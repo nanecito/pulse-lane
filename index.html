@@ -298,11 +298,12 @@ async function begin(){
     ui.errMsg.textContent=m; ui.errMsg.hidden=false;
   }
 }
-const L={lsh:11,rsh:12,lwr:15,rwr:16,lhip:23,rhip:24,lkn:25,rkn:26};
-function pt(i){
+const L={lsh:11,rsh:12,lwr:15,rwr:16,lhip:23,rhip:24,lkn:25,rkn:26,lank:27,rank:28};
+function pt(i,thr){
   if(!pose||!pose[i]) return null;
   const p=pose[i];
-  if(p.visibility!==undefined && p.visibility<0.3) return null;
+  const t = (thr===undefined) ? 0.3 : thr;
+  if(p.visibility!==undefined && p.visibility<t) return null;
   return { x:1-p.x, y:p.y };
 }
 function mid(a,b){ const p=pt(a),q=pt(b); if(!p||!q) return null; return {x:(p.x+q.x)/2,y:(p.y+q.y)/2}; }
@@ -360,7 +361,7 @@ let state='idle';
 let position=0, speed=0, playerX=0, distance=0, overtakes=0, movingTime=0;
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
-let cadence=0, stepTimes=[], kneeUp={l:false,r:false}, armUp={l:false,r:false};
+let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
 let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START, callsHit=0;
 let warmUntil=0, warmSteps=0;
 const step=1/60;
@@ -386,6 +387,30 @@ function showStreak(){
   if(s.n > 0){ ui.streakChip.hidden = false; ui.streakChip.textContent = s.n + (s.n===1?' day':' days') + ' in a row'; }
 }
 
+/* ---- one stepper, used for whichever limb pair the camera can actually see ---- */
+function stepPair(tag, lp, rp, baseKey, upT, dnT, now){
+  if(!lp && !rp) return false;
+  if(base[baseKey] == null){
+    // baseline was not captured at calibration (limb was hidden then) - take it now
+    let sum=0, n=0;
+    if(lp){ sum+=lp.y; n++; } if(rp){ sum+=rp.y; n++; }
+    base[baseKey] = sum/n;
+    return true;
+  }
+  const b = base[baseKey];
+  if(lp){
+    const lift=(b-lp.y)/base.torso;
+    if(!limbUp[tag+'L'] && lift>upT){ limbUp[tag+'L']=true; stepTimes.push(now); }
+    else if(limbUp[tag+'L'] && lift<dnT) limbUp[tag+'L']=false;
+  }
+  if(rp){
+    const lift=(b-rp.y)/base.torso;
+    if(!limbUp[tag+'R'] && lift>upT){ limbUp[tag+'R']=true; stepTimes.push(now); }
+    else if(limbUp[tag+'R'] && lift<dnT) limbUp[tag+'R']=false;
+  }
+  return true;
+}
+
 /* ---- pose reading: legs drive, hands steer ---- */
 function readPose(dt, now){
   const lw=pt(L.lwr), rw=pt(L.rwr), sh=mid(L.lsh,L.rsh), hp=mid(L.lhip,L.rhip);
@@ -403,19 +428,12 @@ function readPose(dt, now){
   if(base) squatting = (hp.y-base.hipY)/base.torso > 0.28;
 
   if(base){
-    const lk=pt(L.lkn), rk=pt(L.rkn);
-    if(lk||rk){
-      if(lk){ const lift=(base.kneeY-lk.y)/base.torso;
-        if(!kneeUp.l && lift>0.12){ kneeUp.l=true; stepTimes.push(now); }
-        else if(kneeUp.l && lift<0.05) kneeUp.l=false; }
-      if(rk){ const lift=(base.kneeY-rk.y)/base.torso;
-        if(!kneeUp.r && lift>0.12){ kneeUp.r=true; stepTimes.push(now); }
-        else if(kneeUp.r && lift<0.05) kneeUp.r=false; }
-    } else if(lw&&rw){
-      const ll=(base.wristY-lw.y)/base.torso, rl=(base.wristY-rw.y)/base.torso;
-      if(!armUp.l && ll>0.16){ armUp.l=true; stepTimes.push(now); } else if(armUp.l && ll<0.06) armUp.l=false;
-      if(!armUp.r && rl>0.16){ armUp.r=true; stepTimes.push(now); } else if(armUp.r && rl<0.06) armUp.r=false;
-    }
+    const lk=pt(L.lkn,0.12), rk=pt(L.rkn,0.12);
+    const la=pt(L.lank,0.12), ra=pt(L.rank,0.12);
+    if(stepPair('kn', lk, rk, 'kneeY', 0.10, 0.04, now)) driveSrc='knees';
+    else if(stepPair('an', la, ra, 'ankleY', 0.07, 0.03, now)) driveSrc='ankles';
+    else if(stepPair('ar', lw, rw, 'wristY', 0.16, 0.06, now)) driveSrc='arms';
+    else driveSrc='none';
   }
   while(stepTimes.length && now-stepTimes[0] > 3000) stepTimes.shift();
   cadence = stepTimes.length * 20;
@@ -426,16 +444,21 @@ function readPose(dt, now){
     const height=Math.abs(((lw.y+rw.y)/2) - base.wristY)/base.torso;
     if(spread<0.75 && height<0.35) push=true;
   }
-  return { torso, hipY:hp.y, kneeY:kneeBase(), wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
+  return { torso, hipY:hp.y, kneeY:kneeBase(), ankleY:ankleBase(),
+           wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
            ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0, hasHands:!!(lw&&rw),
-           hasKnees:!!(pt(L.lkn)||pt(L.rkn)), spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push };
+           hasKnees:!!(pt(L.lkn,0.12)||pt(L.rkn,0.12)),
+           hasFeet:!!(pt(L.lank,0.12)||pt(L.rank,0.12)),
+           spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push };
 }
-function kneeBase(){
-  const lk=pt(L.lkn), rk=pt(L.rkn);
-  if(lk&&rk) return (lk.y+rk.y)/2;
-  if(lk) return lk.y; if(rk) return rk.y;
+function pairBase(a,b){
+  const p=pt(a,0.12), q=pt(b,0.12);
+  if(p&&q) return (p.y+q.y)/2;
+  if(p) return p.y; if(q) return q.y;
   return null;
 }
+function kneeBase(){ return pairBase(L.lkn,L.rkn); }
+function ankleBase(){ return pairBase(L.lank,L.rank); }
 
 /* ---- keep the screen awake while racing ---- */
 let wakeLock = null;
@@ -463,7 +486,7 @@ function hideCall(){ ui.call.className='call'; }
 function startRace(fresh){
   if(fresh){ buildTrack(); buildCars(); distance=0; overtakes=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; }
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
-  stepTimes=[]; cadence=0; callMode=null; callPhase=null; nextCall=8;
+  stepTimes=[]; cadence=0; limbUp={}; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
   bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
   if(schedTimer) clearInterval(schedTimer);
@@ -575,7 +598,8 @@ function update(dt, reading, now){
   ui.pass.textContent = overtakes;
   ui.clock.textContent = Math.floor(left/60)+':'+String(Math.floor(left%60)).padStart(2,'0');
   ui.cad.style.width = Math.round(drive*100)+'%';
-  ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep marching' : 'MARCH TO BUILD SPEED');
+  const verb = (driveSrc==='arms') ? 'PUMP YOUR ARMS' : 'MARCH';
+  ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb+' TO BUILD SPEED');
   ui.foot.className = drive>0.2 ? 'foot' : 'foot warn';
 
   if(left<=0) endRace();
@@ -700,10 +724,13 @@ function drawMirror(alpha){
     ctx.beginPath(); ctx.arc(lw.x*W,lw.y*H,Math.max(8,W*0.018),0,Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(rw.x*W,rw.y*H,Math.max(8,W*0.018),0,Math.PI*2); ctx.fill();
   }
-  const lk=pt(L.lkn), rk=pt(L.rkn);
+  const lk=pt(L.lkn,0.12), rk=pt(L.rkn,0.12), la=pt(L.lank,0.12), ra=pt(L.rank,0.12);
   ctx.fillStyle='rgba(63,224,224,0.9)';
   if(lk){ ctx.beginPath(); ctx.arc(lk.x*W,lk.y*H,Math.max(7,W*0.014),0,Math.PI*2); ctx.fill(); }
   if(rk){ ctx.beginPath(); ctx.arc(rk.x*W,rk.y*H,Math.max(7,W*0.014),0,Math.PI*2); ctx.fill(); }
+  ctx.fillStyle='rgba(126,224,160,0.85)';
+  if(la){ ctx.beginPath(); ctx.arc(la.x*W,la.y*H,Math.max(6,W*0.011),0,Math.PI*2); ctx.fill(); }
+  if(ra){ ctx.beginPath(); ctx.arc(ra.x*W,ra.y*H,Math.max(6,W*0.011),0,Math.PI*2); ctx.fill(); }
 }
 
 function calibrate(r,dt){
@@ -712,12 +739,21 @@ function calibrate(r,dt){
     ui.bGo.disabled=true; ui.bGo.textContent='Hold still…'; calSteady=0; return;
   }
   if(r.torso<0.08){ ui.calHint.textContent='Too far — step closer'; calSteady=0; }
-  else if(!r.hasKnees){ ui.calHint.textContent='I cannot see your knees — tilt the camera down'; calSteady=0; }
-  else { calSteady+=dt; ui.calHint.textContent='Hold it'; }
+  else {
+    calSteady+=dt;
+    ui.calHint.textContent = r.hasKnees ? 'Hold it — I can see your legs'
+      : (r.hasFeet ? 'Hold it — I can see your feet'
+                   : 'Hold it — legs out of frame, I will read your arms');
+  }
   ui.calCount.textContent = Math.max(0,3-Math.floor(calSteady))||'OK';
   if(calSteady>3){
-    base={ ang:r.ang, hipY:r.hipY, torso:r.torso, kneeY:r.kneeY, wristY:r.wristY, spread:Math.max(0.05,r.spread) };
-    ui.bGo.disabled=false; ui.bGo.textContent='Warm up'; ui.calHint.textContent='Calibrated';
+    base={ ang:r.ang, hipY:r.hipY, torso:r.torso, kneeY:r.kneeY, ankleY:r.ankleY,
+           wristY:r.wristY, spread:Math.max(0.05,r.spread) };
+    limbUp={};
+    ui.bGo.disabled=false; ui.bGo.textContent='Warm up';
+    ui.calHint.textContent = r.hasKnees ? 'Calibrated — march to drive'
+      : (r.hasFeet ? 'Calibrated — march to drive'
+                   : 'Calibrated — pump your arms to drive');
   }
 }
 
@@ -742,7 +778,8 @@ function frame(now){
     drawMirror(0.4);
     const left = Math.max(0, (warmUntil - now)/1000);
     ui.warmCount.textContent = Math.ceil(left);
-    ui.warmHint.textContent = cadence > 40 ? 'Good — keep going' : 'March on the spot';
+    ui.warmHint.textContent = cadence > 40 ? 'Good — keep going'
+      : (driveSrc==='arms' ? 'Pump your arms' : 'March on the spot');
     if(left<=0){ ui.oWarm.hidden=true; startRace(true); }
     return;
   }
