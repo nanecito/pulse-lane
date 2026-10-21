@@ -287,7 +287,7 @@ async function begin(){
     video.srcObject=s; await video.play();
     if(!landmarker) await loadTracker();
     ui.loadMsg.hidden=true; ui.oStart.hidden=true; ui.oCal.hidden=false;
-    state='calibrate'; calSteady=0;
+    state='calibrate'; calSteady=0; keepAwake();
     requestAnimationFrame(frame);
   } catch(err){
     ui.loadMsg.hidden=true;
@@ -437,6 +437,23 @@ function kneeBase(){
   return null;
 }
 
+/* ---- keep the screen awake while racing ---- */
+let wakeLock = null;
+async function keepAwake(){
+  try {
+    if('wakeLock' in navigator && !wakeLock){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', function(){ wakeLock = null; });
+    }
+  } catch(e){ wakeLock = null; }
+}
+function letSleep(){
+  try { if(wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){ wakeLock = null; }
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible' && (state === 'race' || state === 'warm' || state === 'calibrate')) keepAwake();
+});
+
 function showCall(word,sub,cls){
   ui.callWord.textContent=word; ui.callSub.textContent=sub||'';
   ui.call.className='call on '+cls;
@@ -452,6 +469,7 @@ function startRace(fresh){
   if(schedTimer) clearInterval(schedTimer);
   schedTimer=setInterval(scheduler,25);
   engGain.gain.value=0.04;
+  keepAwake();
   ui.oCal.hidden=true; ui.oEnd.hidden=true; ui.oWarm.hidden=true; ui.hud.hidden=false;
 }
 function endRace(){
@@ -472,6 +490,7 @@ function endRace(){
   document.getElementById('ePass').textContent=overtakes;
   document.getElementById('eMove').textContent=(movingTime/60).toFixed(1);
   ui.hud.hidden=true; ui.oEnd.hidden=false;
+  letSleep();
   blip(300,0.5,0.28,'sine');
 }
 
@@ -756,7 +775,7 @@ document.getElementById('bGo').addEventListener('click', goWarm);
 document.getElementById('bSkipWarm').addEventListener('click', function(){ ui.oWarm.hidden=true; startRace(true); });
 document.getElementById('bMore').addEventListener('click', function(){ startRace(false); });
 document.getElementById('bAgain').addEventListener('click', function(){
-  ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; calSteady=0;
+  ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; calSteady=0; keepAwake();
 });
 document.getElementById('eBest').textContent=readBest();
 showStreak();
