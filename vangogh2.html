@@ -1098,41 +1098,63 @@ function drawMirror(alpha){
   drawSkeleton();
 }
 
+function makeBase(r){
+  // never return something that can produce NaN downstream
+  return {
+    ang:    r ? r.ang : 0,
+    hipY:   (r && isFinite(r.hipY)) ? r.hipY : 0.55,
+    shY:    (r && isFinite(r.shY))  ? r.shY  : 0.32,
+    torso:  (r && r.torso > 0.03)   ? r.torso : 0.18,
+    kneeY:  r ? r.kneeY : null,
+    ankleY: r ? r.ankleY : null,
+    wristY: r ? r.wristY : null,
+    spread: Math.max(0.05, (r && r.spread) ? r.spread : 0.20)
+  };
+}
+function beginRaceFrom(r){
+  base = makeBase(r);
+  limbUp={}; rest={}; lastLift=null; gripHold=0;
+  try { blip(680,0.18,0.3); } catch(e){}
+  goWarm();
+}
 function calibrate(r,dt){
   const knees  = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
   const ankles = !!(pt(L.lank,0.12)||pt(L.rank,0.12));
   const lw=pt(L.lwr), rw=pt(L.rwr), sh=mid(L.lsh,L.rsh), hp=mid(L.lhip,L.rhip);
+  const lsh=pt(L.lsh), rsh=pt(L.rsh);
 
   let title='Finding you', hint='Step into the picture', ok=false;
 
-  if(!r || !sh || !hp){
-    calSteady=0; gripHold=0;
-  } else if(r.torso > 0.30){
-    title='A bit too close'; hint='Step back until your knees are in the picture'; calSteady=0; gripHold=0;
-  } else if(r.torso < 0.11){
-    title='Too far away'; hint='Step closer, about two big paces from the camera'; calSteady=0; gripHold=0;
-  } else if(!knees && !ankles){
-    title='I can see you, not your legs'; hint='Step back, or tilt the phone down a little'; calSteady=0; gripHold=0;
-  } else {
+  if(!sh){
+    // nothing to work with yet
+  } else if(!hp){
+    title='Too close'; hint='Step back so I can see your hips';
+  } else if(r && r.torso > 0.34){
+    title='A bit too close'; hint='Step back a pace or two';
+  } else if(r && r.torso < 0.10){
+    title='Too far away'; hint='Step closer, about two big paces from the camera';
+  } else if(r){
+    // legs are a bonus, not a requirement: without them the game reads your arms
     ok = true;
-    title = ankles ? 'Good spot' : 'Good enough';
+    title = (knees||ankles) ? 'Good spot' : 'That works';
     hint  = 'Now take the wheel with both hands';
   }
 
-  // the wheel: both hands up at chest height, roughly shoulder width apart
+  // the wheel: both hands up in front of you, anywhere from narrow to wide
   let gripping=false, wheelAngle=0;
-  if(lw && rw && sh && hp){
+  if(ok && lw && rw && sh){
     wheelAngle = Math.atan2(rw.y-lw.y, rw.x-lw.x);
     const spread = Math.abs(rw.x-lw.x);
-    const shw = Math.abs(pt(L.lsh) && pt(L.rsh) ? pt(L.rsh).x-pt(L.lsh).x : 0.2) || 0.2;
+    const shw = (lsh && rsh) ? Math.max(0.04, Math.abs(rsh.x-lsh.x)) : 0.20;
     const midY = (lw.y+rw.y)/2;
-    const chest = midY < hp.y && midY > sh.y - r.torso*0.9;
-    gripping = ok && chest && spread > shw*0.55 && spread < shw*2.0;
+    const above = hp ? (midY < hp.y + r.torso*0.25) : true;   // not down by your sides
+    const below = midY > sh.y - r.torso*1.6;                  // not straight overhead
+    gripping = above && below && spread > shw*0.30 && spread < shw*3.2;
   }
-  if(gripping){ gripHold = Math.min(1.2, gripHold + dt); } else { gripHold = Math.max(0, gripHold - dt*1.6); }
+  // tracking flickers, so build fast and forget slowly
+  if(gripping){ gripHold = Math.min(1.0, gripHold + dt); } else { gripHold = Math.max(0, gripHold - dt*0.5); }
 
-  // gripping: the wheel sits in your hands. not gripping: a ghost shows where they go.
-  const lsh=pt(L.lsh), rsh=pt(L.rsh);
+
   let wx=W*0.5, wy=H*0.46, wr=Math.min(W,H)*0.15;
   if(gripping && lw && rw){
     wx=((lw.x+rw.x)/2)*W; wy=((lw.y+rw.y)/2)*H;
@@ -1141,25 +1163,16 @@ function calibrate(r,dt){
     wx=((lsh.x+rsh.x)/2)*W; wy=(sh.y + r.torso*0.42)*H;
     wr=Math.max(Math.min(W,H)*0.09, Math.abs(rsh.x-lsh.x)*W*0.95);
   }
-  drawWheel(wx, wy, wr, (gripping ? wheelAngle : 0), gripping, gripHold/1.2);
+  drawWheel(wx, wy, wr, (gripping ? wheelAngle : 0), gripping, gripHold/1.0);
 
-  if(ok){
-    calSteady += dt;
-    if(gripping) hint = gripHold > 0.9 ? 'Hold it&hellip;' : 'Hands on the wheel &mdash; hold';
-  }
+  if(ok && gripping) hint = gripHold > 0.7 ? 'Hold it&hellip;' : 'Hands on the wheel &mdash; hold';
   ui.calTitle.innerHTML = title;
   ui.calHint.innerHTML = hint;
-  ui.calSub.innerHTML = ok ? 'Hold the wheel with both hands to start'
-                           : (knees ? 'I can see your legs' : 'I cannot see your legs yet');
-  ui.bGo.disabled = !ok;
+  ui.calSub.innerHTML = (knees||ankles) ? 'I can see your legs &mdash; you can march to drive'
+                                        : 'I cannot see your legs &mdash; you can still play with your arms';
+  ui.bGo.disabled = false;   // the escape hatch is never locked
 
-  if(ok && gripHold >= 1.2){
-    base={ ang:r.ang, hipY:r.hipY, shY:r.shY, torso:r.torso, kneeY:r.kneeY, ankleY:r.ankleY,
-           wristY:r.wristY, spread:Math.max(0.05,r.spread) };
-    limbUp={}; rest={}; lastLift=null; gripHold=0;
-    blip(680,0.18,0.3);
-    goWarm();
-  }
+  if(ok && gripHold >= 1.0) beginRaceFrom(r);
 }
 
 let lastT=0;
@@ -1214,16 +1227,7 @@ function goWarm(){
 }
 document.getElementById('bStart').addEventListener('click', begin);
 document.getElementById('bGo').addEventListener('click', function(){
-  // the manual escape hatch still needs a baseline taken from wherever the player is standing
-  const r = readPose(0, performance.now());
-  if(r && r.hasHands){
-    base={ ang:r.ang, hipY:r.hipY, shY:r.shY, torso:r.torso, kneeY:r.kneeY, ankleY:r.ankleY,
-           wristY:r.wristY, spread:Math.max(0.05,r.spread) };
-    limbUp={}; rest={}; lastLift=null; gripHold=0;
-    goWarm();
-  } else {
-    ui.calHint.textContent = 'I still need to see both hands before we start';
-  }
+  beginRaceFrom(readPose(0, performance.now()));
 });
 document.getElementById('bSkipWarm').addEventListener('click', function(){ ui.oWarm.hidden=true; startRace(true); });
 document.getElementById('bMore').addEventListener('click', function(){ startRace(false); });
