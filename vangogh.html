@@ -34,6 +34,7 @@ canvas{display:block;width:100%;height:100%}
 .cad b{position:absolute;left:55%;top:0;bottom:0;width:2px;background:rgba(242,246,255,.55)}
 .foot{font-size:clamp(11px,1.5vw,16px);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
 .foot.warn{color:var(--amber)}
+.diag{font-size:clamp(9px,1.1vw,12px);letter-spacing:.06em;color:var(--muted);opacity:.7;font-variant-numeric:tabular-nums}
 .call{position:fixed;left:0;right:0;top:34%;text-align:center;pointer-events:none;opacity:0;transition:opacity .12s}
 .call.on{opacity:1}
 .call .word{font-size:clamp(44px,12vw,140px);font-weight:700;letter-spacing:.06em;line-height:1}
@@ -94,6 +95,7 @@ button[disabled]{opacity:.5;cursor:default}
   <div class="bottom">
     <div class="cad"><i id="hCad"></i><b></b></div>
     <div class="foot" id="hFoot">March to build speed</div>
+    <div class="diag" id="hDiag"></div>
   </div>
 </div>
 
@@ -167,18 +169,19 @@ const segmentLength = 200, rumbleLength = 3, roadWidth = 2000, lanes = 3;
 const fieldOfView = 100, cameraHeight = 1000, drawDistance = 150;
 const cameraDepth = 1/Math.tan((fieldOfView/2)*Math.PI/180);
 const playerZ = cameraHeight*cameraDepth;
-const maxSpeed = segmentLength*58;
-const accel = maxSpeed/6, coast = -maxSpeed/9, offRoadDecel = -maxSpeed/2;
+const maxSpeed = segmentLength*40;
+const accel = maxSpeed/11, coast = -maxSpeed/9, offRoadDecel = -maxSpeed/2;
+const ACCEL_FALLOFF = 0.72;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/4, centrifugal = 0.30;
-const FULL_CADENCE = 100;
+const FULL_CADENCE = 85;
 const PREVIEW = 3.0, WINDOW_START = 6.0, WINDOW_FLOOR = 4.2;
-const LAP_METRES = 21000;
+const LAP_METRES = 15000;
 const SQUAT_DEPTH = 0.17;
 const RIVALS = [
-  { key:'dali',     name:'DALI',     pace:138, lane:-0.56 },
-  { key:'picasso',  name:'PICASSO',  pace:146, lane: 0.56 },
-  { key:'frida',    name:'FRIDA',    pace:142, lane:-0.21 },
-  { key:'mondrian', name:'MONDRIAN', pace:136, lane: 0.21 }
+  { key:'dali',     name:'DALI',     pace: 95, lane:-0.56 },
+  { key:'picasso',  name:'PICASSO',  pace:101, lane: 0.56 },
+  { key:'frida',    name:'FRIDA',    pace: 98, lane:-0.21 },
+  { key:'mondrian', name:'MONDRIAN', pace: 94, lane: 0.21 }
 ];
 
 const cv = document.getElementById('view'), ctx = cv.getContext('2d');
@@ -194,6 +197,7 @@ window.addEventListener('resize', function(){ resize(); skyCv=null; }); resize()
 const ui = {
   hud:document.getElementById('hud'), spd:document.getElementById('hSpd'), dist:document.getElementById('hDist'),
   pos:document.getElementById('hPos'), lap:document.getElementById('hLap'),
+  diag:document.getElementById('hDiag'),
   clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
   foot:document.getElementById('hFoot'),
   call:document.getElementById('call'), callWord:document.getElementById('callWord'),
@@ -417,6 +421,7 @@ let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
+let rest={}, lastLift=null;
 let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START, callsHit=0;
 let warmUntil=0, warmSteps=0;
 const step=1/60;
@@ -443,25 +448,29 @@ function showStreak(){
 }
 
 /* ---- one stepper, used for whichever limb pair the camera can actually see ---- */
-function stepPair(tag, lp, rp, baseKey, upT, dnT, now){
+function limbLift(key, p, dt){
+  if(!p) return null;
+  let r = rest[key];
+  if(r == null || !isFinite(r)){ rest[key] = p.y; return 0; }
+  r -= 0.05 * base.torso * dt;   // slow upward drift so a stale baseline self-corrects
+  if(p.y > r) r = p.y;           // the standing position is the lowest the limb ever sits
+  rest[key] = r;
+  return (r - p.y)/base.torso;
+}
+function stepPair(tag, lp, rp, baseKey, upT, dnT, now, dt){
   if(!lp && !rp) return false;
-  if(base[baseKey] == null){
-    // baseline was not captured at calibration (limb was hidden then) - take it now
-    let sum=0, n=0;
-    if(lp){ sum+=lp.y; n++; } if(rp){ sum+=rp.y; n++; }
-    base[baseKey] = sum/n;
-    return true;
-  }
-  const b = base[baseKey];
-  if(lp){
-    const lift=(b-lp.y)/base.torso;
-    if(!limbUp[tag+'L'] && lift>upT){ limbUp[tag+'L']=true; stepTimes.push(now); }
-    else if(limbUp[tag+'L'] && lift<dnT) limbUp[tag+'L']=false;
-  }
-  if(rp){
-    const lift=(b-rp.y)/base.torso;
-    if(!limbUp[tag+'R'] && lift>upT){ limbUp[tag+'R']=true; stepTimes.push(now); }
-    else if(limbUp[tag+'R'] && lift<dnT) limbUp[tag+'R']=false;
+  const sides = [['L',lp],['R',rp]];
+  for(let i=0;i<sides.length;i++){
+    const side = sides[i][0], p = sides[i][1];
+    if(!p) continue;
+    const lift = (baseKey==='wristY' && base[baseKey]!=null)
+      ? (base[baseKey]-p.y)/base.torso
+      : limbLift(tag+side, p, dt);
+    if(lift == null) continue;
+    if(tag==='kn') lastLift = lift;
+    const k = tag+side;
+    if(!limbUp[k] && lift>upT){ limbUp[k]=true; stepTimes.push(now); }
+    else if(limbUp[k] && lift<dnT) limbUp[k]=false;
   }
   return true;
 }
@@ -490,13 +499,14 @@ function readPose(dt, now){
   if(base){
     const lk=pt(L.lkn,0.12), rk=pt(L.rkn,0.12);
     const la=pt(L.lank,0.12), ra=pt(L.rank,0.12);
-    if(stepPair('kn', lk, rk, 'kneeY', 0.10, 0.04, now)) driveSrc='knees';
-    else if(stepPair('an', la, ra, 'ankleY', 0.07, 0.03, now)) driveSrc='ankles';
-    else if(stepPair('ar', lw, rw, 'wristY', 0.16, 0.06, now)) driveSrc='arms';
-    else driveSrc='none';
+    if(stepPair('kn', lk, rk, 'kneeY', 0.10, 0.04, now, dt)) driveSrc='knees';
+    else if(stepPair('an', la, ra, 'ankleY', 0.07, 0.03, now, dt)) driveSrc='ankles';
+    else if(stepPair('ar', lw, rw, 'wristY', 0.16, 0.06, now, dt)) driveSrc='arms';
+    else { driveSrc='none'; lastLift=null; }
   }
   while(stepTimes.length && now-stepTimes[0] > 3000) stepTimes.shift();
-  cadence = stepTimes.length * 20;
+  const rawCad = stepTimes.length * 20;
+  cadence += (rawCad - cadence) * Math.min(1, dt*2.5);
 
   let push=false;
   if(lw&&rw&&base){
@@ -510,6 +520,17 @@ function readPose(dt, now){
            hasKnees:!!(pt(L.lkn,0.12)||pt(L.rkn,0.12)),
            hasFeet:!!(pt(L.lank,0.12)||pt(L.rank,0.12)),
            spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push };
+}
+function vis(i){
+  const p = pose && pose[i];
+  return (p && p.visibility!==undefined) ? p.visibility.toFixed(2) : '--';
+}
+function diagText(){
+  return driveSrc
+    + '  kn ' + vis(L.lkn) + '/' + vis(L.rkn)
+    + '  an ' + vis(L.lank) + '/' + vis(L.rank)
+    + '  lift ' + (lastLift==null ? '--' : lastLift.toFixed(2))
+    + '  cad ' + Math.round(cadence);
 }
 function pairBase(a,b){
   const p=pt(a,0.12), q=pt(b,0.12);
@@ -547,7 +568,7 @@ function startRace(fresh){
   if(fresh){ buildTrack(); buildProps(); distance=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; bestLap=0; }
   buildCars(); lap=0; lapStart=0; squatDepth=0; ui.depthWrap.hidden=true;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
-  stepTimes=[]; cadence=0; limbUp={}; callMode=null; callPhase=null; nextCall=8;
+  stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
   bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
   if(schedTimer) clearInterval(schedTimer);
@@ -566,13 +587,13 @@ function endRace(){
   if(rec){ best=d; writeLS('vgBest',best); }
   const n = bumpStreak();
   document.getElementById('endTitle').textContent = rec?'Fastest run yet':'Chequered flag';
+  const fin = rankNow();
   const who = cars.slice().sort(function(a,b){ return b.dist-a.dist; })[0];
   document.getElementById('endNote').textContent = (fin===1)
     ? 'You took the win. ' + (movingTime/ROUND > 0.7 ? 'And you kept moving for most of it.' : '') + ' Day ' + n + ' in a row.'
     : who.name + ' took it. You finished P' + fin + '. Day ' + n + ' in a row.';
   document.getElementById('eDist').textContent=d;
   document.getElementById('eBest').textContent=best;
-  const fin = rankNow();
   document.getElementById('ePass').textContent='P'+fin;
   document.getElementById('eMove').textContent = bestLap>0 ? bestLap.toFixed(1)+'s' : '--';
   ui.hud.hidden=true; ui.oEnd.hidden=false;
@@ -596,7 +617,14 @@ function update(dt, reading, now){
   let target = maxSpeed*(0.12 + 0.88*drive);
   if(boost>0){ target = Math.max(target, maxSpeed*1.3); boost -= dt; }
   if(slip>0){ target = Math.max(target, maxSpeed*1.12); slip -= dt; }
-  speed += (speed < target ? accel : coast)*dt;
+  const gap = target - speed;
+  if(gap > 0){
+    // a boost or a slipstream overrides the taper, so it still feels like a shove
+    const urge = (boost>0 || slip>0) ? 1 : Math.max(0.12, 1 - ACCEL_FALLOFF*(speed/maxSpeed));
+    speed += Math.min(gap, accel*urge*dt);
+  } else {
+    speed += Math.max(gap, coast*dt);
+  }
   speed = Math.max(0, Math.min(maxSpeed*1.35, speed));
   if((playerX<-1||playerX>1) && speed>offRoadLimit) speed = Math.max(offRoadLimit, speed+offRoadDecel*dt);
   playerX = Math.max(-2,Math.min(2,playerX));
@@ -683,9 +711,13 @@ function update(dt, reading, now){
   ui.lap.textContent = (lap+1);
   ui.clock.textContent = Math.floor(left/60)+':'+String(Math.floor(left%60)).padStart(2,'0');
   ui.cad.style.width = Math.round(drive*100)+'%';
-  const verb = (driveSrc==='arms') ? 'PUMP YOUR ARMS' : 'MARCH';
-  ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb+' TO BUILD SPEED');
-  ui.foot.className = drive>0.2 ? 'foot' : 'foot warn';
+  const legs = (driveSrc==='knees' || driveSrc==='ankles');
+  const verb = legs ? 'MARCH TO BUILD SPEED'
+             : (driveSrc==='arms' ? "CAN'T SEE YOUR LEGS - PUMP YOUR ARMS"
+                                  : 'STEP INTO THE PICTURE');
+  ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb);
+  ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn';
+  ui.diag.textContent = diagText();
 
   if(left<=0) endRace();
 }
@@ -1024,7 +1056,7 @@ function calibrate(r,dt){
   if(calSteady>3){
     base={ ang:r.ang, hipY:r.hipY, shY:r.shY, torso:r.torso, kneeY:r.kneeY, ankleY:r.ankleY,
            wristY:r.wristY, spread:Math.max(0.05,r.spread) };
-    limbUp={};
+    limbUp={}; rest={}; lastLift=null;
     ui.bGo.disabled=false; ui.bGo.textContent='Warm up';
     ui.calHint.textContent = r.hasKnees ? 'Calibrated — march to drive'
       : (r.hasFeet ? 'Calibrated — march to drive'
