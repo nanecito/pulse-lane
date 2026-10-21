@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pulse Lane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&display=swap">
+<style>
+  /* Layout: full-bleed corridor canvas, oversized HUD readable from four metres, modal cards for setup. */
+  :root{
+    --ink:#0C1018; --deep:#141C2B; --panel:rgba(20,28,43,.95);
+    --fg:#EAF2FF; --muted:#8FA3C4;
+    --cyan:#35E0D4; --magenta:#FF4D8D; --gold:#FFC93F; --red:#FF5A5A;
+    --display:"Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;overflow:hidden;background:var(--ink);color:var(--fg);font-family:var(--display)}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{display:block;width:100%;height:100%}
+  .hud{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;
+       padding:max(18px,env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) max(18px,env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px))}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .score{font-size:clamp(34px,7vw,76px);font-weight:700;font-variant-numeric:tabular-nums;line-height:.95;
+         text-shadow:0 3px 18px rgba(0,0,0,.8)}
+  .score small{display:block;font-size:clamp(11px,1.4vw,15px);letter-spacing:.2em;color:var(--muted);font-weight:600}
+  .right{text-align:right}
+  .mult{font-size:clamp(26px,5vw,56px);font-weight:700;color:var(--gold);line-height:1;text-shadow:0 3px 18px rgba(0,0,0,.8)}
+  .clock{font-size:clamp(16px,2.4vw,28px);color:var(--muted);font-variant-numeric:tabular-nums}
+  .bottom{display:flex;flex-direction:column;gap:9px}
+  .effort{height:clamp(14px,2.2vw,26px);border-radius:999px;background:rgba(234,242,255,.12);overflow:hidden;
+          border:1px solid rgba(234,242,255,.2)}
+  .effort i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--cyan),var(--gold));transition:width .1s linear}
+  .effortlabel{font-size:clamp(11px,1.5vw,16px);letter-spacing:.2em;text-transform:uppercase;color:var(--muted);text-align:center}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(12,16,24,.9);
+           padding:max(18px,env(safe-area-inset-left,0px))}
+  .card{background:var(--panel);border:1px solid rgba(234,242,255,.18);border-radius:18px;padding:28px;width:100%;max-width:520px;text-align:center}
+  .card h1{margin:0 0 6px;font-size:clamp(26px,5vw,38px);font-weight:700;letter-spacing:.06em;text-wrap:balance}
+  .card h2{margin:0 0 10px;font-size:clamp(22px,4vw,30px);font-weight:700}
+  .card p{margin:0 0 18px;color:var(--muted);font-size:clamp(13px,1.8vw,15px);line-height:1.6}
+  .moves{display:grid;gap:9px;margin:0 0 20px;text-align:left}
+  .move{display:flex;gap:12px;align-items:flex-start;background:rgba(234,242,255,.06);border-radius:11px;padding:11px 13px}
+  .move b{color:var(--cyan);font-size:13px;letter-spacing:.12em;text-transform:uppercase;min-width:94px}
+  .move span{font-size:13.5px;color:var(--muted);line-height:1.45}
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 20px}
+  .stat{background:rgba(234,242,255,.07);border-radius:12px;padding:13px}
+  .stat b{display:block;font-size:clamp(24px,4vw,32px);font-weight:700;font-variant-numeric:tabular-nums}
+  .stat span{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  button{font-family:var(--display);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:15px;
+         padding:16px 34px;border-radius:999px;border:0;cursor:pointer;background:var(--cyan);color:#06211F}
+  button:active{transform:scale(.97)}
+  button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+  .err{color:var(--red);font-size:13.5px;line-height:1.6;margin-top:14px}
+  .load{color:var(--muted);font-size:13.5px;margin-top:14px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<canvas id="view"></canvas>
+
+<div class="hud" id="hud" hidden>
+  <div class="top">
+    <div class="score"><span id="hScore">0</span><small>Score</small></div>
+    <div class="right">
+      <div class="mult" id="hMult">x1</div>
+      <div class="clock" id="hClock">3:00</div>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="effort"><i id="hEffort"></i></div>
+    <div class="effortlabel" id="hEffortLabel">Keep moving to hold your multiplier</div>
+  </div>
+</div>
+
+<div class="overlay" id="oStart">
+  <div class="card">
+    <h1>Pulse Lane</h1>
+    <p>Three minutes. Everything arrives on the beat, and the beat gets faster. Standing still is what costs you, not missing a target.</p>
+    <div class="moves">
+      <div class="move"><b>Lean</b><span>Shift your weight left or right to change lane.</span></div>
+      <div class="move"><b>Punch</b><span>Reach a hand out to the glowing orb on that side.</span></div>
+      <div class="move"><b>Squat</b><span>Drop down to get under the low bars.</span></div>
+    </div>
+    <button id="bStart">Turn on camera</button>
+    <div class="load" id="loadMsg" hidden>Loading the body tracker, a few seconds&hellip;</div>
+    <div class="err" id="errMsg" hidden></div>
+  </div>
+</div>
+
+<div class="overlay" id="oCal" hidden>
+  <div class="card">
+    <h2 id="calTitle">Stand where I can see you</h2>
+    <p>Back up until your head and both hands fit in the picture, arms out to the sides. Then hold still.</p>
+    <div class="stat" style="margin-bottom:18px"><b id="calCount">—</b><span id="calHint">Looking for you</span></div>
+    <button id="bGo" disabled>Hold still&hellip;</button>
+  </div>
+</div>
+
+<div class="overlay" id="oEnd" hidden>
+  <div class="card">
+    <h2 id="endTitle">Run complete</h2>
+    <p id="endNote">Nice work.</p>
+    <div class="stats">
+      <div class="stat"><b id="eScore">0</b><span>Score</span></div>
+      <div class="stat"><b id="eBest">0</b><span>Best run</span></div>
+      <div class="stat"><b id="eMoves">0</b><span>Moves landed</span></div>
+      <div class="stat"><b id="eActive">0</b><span>Active minutes</span></div>
+    </div>
+    <button id="bAgain">Go again</button>
+  </div>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/* ---------------- constants ---------------- */
+const ROUND_SECONDS = 180;
+const LEAD_BEATS = 4;
+const LANES = [-1, 0, 1];
+
+/* ---------------- dom ---------------- */
+const cv = document.getElementById('view');
+const ctx = cv.getContext('2d');
+const ui = {
+  hud: document.getElementById('hud'),
+  score: document.getElementById('hScore'),
+  mult: document.getElementById('hMult'),
+  clock: document.getElementById('hClock'),
+  effort: document.getElementById('hEffort'),
+  effortLabel: document.getElementById('hEffortLabel'),
+  oStart: document.getElementById('oStart'),
+  oCal: document.getElementById('oCal'),
+  oEnd: document.getElementById('oEnd'),
+  loadMsg: document.getElementById('loadMsg'),
+  errMsg: document.getElementById('errMsg'),
+  calCount: document.getElementById('calCount'),
+  calHint: document.getElementById('calHint'),
+  bGo: document.getElementById('bGo')
+};
+
+let W = 0, H = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.floor(W*DPR); cv.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------------- audio ---------------- */
+const AC = window.AudioContext || window.webkitAudioContext;
+let actx = null, master = null, noiseBuf = null, leadGain = null;
+let bpm = 92, nextTick = 0, tickIndex = 0, schedTimer = null, musicStart = 0;
+
+function initAudio(){
+  actx = new AC();
+  master = actx.createGain(); master.gain.value = 0.85; master.connect(actx.destination);
+  leadGain = actx.createGain(); leadGain.gain.value = 0.0; leadGain.connect(master);
+  const n = actx.sampleRate * 1.0;
+  noiseBuf = actx.createBuffer(1, n, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<n;i++) d[i] = Math.random()*2-1;
+}
+function noiseSrc(){ const s = actx.createBufferSource(); s.buffer = noiseBuf; return s; }
+
+function kick(t){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(44, t+0.10);
+  g.gain.setValueAtTime(0.95, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t+0.30);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.32);
+}
+function snare(t){
+  const s = noiseSrc(), f = actx.createBiquadFilter(), g = actx.createGain();
+  f.type='bandpass'; f.frequency.value=1900; f.Q.value=0.8;
+  g.gain.setValueAtTime(0.5, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t+0.17);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.2);
+}
+function hat(t, loud){
+  const s = noiseSrc(), f = actx.createBiquadFilter(), g = actx.createGain();
+  f.type='highpass'; f.frequency.value=7600;
+  g.gain.setValueAtTime(loud?0.22:0.1, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t+0.05);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.06);
+}
+function bass(t, freq, dur){
+  const o = actx.createOscillator(), f = actx.createBiquadFilter(), g = actx.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(freq, t);
+  f.type='lowpass'; f.frequency.setValueAtTime(260, t);
+  f.frequency.exponentialRampToValueAtTime(700, t+dur*0.4);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.34, t+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+}
+function lead(t, freq, dur){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type='square'; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.18, t+0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g); g.connect(leadGain); o.start(t); o.stop(t+dur+0.02);
+}
+function blip(freq, dur, vol){
+  if(!actx) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol||0.3, t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+}
+
+const CHORDS = [110.00, 87.31, 130.81, 98.00];           // Am F C G roots
+const PENTA  = [440.00, 523.25, 587.33, 659.25, 783.99]; // A minor pentatonic
+
+function scheduler(){
+  if(!actx) return;
+  const spb = 60/bpm;
+  while(nextTick < actx.currentTime + 0.3){
+    scheduleTick(tickIndex, nextTick, spb);
+    nextTick += spb/2;
+    tickIndex++;
+  }
+}
+function scheduleTick(i, t, spb){
+  const inBar = i % 8;
+  if(inBar===0 || inBar===4) kick(t);
+  if(inBar===2 || inBar===6) snare(t);
+  hat(t, inBar%2===0);
+  if(inBar%2===0){
+    const bar = Math.floor(i/8) % 4;
+    bass(t, CHORDS[bar], spb*0.45);
+  }
+  if(game.difficulty > 0.45 && i%2===1 && Math.random()<0.55){
+    lead(t, PENTA[Math.floor(Math.random()*PENTA.length)], spb*0.35);
+  }
+  if(i%2===0 && game.state==='play') onQuarter(i/2, t, spb);
+}
+
+/* ---------------- camera + tracking ---------------- */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+
+async function loadTracker(){
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm"
+  );
+  try {
+    landmarker = await PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO", numPoses: 1
+    });
+  } catch(e){
+    landmarker = await PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        delegate: "CPU"
+      },
+      runningMode: "VIDEO", numPoses: 1
+    });
+  }
+}
+
+async function begin(){
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx.state === 'suspended') await actx.resume();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:960}, height:{ideal:720}, facingMode:'user' }, audio:false
+    });
+    video.srcObject = stream;
+    await video.play();
+    if(!landmarker) await loadTracker();
+    ui.loadMsg.hidden = true;
+    ui.oStart.hidden = true; ui.oCal.hidden = false;
+    game.state = 'calibrate';
+    calSteady = 0;
+    requestAnimationFrame(frame);
+  } catch(err){
+    ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    if(err && err.name === 'NotAllowedError') m = 'Camera permission denied. Allow it in the address bar and reload.';
+    if(err && err.name === 'NotFoundError') m = 'No camera found on this device.';
+    if(err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    if(String(err).indexOf('fetch') >= 0 || String(err).indexOf('network') >= 0)
+      m = 'Could not download the body tracker. Check your connection and reload.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  }
+}
+
+/* landmark helpers — display space, already mirrored */
+const L = { nose:0, lsh:11, rsh:12, lwr:15, rwr:16, lhip:23, rhip:24, lank:27, rank:28 };
+function pt(i){
+  if(!pose || !pose[i]) return null;
+  const p = pose[i];
+  if(p.visibility !== undefined && p.visibility < 0.35) return null;
+  return { x: 1 - p.x, y: p.y };
+}
+function mid(a, b){
+  const p = pt(a), q = pt(b);
+  if(!p || !q) return null;
+  return { x:(p.x+q.x)/2, y:(p.y+q.y)/2 };
+}
+
+/* ---------------- game ---------------- */
+const game = {
+  state:'idle', score:0, streak:0, mult:1, objects:[], effort:0, activeTime:0,
+  moves:0, startTime:0, difficulty:0, flash:0, quarter:0, lastBodyX:0
+};
+let base = null, calSteady = 0, prevPose = null, playerX = 0, squatting = false, squatDepth = 0;
+
+function readBest(){ try { return parseInt(localStorage.getItem('pulseLaneBest')||'0',10)||0; } catch(e){ return 0; } }
+function writeBest(v){ try { localStorage.setItem('pulseLaneBest', String(v)); } catch(e){} }
+
+function onQuarter(q, t, spb){
+  game.quarter = q;
+  const lead = LEAD_BEATS * spb;
+  const d = game.difficulty;
+  const target = t + lead;
+
+  if(q % 8 === 0 && d > 0.12){
+    const blocked = [Math.floor(Math.random()*3)];
+    if(d > 0.62 && Math.random() < 0.5){
+      let b2; do { b2 = Math.floor(Math.random()*3); } while(b2 === blocked[0]);
+      blocked.push(b2);
+    }
+    game.objects.push({ type:'gate', blocked, spawn:t, target, resolved:false });
+    return;
+  }
+  if(q % 16 === 8 && d > 0.3){
+    game.objects.push({ type:'duck', spawn:t, target, resolved:false });
+    return;
+  }
+  const side = (q % 4 < 2) ? 'L' : 'R';
+  game.objects.push({ type:'orb', side, lane:Math.floor(Math.random()*3), spawn:t, target, resolved:false, hit:false });
+  if(d > 0.55 && Math.random() < 0.45){
+    game.objects.push({ type:'orb', side: side==='L'?'R':'L', lane:Math.floor(Math.random()*3),
+                        spawn:t, target: target + spb/2, resolved:false, hit:false });
+  }
+}
+
+function startRound(){
+  game.state = 'play';
+  game.score = 0; game.streak = 0; game.mult = 1; game.objects = [];
+  game.effort = 0; game.activeTime = 0; game.moves = 0; game.difficulty = 0; game.flash = 0;
+  game.startTime = actx.currentTime;
+  bpm = 92; tickIndex = 0; nextTick = actx.currentTime + 0.12; musicStart = nextTick;
+  if(schedTimer) clearInterval(schedTimer);
+  schedTimer = setInterval(scheduler, 25);
+  ui.oCal.hidden = true; ui.oEnd.hidden = true; ui.hud.hidden = false;
+}
+
+function endRound(){
+  game.state = 'over';
+  if(schedTimer){ clearInterval(schedTimer); schedTimer = null; }
+  const score = Math.round(game.score);
+  let best = readBest();
+  const record = score > best;
+  if(record){ best = score; writeBest(best); }
+  document.getElementById('endTitle').textContent = record ? 'Best run yet' : 'Run complete';
+  document.getElementById('endNote').textContent = game.activeTime > 120
+    ? 'You kept moving for most of it. That is the whole game.'
+    : 'You stopped moving for a stretch. The multiplier lives on constant motion.';
+  document.getElementById('eScore').textContent = score;
+  document.getElementById('eBest').textContent = best;
+  document.getElementById('eMoves').textContent = game.moves;
+  document.getElementById('eActive').textContent = (game.activeTime/60).toFixed(1);
+  ui.hud.hidden = true; ui.oEnd.hidden = false;
+  blip(330, 0.5, 0.25);
+}
+
+/* ---------------- projection ---------------- */
+function proj(z){
+  const s = 1/(0.32 + z*2.4);
+  return s/(1/0.32);
+}
+function screenOf(laneX, z, lift){
+  const s = proj(z);
+  const horizon = H*0.40;
+  return {
+    x: W/2 + laneX * (W*0.30) * s,
+    y: horizon + (H*0.62)*s - (lift||0)*H*0.30*s,
+    s
+  };
+}
+
+/* ---------------- pose reading ---------------- */
+function readPose(dt){
+  const sh = mid(L.lsh, L.rsh), hp = mid(L.lhip, L.rhip);
+  if(!sh || !hp) return false;
+
+  const torso = Math.max(0.05, Math.abs(hp.y - sh.y));
+  const bodyX = (sh.x + hp.x)/2;
+
+  if(base){
+    playerX = Math.max(-1.45, Math.min(1.45, (bodyX - base.x) / (base.torso * 0.72)));
+    squatDepth = (hp.y - base.hipY) / base.torso;
+    squatting = squatDepth > 0.33;
+  }
+
+  if(prevPose && dt > 0){
+    let move = 0, n = 0;
+    [L.lwr, L.rwr, L.lsh, L.rsh, L.lhip, L.rhip, L.lank, L.rank].forEach(function(i){
+      const a = pt(i), b = prevPose[i];
+      if(a && b){ move += Math.abs(a.x-b.x) + Math.abs(a.y-b.y); n++; }
+    });
+    if(n > 0){
+      const rate = (move/n)/dt;
+      game.effort = game.effort*0.90 + Math.min(1, rate/0.65)*0.10;
+    }
+  }
+  prevPose = {};
+  [L.lwr, L.rwr, L.lsh, L.rsh, L.lhip, L.rhip, L.lank, L.rank].forEach(function(i){
+    prevPose[i] = pt(i);
+  });
+  return { torso, bodyX, hipY: hp.y };
+}
+
+/* ---------------- update ---------------- */
+function update(now, dt){
+  const elapsed = actx.currentTime - game.startTime;
+  game.difficulty = Math.min(1, elapsed/75);
+  bpm = 92 + game.difficulty*40;
+
+  game.mult = 1 + Math.floor(game.effort*3.2);
+  if(game.effort > 0.22) game.activeTime += dt;
+  leadGain.gain.value = 0.25 + game.effort*0.5;
+
+  const t = actx.currentTime;
+  for(let i=game.objects.length-1;i>=0;i--){
+    const o = game.objects[i];
+    const p = (t - o.spawn)/(o.target - o.spawn);
+    o.p = p;
+    if(p > 1.3){ game.objects.splice(i,1); continue; }
+
+    if(o.type === 'orb' && !o.resolved && p > 0.76 && p < 1.18){
+      const w = pt(o.side === 'L' ? L.lwr : L.rwr);
+      if(w){
+        const sp = screenOf(LANES[o.lane], Math.max(0, 1-p), 0.55);
+        const ox = sp.x + (o.side==='L' ? -1 : 1) * W*0.17 * sp.s;
+        const r = W*0.085*sp.s + W*0.045;
+        const wx = w.x*W, wy = w.y*H;
+        if(Math.hypot(wx-ox, wy-sp.y) < r){
+          o.resolved = true; o.hit = true;
+          game.streak++; game.moves++;
+          game.score += 100*game.mult;
+          blip(620 + Math.min(700, game.streak*28), 0.09, 0.3);
+        }
+      }
+    }
+    if(!o.resolved && p >= 1.0){
+      o.resolved = true;
+      if(o.type === 'gate'){
+        const lane = playerX < -0.45 ? 0 : (playerX > 0.45 ? 2 : 1);
+        if(o.blocked.indexOf(lane) >= 0){ fail(); } else { game.score += 50*game.mult; game.moves++; game.streak++; }
+      } else if(o.type === 'duck'){
+        if(squatting){ game.score += 90*game.mult; game.moves++; game.streak++; blip(300,0.14,0.3); }
+        else fail();
+      } else if(o.type === 'orb' && !o.hit){
+        game.streak = 0;
+      }
+    }
+  }
+
+  if(game.flash > 0) game.flash = Math.max(0, game.flash - dt*2.4);
+
+  const left = Math.max(0, ROUND_SECONDS - elapsed);
+  ui.score.textContent = Math.round(game.score);
+  ui.mult.textContent = 'x' + game.mult;
+  ui.clock.textContent = Math.floor(left/60) + ':' + String(Math.floor(left%60)).padStart(2,'0');
+  ui.effort.style.width = Math.round(game.effort*100) + '%';
+  ui.effortLabel.textContent = game.effort < 0.2 ? 'MOVE — the multiplier is dropping'
+    : game.effort < 0.55 ? 'Good pace' : 'Full effort';
+  if(left <= 0) endRound();
+}
+function fail(){
+  game.streak = 0; game.flash = 1;
+  game.score = Math.max(0, game.score - 40);
+  blip(120, 0.22, 0.35);
+}
+
+/* ---------------- draw ---------------- */
+function drawCorridor(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, '#0C1018'); g.addColorStop(0.42, '#16233B'); g.addColorStop(1, '#0C1018');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  const beat = actx ? (actx.currentTime - musicStart)/(60/bpm) : 0;
+  const pulse = Math.max(0, 1 - (beat % 1))*0.5;
+
+  ctx.strokeStyle = 'rgba(53,224,212,' + (0.18 + pulse*0.22).toFixed(3) + ')';
+  ctx.lineWidth = Math.max(2, W*0.0035);
+  for(let l=-1.5;l<=1.5;l+=1){
+    ctx.beginPath();
+    for(let z=1;z>=0;z-=0.05){
+      const s = screenOf(l, z, 0);
+      if(z===1) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+    }
+    ctx.stroke();
+  }
+  for(let k=0;k<14;k++){
+    const z = ((k/14) + (beat*0.07 % (1/14))) % 1;
+    const a = screenOf(-1.5, z, 0), b = screenOf(1.5, z, 0);
+    ctx.strokeStyle = 'rgba(143,163,196,' + (0.06 + (1-z)*0.1).toFixed(3) + ')';
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+}
+
+function drawObjects(){
+  const sorted = game.objects.slice().sort(function(a,b){ return a.p - b.p; });
+  for(const o of sorted){
+    const z = Math.max(0, 1 - o.p);
+    if(o.p < 0 || o.p > 1.3) continue;
+    const fade = o.p > 1 ? Math.max(0, 1-(o.p-1)*4) : 1;
+    ctx.globalAlpha = fade;
+
+    if(o.type === 'orb'){
+      const sp = screenOf(LANES[o.lane], z, 0.55);
+      const ox = sp.x + (o.side==='L' ? -1 : 1) * W*0.17 * sp.s;
+      const r = W*0.085*sp.s;
+      if(r < 1.5){ ctx.globalAlpha = 1; continue; }
+      const col = o.side==='L' ? '53,224,212' : '255,77,141';
+      if(o.hit){
+        ctx.strokeStyle = 'rgba(255,201,63,0.9)'; ctx.lineWidth = Math.max(2,r*0.2);
+        ctx.beginPath(); ctx.arc(ox, sp.y, r*1.5, 0, Math.PI*2); ctx.stroke();
+      } else {
+        const gg = ctx.createRadialGradient(ox,sp.y,r*0.1,ox,sp.y,r*1.5);
+        gg.addColorStop(0,'rgba('+col+',0.75)'); gg.addColorStop(1,'rgba('+col+',0)');
+        ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(ox,sp.y,r*1.5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba('+col+',0.95)';
+        ctx.beginPath(); ctx.arc(ox,sp.y,r,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#0C1018'; ctx.font = '700 '+Math.max(10,r*0.9)+'px Chakra Petch, sans-serif';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(o.side, ox, sp.y+r*0.04);
+      }
+    }
+
+    if(o.type === 'gate'){
+      for(const b of o.blocked){
+        const sp = screenOf(LANES[b], z, 0);
+        const w = W*0.26*sp.s, h = H*0.42*sp.s;
+        ctx.fillStyle = 'rgba(255,90,90,0.30)';
+        ctx.fillRect(sp.x-w/2, sp.y-h, w, h);
+        ctx.strokeStyle = 'rgba(255,90,90,0.95)';
+        ctx.lineWidth = Math.max(2, w*0.07);
+        ctx.strokeRect(sp.x-w/2, sp.y-h, w, h);
+      }
+    }
+
+    if(o.type === 'duck'){
+      const sp = screenOf(0, z, 0);
+      const w = W*0.92*sp.s, h = H*0.07*sp.s;
+      const y = sp.y - H*0.17*sp.s;
+      ctx.fillStyle = 'rgba(255,201,63,0.85)';
+      ctx.fillRect(sp.x-w/2, y, w, h);
+      ctx.fillStyle = '#0C1018';
+      ctx.font = '700 '+Math.max(9,h*0.8)+'px Chakra Petch, sans-serif';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      if(h > 12) ctx.fillText('DUCK', sp.x, y+h/2);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+const BONES = [[11,12],[11,23],[12,24],[23,24],[11,13],[13,15],[12,14],[14,16],[23,25],[25,27],[24,26],[26,28]];
+function drawSkeleton(){
+  if(!pose) return;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = 'rgba(234,242,255,0.75)';
+  ctx.lineWidth = Math.max(3, W*0.006);
+  ctx.lineCap = 'round';
+  for(const [a,b] of BONES){
+    const p = pt(a), q = pt(b);
+    if(!p || !q) continue;
+    ctx.beginPath();
+    ctx.moveTo(p.x*W, p.y*H); ctx.lineTo(q.x*W, q.y*H);
+    ctx.stroke();
+  }
+  for(const i of [L.lwr, L.rwr]){
+    const p = pt(i);
+    if(!p) continue;
+    ctx.fillStyle = i===L.lwr ? 'rgba(53,224,212,0.95)' : 'rgba(255,77,141,0.95)';
+    ctx.beginPath(); ctx.arc(p.x*W, p.y*H, Math.max(7, W*0.016), 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawPlayerMarker(){
+  const sp = screenOf(playerX, 0.02, 0);
+  ctx.strokeStyle = squatting ? 'rgba(255,201,63,0.95)' : 'rgba(234,242,255,0.65)';
+  ctx.lineWidth = Math.max(3, W*0.006);
+  const w = W*0.18;
+  ctx.beginPath();
+  ctx.moveTo(sp.x-w/2, H*0.95); ctx.lineTo(sp.x, H*0.95 - (squatting? H*0.02 : H*0.05)); ctx.lineTo(sp.x+w/2, H*0.95);
+  ctx.stroke();
+}
+
+/* ---------------- calibration ---------------- */
+function calibrate(reading, dt){
+  if(!reading){
+    ui.calCount.textContent = '—';
+    ui.calHint.textContent = 'Step into the picture';
+    ui.bGo.disabled = true; ui.bGo.textContent = 'Hold still…';
+    calSteady = 0;
+    return;
+  }
+  const bigEnough = reading.torso > 0.09;
+  if(!bigEnough){
+    ui.calHint.textContent = 'Too far — step closer';
+    calSteady = 0;
+  } else {
+    calSteady += dt;
+    ui.calHint.textContent = 'Hold it';
+  }
+  ui.calCount.textContent = Math.max(0, 3 - Math.floor(calSteady)) || 'OK';
+  if(calSteady > 3){
+    base = { x: reading.bodyX, hipY: reading.hipY, torso: reading.torso };
+    ui.bGo.disabled = false;
+    ui.bGo.textContent = 'Start the run';
+    ui.calHint.textContent = 'Locked in';
+  }
+}
+
+/* ---------------- loop ---------------- */
+let lastT = 0;
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = lastT ? Math.min(0.1, (now-lastT)/1000) : 0;
+  lastT = now;
+  if(video.readyState < 2 || !landmarker) return;
+
+  if(video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+    } catch(e){ /* dropped frame */ }
+  }
+
+  const reading = readPose(dt);
+
+  if(game.state === 'calibrate'){
+    ctx.clearRect(0,0,W,H);
+    ctx.save(); ctx.scale(-1,1); ctx.globalAlpha = 0.45;
+    ctx.drawImage(video, -W, 0, W, H); ctx.restore();
+    ctx.globalAlpha = 1;
+    drawSkeleton();
+    calibrate(reading, dt);
+    return;
+  }
+
+  if(game.state === 'play'){
+    update(now, dt);
+    drawCorridor();
+    drawObjects();
+    drawSkeleton();
+    drawPlayerMarker();
+    if(game.flash > 0){
+      ctx.fillStyle = 'rgba(255,90,90,' + (game.flash*0.3).toFixed(3) + ')';
+      ctx.fillRect(0,0,W,H);
+    }
+    return;
+  }
+
+  if(game.state === 'over'){
+    drawCorridor();
+    drawSkeleton();
+  }
+}
+
+/* ---------------- wiring ---------------- */
+document.getElementById('bStart').addEventListener('click', begin);
+document.getElementById('bGo').addEventListener('click', startRound);
+document.getElementById('bAgain').addEventListener('click', function(){
+  ui.oEnd.hidden = true; ui.oCal.hidden = false;
+  game.state = 'calibrate'; calSteady = 0;
+});
+document.getElementById('eBest').textContent = readBest();
+</script>
+</body>
+</html>
