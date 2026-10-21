@@ -40,6 +40,9 @@ canvas{display:block;width:100%;height:100%}
 .call .sub{font-size:clamp(12px,2vw,22px);letter-spacing:.3em;text-transform:uppercase;color:var(--muted);margin-top:6px}
 .call .bar{margin:14px auto 0;width:min(60vw,420px);height:8px;border-radius:999px;background:rgba(242,246,255,.18);overflow:hidden}
 .call .bar i{display:block;height:100%;width:100%;background:var(--amber)}
+.call .bar.depth{margin-top:9px;height:14px}
+.call .bar.depth i{width:0%;background:var(--cyan);transition:width .05s linear}
+.call .bar.depth i.full{background:var(--lime)}
 .call.ready .word{color:var(--muted)} .call.squat .word{color:var(--cyan)}
 .call.push .word{color:var(--amber)} .call.good .word{color:var(--lime)}
 .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,14,34,.93);
@@ -83,7 +86,8 @@ button[disabled]{opacity:.5;cursor:default}
     <div class="spd"><span id="hSpd">0</span><small>km/h</small></div>
     <div class="rt">
       <div class="big" id="hDist">0</div><div class="lbl">metres</div>
-      <div class="big" id="hPass" style="color:var(--amber)">0</div><div class="lbl">overtakes</div>
+      <div class="big" id="hPos" style="color:var(--amber)">P5</div><div class="lbl">position</div>
+      <div class="big" id="hLap">1</div><div class="lbl">lap</div>
       <div class="big" id="hClock">3:00</div><div class="lbl">left</div>
     </div>
   </div>
@@ -97,6 +101,7 @@ button[disabled]{opacity:.5;cursor:default}
   <div class="word" id="callWord"></div>
   <div class="sub" id="callSub"></div>
   <div class="bar"><i id="callBar"></i></div>
+  <div class="bar depth" id="depthWrap" hidden><i id="callDepth"></i></div>
 </div>
 
 <div class="overlay" id="oStart">
@@ -146,8 +151,8 @@ button[disabled]{opacity:.5;cursor:default}
     <div class="stats">
       <div class="stat"><b id="eDist">0</b><span>metres</span></div>
       <div class="stat"><b id="eBest">0</b><span>best run</span></div>
-      <div class="stat"><b id="ePass">0</b><span>overtakes</span></div>
-      <div class="stat"><b id="eMove">0</b><span>min moving</span></div>
+      <div class="stat"><b id="ePass">P5</b><span>finish</span></div>
+      <div class="stat"><b id="eMove">0</b><span>best lap</span></div>
     </div>
     <button id="bMore">One more race</button>
     <button id="bAgain" class="ghost">Back to start</button>
@@ -167,6 +172,14 @@ const accel = maxSpeed/6, coast = -maxSpeed/9, offRoadDecel = -maxSpeed/2;
 const offRoadLimit = maxSpeed/4, centrifugal = 0.30;
 const FULL_CADENCE = 100;
 const PREVIEW = 3.0, WINDOW_START = 6.0, WINDOW_FLOOR = 4.2;
+const LAP_METRES = 21000;
+const SQUAT_DEPTH = 0.17;
+const RIVALS = [
+  { key:'dali',     name:'DALI',     pace:138, lane:-0.56 },
+  { key:'picasso',  name:'PICASSO',  pace:146, lane: 0.56 },
+  { key:'frida',    name:'FRIDA',    pace:142, lane:-0.21 },
+  { key:'mondrian', name:'MONDRIAN', pace:136, lane: 0.21 }
+];
 
 const cv = document.getElementById('view'), ctx = cv.getContext('2d');
 let W=0,H=0,DPR=1;
@@ -180,10 +193,12 @@ window.addEventListener('resize', function(){ resize(); skyCv=null; }); resize()
 
 const ui = {
   hud:document.getElementById('hud'), spd:document.getElementById('hSpd'), dist:document.getElementById('hDist'),
-  pass:document.getElementById('hPass'), clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
+  pos:document.getElementById('hPos'), lap:document.getElementById('hLap'),
+  clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
   foot:document.getElementById('hFoot'),
   call:document.getElementById('call'), callWord:document.getElementById('callWord'),
   callSub:document.getElementById('callSub'), callBar:document.getElementById('callBar'),
+  callDepth:document.getElementById('callDepth'), depthWrap:document.getElementById('depthWrap'),
   oStart:document.getElementById('oStart'), oCal:document.getElementById('oCal'),
   oWarm:document.getElementById('oWarm'), oEnd:document.getElementById('oEnd'),
   loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
@@ -335,14 +350,15 @@ function buildTrack(){
   trackLength = segments.length*segmentLength;
 }
 function buildCars(){
-  cars=[];
-  const pal=['#FF4B5C','#3FE0E0','#FFB01F','#C6FF3D','#F2F6FF','#A06BFF'];
-  for(let i=0;i<22;i++){
-    cars.push({ offset:(Math.random()<0.5?-1:1)*(0.16+Math.random()*0.62),
-      z:Math.floor(Math.random()*segments.length)*segmentLength,
-      speed:maxSpeed/4.5+Math.random()*(maxSpeed/3.4),
-      color:pal[i%pal.length], passed:false });
-  }
+  cars = RIVALS.map(function(r,i){
+    return { key:r.key, name:r.name, basePace:r.pace, offset:r.lane,
+             dist: 80 + i*30, wob: i*1.7, bumped:0, z:0, dz:0 };
+  });
+}
+function rankNow(){
+  let p = 1;
+  for(const c of cars) if(c.dist > distance) p++;
+  return p;
 }
 let props=[];
 function buildProps(){
@@ -396,7 +412,8 @@ function project(p,camX,camY,camZ){
 
 /* ---- state ---- */
 let state='idle';
-let position=0, speed=0, playerX=0, distance=0, overtakes=0, movingTime=0;
+let position=0, speed=0, playerX=0, distance=0, movingTime=0;
+let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
@@ -463,7 +480,12 @@ function readPose(dt, now){
   } else { steerRaw *= 0.85; }
   steer = steer*0.72 + steerRaw*0.28;
 
-  if(base) squatting = (hp.y-base.hipY)/base.torso > 0.28;
+  if(base){
+    const hipDrop = (hp.y - base.hipY)/base.torso;
+    const shDrop  = (base.shY != null) ? (sh.y - base.shY)/base.torso : 0;
+    squatDepth = Math.max(0, Math.max(hipDrop, shDrop)) / SQUAT_DEPTH;
+    squatting = squatDepth >= 1;
+  }
 
   if(base){
     const lk=pt(L.lkn,0.12), rk=pt(L.rkn,0.12);
@@ -482,7 +504,7 @@ function readPose(dt, now){
     const height=Math.abs(((lw.y+rw.y)/2) - base.wristY)/base.torso;
     if(spread<0.75 && height<0.35) push=true;
   }
-  return { torso, hipY:hp.y, kneeY:kneeBase(), ankleY:ankleBase(),
+  return { torso, hipY:hp.y, shY:sh.y, kneeY:kneeBase(), ankleY:ankleBase(),
            wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
            ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0, hasHands:!!(lw&&rw),
            hasKnees:!!(pt(L.lkn,0.12)||pt(L.rkn,0.12)),
@@ -522,7 +544,8 @@ function showCall(word,sub,cls){
 function hideCall(){ ui.call.className='call'; }
 
 function startRace(fresh){
-  if(fresh){ buildTrack(); buildCars(); buildProps(); distance=0; overtakes=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; }
+  if(fresh){ buildTrack(); buildProps(); distance=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; bestLap=0; }
+  buildCars(); lap=0; lapStart=0; squatDepth=0; ui.depthWrap.hidden=true;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
@@ -543,13 +566,15 @@ function endRace(){
   if(rec){ best=d; writeLS('vgBest',best); }
   const n = bumpStreak();
   document.getElementById('endTitle').textContent = rec?'Fastest run yet':'Chequered flag';
-  document.getElementById('endNote').textContent = (movingTime/ROUND > 0.7)
-    ? 'You kept your feet moving for most of it. That is where the work is. Day ' + n + ' in a row.'
-    : 'Your feet stopped for a while and the car coasted. Day ' + n + ' in a row.';
+  const who = cars.slice().sort(function(a,b){ return b.dist-a.dist; })[0];
+  document.getElementById('endNote').textContent = (fin===1)
+    ? 'You took the win. ' + (movingTime/ROUND > 0.7 ? 'And you kept moving for most of it.' : '') + ' Day ' + n + ' in a row.'
+    : who.name + ' took it. You finished P' + fin + '. Day ' + n + ' in a row.';
   document.getElementById('eDist').textContent=d;
   document.getElementById('eBest').textContent=best;
-  document.getElementById('ePass').textContent=overtakes;
-  document.getElementById('eMove').textContent=(movingTime/60).toFixed(1);
+  const fin = rankNow();
+  document.getElementById('ePass').textContent='P'+fin;
+  document.getElementById('eMove').textContent = bestLap>0 ? bestLap.toFixed(1)+'s' : '--';
   ui.hud.hidden=true; ui.oEnd.hidden=false;
   letSleep();
   blip(300,0.5,0.28,'sine');
@@ -585,15 +610,26 @@ function update(dt, reading, now){
   }
 
   for(const c of cars){
-    c.z = wrap(c.z + dt*c.speed);
-    let dz = c.z-(position+playerZ);
-    if(dz>trackLength/2) dz-=trackLength;
-    if(dz<-trackLength/2) dz+=trackLength;
-    if(Math.abs(dz)<segmentLength*1.1 && Math.abs(playerX-c.offset)<0.42){
-      speed *= 0.6; shake=20; blip(110,0.25,0.3,'sawtooth');
+    const gap = distance - c.dist;
+    const band = Math.max(-0.22, Math.min(0.22, gap/5000));
+    const wob = Math.sin(elapsed*0.45 + c.wob)*0.045;
+    if(c.bumped>0) c.bumped -= dt;
+    c.dist += c.basePace * (1 + band + wob) * (c.bumped>0 ? 0.5 : 1) * dt;
+    c.dz = (c.dist - distance) * 52;
+    c.z = wrap(position + c.dz);
+    if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < 0.40 && c.bumped<=0){
+      speed *= 0.62; shake=20; c.bumped=1.3; blip(110,0.25,0.3,'sawtooth');
     }
-    if(dz < -segmentLength*2 && !c.passed){ c.passed=true; overtakes++; }
-    if(dz > segmentLength*2) c.passed=false;
+  }
+
+  const lapsDone = Math.floor(distance/LAP_METRES);
+  if(lapsDone > lap){
+    const lt = elapsed - lapStart;
+    if(bestLap===0 || lt<bestLap) bestLap = lt;
+    lap = lapsDone; lapStart = elapsed;
+    showCall('LAP '+lap, 'P'+rankNow()+'  -  '+lt.toFixed(1)+'s', 'good');
+    callTimer = 2.2;
+    blip(760,0.3,0.3);
   }
 
   // calls: preview, then a generous window, non-punitive
@@ -615,25 +651,36 @@ function update(dt, reading, now){
   }
   if(callPhase==='active'){
     ui.callBar.style.width = Math.max(0,Math.min(1,(callUntil-elapsed)/callWindow))*100 + '%';
+    if(callMode==='squat'){
+      ui.depthWrap.hidden = false;
+      const dp = Math.max(0, Math.min(1, squatDepth));
+      ui.callDepth.style.width = (dp*100)+'%';
+      ui.callDepth.className = dp>=1 ? 'full' : '';
+    }
     const done = (callMode==='squat' && squatting) || (callMode==='push' && reading && reading.push);
     if(done){
       if(callMode==='squat'){ boost=4; } else { slip=3; }
       callsHit++;
       callWindow = Math.max(WINDOW_FLOOR, callWindow - 0.25);
       callMode=null; callPhase=null; nextCall=elapsed+20+Math.random()*8;
-      showCall('GO','','good'); setTimeout(hideCall, 900);
+      ui.depthWrap.hidden = true;
+      showCall('GO','','good'); callTimer = 0.9;
       blip(880,0.22,0.3);
     } else if(elapsed > callUntil){
       callMode=null; callPhase=null; nextCall=elapsed+18+Math.random()*8;
+      ui.depthWrap.hidden = true;
       hideCall();
     }
   }
+
+  if(callTimer>0){ callTimer -= dt; if(callTimer<=0 && callPhase===null) hideCall(); }
 
   if(shake>0) shake=Math.max(0,shake-dt*60);
 
   ui.spd.textContent = Math.round(speed/segmentLength*3.6*1.6);
   ui.dist.textContent = Math.round(distance);
-  ui.pass.textContent = overtakes;
+  ui.pos.textContent = 'P'+rankNow();
+  ui.lap.textContent = (lap+1);
   ui.clock.textContent = Math.floor(left/60)+':'+String(Math.floor(left%60)).padStart(2,'0');
   ui.cad.style.width = Math.round(drive*100)+'%';
   const verb = (driveSrc==='arms') ? 'PUMP YOUR ARMS' : 'MARCH';
@@ -786,17 +833,91 @@ function rr(x,y,w,h,r){
   ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
   ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); ctx.fill();
 }
-function drawCar(x,y,scale,color){
-  const w=roadWidth*0.00040*scale*W, h=w*0.46;
-  if(w<1.5) return;
+function tri(ax,ay,bx,by,cx2,cy2,col){
+  ctx.fillStyle=col; ctx.beginPath();
+  ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.lineTo(cx2,cy2); ctx.closePath(); ctx.fill();
+}
+function drawDali(w,h){
+  // melting: the roofline sags, the wheels are clock faces
+  ctx.fillStyle='#E8C97A';
+  ctx.beginPath();
+  ctx.moveTo(-w/2,-h*0.05);
+  ctx.bezierCurveTo(-w*0.30,-h*1.05, w*0.30,-h*0.58, w/2,-h*0.05);
+  ctx.lineTo(w/2,-h*0.02); ctx.lineTo(-w/2,-h*0.02);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#C9A24E';
+  ctx.beginPath();
+  ctx.moveTo(-w*0.16,-h*0.78);
+  ctx.bezierCurveTo(-w*0.02,-h*1.18, w*0.16,-h*0.86, w*0.20,-h*0.60);
+  ctx.lineTo(-w*0.12,-h*0.60); ctx.closePath(); ctx.fill();
+  const r=h*0.30;
+  for(const sx of [-w*0.33, w*0.33]){
+    ctx.fillStyle='#F6EBCB'; ctx.beginPath(); ctx.arc(sx,-h*0.04,r,0,Math.PI*2); ctx.fill();
+    if(r>3){
+      ctx.strokeStyle='#4A3410'; ctx.lineWidth=Math.max(1,r*0.11);
+      ctx.beginPath(); ctx.moveTo(sx,-h*0.04); ctx.lineTo(sx,-h*0.04-r*0.62); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx,-h*0.04); ctx.lineTo(sx+r*0.45,-h*0.04+r*0.2); ctx.stroke();
+    }
+  }
+}
+function drawPicasso(w,h){
+  // cubist: the same car seen from several sides at once
+  tri(-w/2,-h*0.02, -w*0.40,-h*0.92, w*0.06,-h*0.10, '#3E6E99');
+  tri(-w*0.40,-h*0.92, w*0.14,-h*0.74, w*0.06,-h*0.10, '#7FA8C4');
+  tri(w*0.06,-h*0.10, w*0.14,-h*0.74, w/2,-h*0.02, '#C4873C');
+  tri(w*0.14,-h*0.74, w*0.42,-h*0.52, w/2,-h*0.02, '#E0B467');
+  tri(-w*0.18,-h*0.60, w*0.02,-h*1.22, w*0.26,-h*0.66, '#2B4F74');
+  ctx.strokeStyle='#14202E'; ctx.lineWidth=Math.max(1,w*0.022);
+  ctx.beginPath(); ctx.moveTo(-w*0.40,-h*0.92); ctx.lineTo(w*0.06,-h*0.10);
+  ctx.lineTo(w*0.42,-h*0.52); ctx.stroke();
+}
+function drawFrida(w,h){
+  ctx.fillStyle='#8E1F2F';
+  rr(-w/2,-h*0.78,w,h*0.76,Math.max(1,w*0.09));
+  ctx.fillStyle='#C62B3E';
+  rr(-w*0.40,-h*0.62,w*0.80,h*0.44,Math.max(1,w*0.07));
+  ctx.fillStyle='#1E6B46';
+  rr(-w*0.46,-h*0.22,w*0.92,h*0.14,1);
+  // flowers across the brow
+  const r=Math.max(1.2,h*0.12);
+  const cols=['#F2C84B','#F07E9A','#F6EBCB'];
+  for(let i=0;i<4;i++){
+    const fx=-w*0.30+i*(w*0.20);
+    ctx.fillStyle=cols[i%3];
+    ctx.beginPath(); ctx.arc(fx,-h*0.86,r,0,Math.PI*2); ctx.fill();
+    if(r>2.5){ ctx.fillStyle='#8E1F2F'; ctx.beginPath(); ctx.arc(fx,-h*0.86,r*0.36,0,Math.PI*2); ctx.fill(); }
+  }
+}
+function drawMondrian(w,h){
+  ctx.fillStyle='#F4F3EE'; rr(-w/2,-h*0.86,w,h*0.84,1);
+  ctx.fillStyle='#CE2B37'; ctx.fillRect(-w*0.48,-h*0.84,w*0.40,h*0.40);
+  ctx.fillStyle='#F2C84B'; ctx.fillRect(w*0.14,-h*0.84,w*0.34,h*0.22);
+  ctx.fillStyle='#1E4FA8'; ctx.fillRect(w*0.06,-h*0.36,w*0.42,h*0.34);
+  ctx.strokeStyle='#121212'; ctx.lineWidth=Math.max(1.1,w*0.045);
+  ctx.beginPath();
+  ctx.moveTo(-w*0.08,-h*0.86); ctx.lineTo(-w*0.08,-h*0.02);
+  ctx.moveTo(-w/2,-h*0.44);    ctx.lineTo(w/2,-h*0.44);
+  ctx.moveTo(w*0.06,-h*0.86);  ctx.lineTo(w*0.06,-h*0.02);
+  ctx.stroke();
+  ctx.strokeRect(-w/2,-h*0.86,w,h*0.84);
+}
+function drawCar(x,y,scale,car){
+  const w=roadWidth*0.00052*scale*W, h=w*0.52;
+  if(w<2) return;
   ctx.save(); ctx.translate(x,y);
-  ctx.fillStyle='rgba(0,0,0,0.4)';
-  ctx.beginPath(); ctx.ellipse(0,0,w*0.56,h*0.18,0,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle=color; rr(-w/2,-h,w,h*0.6,Math.max(1,w*0.06));
-  rr(-w*0.17,-h*1.5,w*0.34,h*0.62,Math.max(1,w*0.05));
-  ctx.fillStyle='rgba(10,14,22,0.7)';
-  rr(-w*0.44,-h*1.15,w*0.2,h*0.5,1); rr(w*0.24,-h*1.15,w*0.2,h*0.5,1);
-  ctx.fillStyle='#FF4B5C'; rr(-w*0.08,-h*0.2,w*0.16,h*0.16,1);
+  ctx.fillStyle='rgba(0,0,0,0.42)';
+  ctx.beginPath(); ctx.ellipse(0,0,w*0.58,h*0.17,0,0,Math.PI*2); ctx.fill();
+  if(car.key==='dali') drawDali(w,h);
+  else if(car.key==='picasso') drawPicasso(w,h);
+  else if(car.key==='frida') drawFrida(w,h);
+  else drawMondrian(w,h);
+  if(w > W*0.07){
+    ctx.font='700 '+Math.round(w*0.19)+'px Chakra Petch, sans-serif';
+    ctx.textAlign='center'; ctx.fillStyle='rgba(242,246,255,0.92)';
+    ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=w*0.1;
+    ctx.fillText(car.name, 0, -h*1.35);
+    ctx.shadowBlur=0;
+  }
   ctx.restore();
 }
 function drawPlayerCar(){
@@ -852,13 +973,14 @@ function render(){
       drawCypress(px, py, psc*1000*pr.scale*0.00062, pr.seed);
     }
     for(const c of cars){
+      if(c.dz < -segmentLength*2 || c.dz > drawDistance*segmentLength) continue;
       if(findSeg(c.z).index!==s.index) continue;
       const pc=(c.z%segmentLength)/segmentLength;
       const sc=lerp(s.p1.screen.scale,s.p2.screen.scale,pc);
       const cx=lerp(s.p1.screen.x,s.p2.screen.x,pc)+(sc*c.offset*roadWidth*W/2);
       const cy=lerp(s.p1.screen.y,s.p2.screen.y,pc);
       if(cy>s.clip+2) continue;
-      drawCar(cx,cy,sc*1000,c.color);
+      drawCar(cx,cy,sc*1000,c);
     }
   }
   drawPlayerCar();
@@ -900,7 +1022,7 @@ function calibrate(r,dt){
   }
   ui.calCount.textContent = Math.max(0,3-Math.floor(calSteady))||'OK';
   if(calSteady>3){
-    base={ ang:r.ang, hipY:r.hipY, torso:r.torso, kneeY:r.kneeY, ankleY:r.ankleY,
+    base={ ang:r.ang, hipY:r.hipY, shY:r.shY, torso:r.torso, kneeY:r.kneeY, ankleY:r.ankleY,
            wristY:r.wristY, spread:Math.max(0.05,r.spread) };
     limbUp={};
     ui.bGo.disabled=false; ui.bGo.textContent='Warm up';
