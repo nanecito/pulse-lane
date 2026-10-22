@@ -32,6 +32,10 @@ canvas{display:block;width:100%;height:100%}
      border:1px solid rgba(242,246,255,.22);overflow:hidden;position:relative}
 .cad i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--cyan),var(--lime));transition:width .14s linear}
 .cad b{position:absolute;left:55%;top:0;bottom:0;width:2px;background:rgba(242,246,255,.55)}
+.chaser{font-size:clamp(11px,1.5vw,15px);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--fg);background:rgba(12,18,40,.72);border:1px solid rgba(246,235,203,.35);
+  border-radius:999px;padding:4px 13px;margin-bottom:7px}
+.chaser.near{color:var(--ink);background:var(--red);border-color:var(--red);font-weight:700}
 .foot{font-size:clamp(11px,1.5vw,16px);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
 .foot.warn{color:var(--amber)}
 
@@ -108,6 +112,7 @@ button[disabled]{opacity:.5;cursor:default}
   </div>
   <div class="bottom">
     <div class="cad"><i id="hCad"></i><b></b></div>
+    <div class="chaser" id="hChaser" hidden></div>
     <div class="foot" id="hFoot">March to build speed</div>
     <div class="diag" id="hDiag"></div>
   </div>
@@ -183,7 +188,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 8;          // bump on every deploy; shown on the start card
+const BUILD = 9;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -202,6 +207,19 @@ const PREVIEW = 3.0, WINDOW_START = 6.0, WINDOW_FLOOR = 4.2;
 let LAP_METRES = 6200;       // set from the track itself, so one loop IS one lap
 const FINISH_SEGS = 3;       // how much road the painted line covers
 const SQUAT_DEPTH = 0.17;
+/* The shadow. One rival sits just off your tail while you are working, and
+   comes through when you stop working. It reads your MARCHING, never your
+   speed: at 150-250ms of camera lag, running wide is usually the tracker's
+   fault, and being passed for that would feel like the game cheating. Being
+   passed because you stopped marching is something you did. */
+const SHADOW_GAP    = 30;    // metres it tries to hold behind you
+const SHADOW_DROP   = 0.68;  // it comes past below this fraction of YOUR normal pace
+const SHADOW_FLOOR  = 0.28;  // and always below this, however gentle your normal pace
+const EFFORT_TAU    = 3.0;   // seconds your recent effort is averaged over
+const EFFORT_BASE   = 20.0;  // seconds your normal working pace is averaged over
+const SHADOW_MIN    = 12;    // metres it can never get closer than, while you are working
+const CHASER_SHOW   = 60;    // metres: when a chaser appears on the HUD
+const CHASER_WARN   = 25;    // metres: when it is close enough to say so
 const RIVALS = [
   { key:'dali',     name:'DALI',     pace: 40, lane:-0.62 },
   { key:'picasso',  name:'PICASSO',  pace: 42, lane: 0.62 },
@@ -233,7 +251,7 @@ const ui = {
   calTitle:document.getElementById('calTitle'), calSub:document.getElementById('calSub'),
   calDiag:document.getElementById('calDiag'),
   clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
-  foot:document.getElementById('hFoot'),
+  foot:document.getElementById('hFoot'), chaser:document.getElementById('hChaser'),
   call:document.getElementById('call'), callWord:document.getElementById('callWord'),
   callSub:document.getElementById('callSub'), callBar:document.getElementById('callBar'),
   callDepth:document.getElementById('callDepth'), depthWrap:document.getElementById('depthWrap'),
@@ -516,6 +534,7 @@ function project(p,camX,camY,camZ){
 let state='idle';
 let position=0, speed=0, playerX=0, distance=0, movingTime=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
+let effortAvg=0, effortBase=0, chaserArmed=true;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
@@ -746,6 +765,7 @@ function startRace(fresh){
   if(fresh){ buildTrack(); buildProps(); distance=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; bestLap=0; }
   LAPS = chosenLaps;
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
+  effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
@@ -803,6 +823,18 @@ function update(dt, reading, now){
 
   const drive = Math.max(0, Math.min(1, cadence/FULL_CADENCE));
   if(drive > 0.25) movingTime += dt;
+  // Only while we can actually see a limb to read. If the tracker loses you
+  // entirely, your effort freezes where it was rather than reading as a stop:
+  // standing still with your knees in view is you choosing to rest, but losing
+  // the knees altogether is the camera's problem, not yours.
+  // (speed is deliberately not part of this either; see SHADOW_DROP above)
+  if(driveSrc !== 'none'){
+  effortAvg  += (drive - effortAvg)  * Math.min(1, dt/EFFORT_TAU);
+  // your normal pace rises quickly and falls slowly, on purpose: if it fell as
+  // fast as you did, easing off would lower your own bar and save you from it
+  effortBase += (drive - effortBase) *
+                Math.min(1, dt/(drive > effortBase ? EFFORT_BASE : EFFORT_BASE*4));
+  }
   let target = maxSpeed*(0.12 + 0.88*drive);
   if(boost>0){ target = Math.max(target, maxSpeed*1.3); boost -= dt; }
   if(slip>0){ target = Math.max(target, maxSpeed*1.12); slip -= dt; }
@@ -826,15 +858,44 @@ function update(dt, reading, now){
     engFilt.frequency.value = 700 + 1400*pct;
   }
 
+  // while you lead, the nearest car behind becomes your shadow
+  let leading = true;
+  for(const c of cars) if(c.dist > distance) leading = false;
+  let shadow = null, shadowGap = 1e9;
+  if(leading){
+    for(const c of cars){
+      const g = distance - c.dist;
+      if(g > 0 && g < shadowGap){ shadowGap = g; shadow = c; }
+    }
+  }
+  // relative to your own normal pace, so a gentle player and a hard one are
+  // judged the same way: ease off by about a third and it comes past
+  const releaseAt = Math.max(SHADOW_FLOOR, effortBase*SHADOW_DROP);
+  const holding = effortAvg >= releaseAt;
+
   for(const c of cars){
     const gap = distance - c.dist;
     const band = Math.max(-0.22, Math.min(0.22, gap/900));
     const wob = Math.sin(elapsed*0.45 + c.wob)*0.045;
     if(c.bumped>0) c.bumped -= dt;
-    const want = c.basePace * (1 + band + wob);
+    let want;
+    if(c===shadow && holding){
+      // hold station: close enough to feel, not close enough to pass
+      const err = (distance - SHADOW_GAP) - c.dist;
+      want = c.basePace * (1 + Math.max(-0.30, Math.min(0.30, err/45)) + wob*0.4);
+    } else {
+      want = c.basePace * (1 + band + wob);
+    }
     const rate = (c.v < want ? c.basePace/7 : c.basePace/3) * dt;   // launch slower than they slow
     c.v += Math.max(-rate, Math.min(rate, want - c.v));
     c.dist += Math.max(0, c.v) * (c.bumped>0 ? 0.5 : 1) * dt;
+    // a hard floor, not a pace nudge: while you are working, the shadow cannot
+    // come past however slow you get. Running wide is the tracker's fault as
+    // often as yours, and losing the lead to it would feel like a cheat.
+    if(c===shadow && holding && c.dist > distance - SHADOW_MIN){
+      c.dist = distance - SHADOW_MIN;
+      if(c.v > Math.max(0, speed/125)) c.v = Math.max(0, speed/125);
+    }
     c.dz = (c.dist - distance) * 125;
     c.z = wrap(position + c.dz);
     if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < 0.20
@@ -911,9 +972,25 @@ function update(dt, reading, now){
   const verb = legs ? 'MARCH TO BUILD SPEED'
              : (driveSrc==='arms' ? "CAN'T SEE YOUR LEGS - PUMP YOUR ARMS"
                                   : 'STEP INTO THE PICTURE');
+  // a car behind you is never drawn, so the only way to feel it is to be told
+  let chName=null, chGap=0;
+  for(const c of cars){
+    const g = distance - c.dist;
+    if(g > 0 && g < CHASER_SHOW && (chName===null || g < chGap)){ chName=c.name; chGap=g; }
+  }
+  if(ui.chaser){
+    if(chName){
+      ui.chaser.hidden=false;
+      ui.chaser.textContent = chName + '  ' + Math.round(chGap) + 'm';
+      ui.chaser.className = 'chaser' + (chGap < CHASER_WARN ? ' near' : '');
+      if(chGap < CHASER_WARN && chaserArmed){ chaserArmed=false; blip(150,0.22,0.22,'sawtooth'); }
+      if(chGap > CHASER_WARN*1.8) chaserArmed=true;
+    } else { ui.chaser.hidden=true; chaserArmed=true; }
+  }
   ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb);
   ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn';
-  ui.diag.textContent = diagText();
+  ui.diag.textContent = diagText() + ' eff ' + effortAvg.toFixed(2)
+    + '/' + effortBase.toFixed(2) + (holding?' hold':' RELEASED');
 
   if(left<=0) endRace();     // the backstop; the finish line is what normally ends it
 }
