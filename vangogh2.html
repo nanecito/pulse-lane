@@ -183,16 +183,17 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 7;          // bump on every deploy; shown on the start card
+const BUILD = 8;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
+const LANE_SEGS = 9;    // lane dashes get a slower period than the kerbs
 // a tall screen needs a narrower road, or its edges fall off the sides where the motion matters most
 let roadWidth = 1200;
 const fieldOfView = 100, cameraHeight = 600, drawDistance = 150;
 const cameraDepth = 1/Math.tan((fieldOfView/2)*Math.PI/180);
 const playerZ = cameraHeight*cameraDepth;
-const maxSpeed = segmentLength*40;
+const maxSpeed = segmentLength*32;   // was *40; 20% slower, and the track is 20% shorter to match
 const accel = maxSpeed/11, coast = -maxSpeed/9, offRoadDecel = -maxSpeed/4;
 const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
@@ -418,7 +419,8 @@ function addSeg(curve,y){
   segments.push({ index:n,
     p1:{world:{y:lastY(),z:n*segmentLength},camera:{},screen:{}},
     p2:{world:{y:y,z:(n+1)*segmentLength},camera:{},screen:{}},
-    curve:curve, dark:Math.floor(n/rumbleLength)%2===0, clip:0, looped:false, fog:0 });
+    curve:curve, dark:Math.floor(n/rumbleLength)%2===0,
+    laneOn:Math.floor(n/LANE_SEGS)%2===0, clip:0, looped:false, fog:0 });
 }
 function addRoad(enter,hold,leave,curve,y){
   const sY=lastY(), eY=sY+y*segmentLength, total=enter+hold+leave;
@@ -431,16 +433,16 @@ function buildTrack(){
   // A real circuit: one loop is one lap, so the start/finish line can live at a
   // fixed place on the road. The hills sum to zero, or the loop would not close
   // and there would be a step in the ground exactly under the gantry.
-  addRoad(70,170,70, 0,  0);   // start/finish straight, long enough to see the line coming
-  addRoad(40, 70,40, 4, 25); addRoad(30, 40,30,-2,-20); addRoad(40, 90,40,-5,  0);
-  addRoad(30, 50,30, 3, 35); addRoad(50, 60,50, 0,-30); addRoad(40, 80,40,-3, 15);
-  addRoad(30, 40,30, 6,  0); addRoad(50, 70,50,-4,-25); addRoad(40, 60,40, 2, 20);
-  addRoad(60, 80,60, 0,  0); addRoad(40, 60,40,-6,  0); addRoad(30, 50,30, 5, 30);
-  addRoad(50, 90,50,-3,-35); addRoad(40, 70,40, 2,  0); addRoad(60,100,60, 0, 20);
-  addRoad(30, 40,30,-7,  0); addRoad(50, 80,50, 4,-25); addRoad(40, 60,40,-2, 30);
-  addRoad(30, 50,30, 6,  0); addRoad(50, 70,50,-5,-20); addRoad(40, 90,40, 3,  0);
-  addRoad(60, 60,60, 0, 15); addRoad(30, 40,30,-4,-35); addRoad(50, 60,50, 2,  0);
-  addRoad(70,180,70, 0,  0);   // the run to the line
+  addRoad(60,140,60, 0,  0);   // start/finish straight, long enough to see the line coming
+  addRoad(35, 55,35, 4, 20); addRoad(25, 35,25,-2,-16); addRoad(35, 70,35,-5,  0);
+  addRoad(25, 40,25, 3, 28); addRoad(40, 50,40, 0,-24); addRoad(35, 65,35,-3, 12);
+  addRoad(25, 35,25, 6,  0); addRoad(40, 55,40,-4,-20); addRoad(35, 50,35, 2, 16);
+  addRoad(50, 65,50, 0,  0); addRoad(35, 50,35,-6,  0); addRoad(25, 40,25, 5, 24);
+  addRoad(40, 70,40,-3,-28); addRoad(35, 55,35, 2,  0); addRoad(50, 80,50, 0, 16);
+  addRoad(25, 35,25,-7,  0); addRoad(40, 65,40, 4,-20); addRoad(35, 50,35,-2, 24);
+  addRoad(25, 40,25, 6,  0); addRoad(40, 55,40,-5,-16); addRoad(35, 70,35, 3,  0);
+  addRoad(50, 50,50, 0, 12); addRoad(25, 35,25,-4,-28); addRoad(40, 50,40, 2,  0);
+  addRoad(60,150,60, 0,  0);   // the run to the line
   trackLength = segments.length*segmentLength;
   // distance advances at speed*dt/125 and position at speed*dt, so one loop of
   // the track is exactly this many metres. Deriving it means the painted line
@@ -1044,7 +1046,7 @@ function renderSeg(s){
   poly(p1.x-p1.w-r1,p1.y,p1.x-p1.w,p1.y,p2.x-p2.w,p2.y,p2.x-p2.w-r2,p2.y,rb);
   poly(p1.x+p1.w+r1,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x+p2.w+r2,p2.y,rb);
   poly(p1.x-p1.w,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x-p2.w,p2.y, s.dark?'#1E2436':'#242B40');
-  if(s.dark){
+  if(s.laneOn){
     const lw1=p1.w/60, lw2=p2.w/60, l1=(p1.w*2)/lanes, l2=(p2.w*2)/lanes;
     let x1=p1.x-p1.w+l1, x2=p2.x-p2.w+l2;
     for(let l=1;l<lanes;l++){
