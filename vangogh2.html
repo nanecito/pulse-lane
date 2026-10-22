@@ -1093,6 +1093,30 @@ function render(){
   if(shake>0){ ctx.fillStyle='rgba(255,75,92,'+Math.min(0.3,shake/50)+')'; ctx.fillRect(0,0,W,H); }
 }
 
+/* the shape to stand into. fitting it puts you at the right distance by construction. */
+const GUIDE = {
+  head:[0.500,0.150], lsh:[0.398,0.300], rsh:[0.602,0.300],
+  lel:[0.330,0.400],  rel:[0.670,0.400],
+  lwr:[0.408,0.330],  rwr:[0.592,0.330],
+  lhip:[0.446,0.550], rhip:[0.554,0.550],
+  lkn:[0.446,0.745],  rkn:[0.554,0.745],
+  lank:[0.446,0.935], rank:[0.554,0.935]
+};
+const CHECKS = [ {g:'lwr',i:15}, {g:'rwr',i:16}, {g:'lkn',i:25}, {g:'rkn',i:26} ];
+function drawGuide(F){
+  const X=n=>F.dx+n*F.dw, Y=n=>F.dy+n*F.dh, U=Math.min(F.dw,F.dh);
+  ctx.save();
+  ctx.strokeStyle='rgba(242,246,255,0.34)';
+  ctx.lineWidth=Math.max(2,U*0.013); ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.setLineDash([Math.max(5,U*0.028), Math.max(5,U*0.022)]);
+  ctx.beginPath(); ctx.arc(X(GUIDE.head[0]),Y(GUIDE.head[1]),U*0.080,0,Math.PI*2); ctx.stroke();
+  const seg=(a,b)=>{ ctx.beginPath();
+    ctx.moveTo(X(GUIDE[a][0]),Y(GUIDE[a][1])); ctx.lineTo(X(GUIDE[b][0]),Y(GUIDE[b][1])); ctx.stroke(); };
+  seg('lsh','rsh'); seg('lsh','lel'); seg('lel','lwr'); seg('rsh','rel'); seg('rel','rwr');
+  seg('lsh','lhip'); seg('rsh','rhip'); seg('lhip','rhip');
+  seg('lhip','lkn'); seg('lkn','lank'); seg('rhip','rkn'); seg('rkn','rank');
+  ctx.setLineDash([]); ctx.restore();
+}
 function videoFit(){
   const vw = video.videoWidth||0, vh = video.videoHeight||0;
   if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
@@ -1161,7 +1185,6 @@ function drawMirror(alpha){
   // outline what the camera can actually see
   ctx.strokeStyle='rgba(242,200,75,0.55)'; ctx.lineWidth=2;
   ctx.setLineDash([8,8]); ctx.strokeRect(f.dx+1,f.dy+1,f.dw-2,f.dh-2); ctx.setLineDash([]);
-  drawSkeleton();
 }
 
 function makeBase(r){
@@ -1184,78 +1207,68 @@ function beginRaceFrom(r){
   goWarm();
 }
 function calibrate(r,dt){
-  const knees  = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
-  const ankles = !!(pt(L.lank,0.12)||pt(L.rank,0.12));
-  const lw=pt(L.lwr), rw=pt(L.rwr), sh=mid(L.lsh,L.rsh), hp=mid(L.lhip,L.rhip);
-  const lsh=pt(L.lsh), rsh=pt(L.rsh);
-
-  let title='Finding you', hint='Step into the picture', ok=false;
-
-  if(!sh){
-    // nothing to work with yet
-  } else if(!hp){
-    title='Too close'; hint=(video.videoWidth>video.videoHeight && H>W)
-      ? 'Your camera is giving a wide frame, so step well back'
-      : 'Step back so I can see your hips';
-  } else if(r && r.torso > 0.34){
-    title='A bit too close'; hint='Step back a pace or two';
-  } else if(r && r.torso < 0.10){
-    title='Too far away'; hint='Step closer, about two big paces from the camera';
-  } else if(r){
-    // legs are a bonus, not a requirement: without them the game reads your arms
-    ok = true;
-    title = (knees||ankles) ? 'Good spot' : 'That works';
-    hint  = 'Now take the wheel with both hands';
-  }
-
-  // the wheel: both hands up in front of you, anywhere from narrow to wide
-  let gripping=false, wheelAngle=0;
-  if(ok && lw && rw && sh){
-    wheelAngle = Math.atan2(rw.y-lw.y, rw.x-lw.x);
-    const spread = Math.abs(rw.x-lw.x);
-    const shw = (lsh && rsh) ? Math.max(0.04, Math.abs(rsh.x-lsh.x)) : 0.20;
-    const midY = (lw.y+rw.y)/2;
-    const above = hp ? (midY < hp.y + r.torso*0.25) : true;   // not down by your sides
-    const below = midY > sh.y - r.torso*1.6;                  // not straight overhead
-    gripping = above && below && spread > shw*0.30 && spread < shw*3.2;
-  }
-  // tracking flickers, so build fast and forget slowly
-  if(gripping){ gripHold = Math.min(1.0, gripHold + dt); } else { gripHold = Math.max(0, gripHold - dt*0.5); }
-
-
-  // everything on this screen must live in the camera's frame, not the canvas
   const F = videoFit();
-  const SX = nx => F.dx + nx*F.dw, SY = ny => F.dy + ny*F.dh;
-  let wx=SX(0.5), wy=SY(0.46), wr=Math.min(F.dw,F.dh)*0.13;
-  if(gripping && lw && rw){
-    wx=SX((lw.x+rw.x)/2); wy=SY((lw.y+rw.y)/2);
-    wr=Math.max(Math.min(F.dw,F.dh)*0.06, Math.hypot((rw.x-lw.x)*F.dw,(rw.y-lw.y)*F.dh)/2);
-  } else if(lsh && rsh && sh && r){
-    wx=SX((lsh.x+rsh.x)/2); wy=SY(sh.y + r.torso*0.42);
-    wr=Math.max(Math.min(F.dw,F.dh)*0.07, Math.abs(rsh.x-lsh.x)*F.dw*0.62);
-  }
-  drawWheel(wx, wy, wr, (gripping ? wheelAngle : 0), gripping, gripHold/1.0);
+  const X=n=>F.dx+n*F.dw, Y=n=>F.dy+n*F.dh, U=Math.min(F.dw,F.dh);
+  drawGuide(F);
 
-  if(ok && gripping) hint = gripHold > 0.7 ? 'Hold it&hellip;' : 'Hands on the wheel &mdash; hold';
+  // four points to land on. hands are required, knees are what you are aiming for.
+  const tol = U*0.115;
+  const state = [];
+  for(const c of CHECKS){
+    const tx=X(GUIDE[c.g][0]), ty=Y(GUIDE[c.g][1]);
+    const j = joint(c.i);
+    const near = !!(j && j.v>0.12 && Math.hypot(j.x-tx, j.y-ty) < tol);
+    state.push({c:c, tx:tx, ty:ty, j:j, near:near});
+  }
+  const hands = state[0].near && state[1].near;
+  const knees = state[2].near && state[3].near;
+  const kneesSeen = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
+
+  // the wheel sits between the two hand marks, so standing into the shape is taking the wheel
+  const wx=(state[0].tx+state[1].tx)/2, wy=(state[0].ty+state[1].ty)/2;
+  const wr=Math.max(U*0.07, Math.hypot(state[1].tx-state[0].tx, state[1].ty-state[0].ty)/2);
+  if(hands){ gripHold = Math.min(1.0, gripHold + dt); }
+  else { gripHold = Math.max(0, gripHold - dt*0.5); }
+  drawWheel(wx, wy, wr, 0, hands, gripHold/1.0);
+
+  // the marks themselves
+  for(const st of state){
+    ctx.beginPath(); ctx.arc(st.tx, st.ty, U*0.042, 0, Math.PI*2);
+    ctx.fillStyle = st.near ? 'rgba(127,224,160,0.95)' : 'rgba(224,74,58,0.90)';
+    ctx.fill();
+    ctx.lineWidth=Math.max(1.5,U*0.008);
+    ctx.strokeStyle = st.near ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.40)';
+    ctx.stroke();
+    // where that limb actually is, so you can see which way to move
+    if(st.j && st.j.v>0.12 && !st.near){
+      ctx.fillStyle='rgba(246,235,203,0.95)';
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.022, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(246,235,203,0.45)'; ctx.lineWidth=Math.max(1,U*0.006);
+      ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
+    }
+  }
+
+  let title, hint;
+  if(!pose){            title='Finding you';     hint='Step into the picture'; }
+  else if(!hands){      title='Stand in the shape'; hint='Put your hands on the two marks'; }
+  else if(!knees){      title='Almost';          hint=kneesSeen ? 'Line your knees up with the lower marks'
+                                                                : 'Step back so your knees are in the picture'; }
+  else {                title='That is it';      hint = gripHold>0.7 ? 'Hold it&hellip;' : 'Hold still'; }
+
   ui.calTitle.innerHTML = title;
   ui.calHint.innerHTML = hint;
-  ui.calSub.innerHTML = (knees||ankles) ? 'I can see your legs &mdash; you can march to drive'
-                                        : 'I cannot see your legs &mdash; you can still play with your arms';
-  ui.bGo.disabled = false;   // the escape hatch is never locked
+  ui.calSub.innerHTML = knees ? 'Legs tracked &mdash; march to drive'
+                              : (kneesSeen ? 'I can see your legs' : 'Legs not in frame &mdash; arms will drive');
+  ui.bGo.disabled = false;
 
   const kv = (i)=>{ const q = pose&&pose[i]; return (q&&q.visibility!==undefined)?q.visibility.toFixed(2):'--'; };
-  const shwD = (lsh&&rsh)? Math.max(0.04,Math.abs(rsh.x-lsh.x)) : 0;
-  const sprD = (lw&&rw)? Math.abs(rw.x-lw.x) : 0;
   ui.calDiag.innerHTML =
       'cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
     + ' &middot; torso ' + (r? r.torso.toFixed(2):'--')
-    + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; an ' + kv(27) + '/' + kv(28)
-    + ' &middot; hip ' + kv(23) + '/' + kv(24)
-    + '<br>wrists ' + (shwD? (sprD/shwD).toFixed(2):'--') + 'x shoulders'
-    + ' &middot; ok ' + (ok?'Y':'N') + ' &middot; grip ' + (gripping?'Y':'N')
-    + ' &middot; hold ' + gripHold.toFixed(2);
+    + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; marks '
+    + state.map(x=>x.near?'Y':'n').join('') + ' &middot; hold ' + gripHold.toFixed(2);
 
-  if(ok && gripHold >= 1.0) beginRaceFrom(r);
+  if(hands && gripHold >= 1.0) beginRaceFrom(r);
 }
 
 let lastT=0;
