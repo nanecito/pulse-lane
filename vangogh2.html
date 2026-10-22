@@ -61,6 +61,10 @@ canvas{display:block;width:100%;height:100%}
 .card h1{margin:0 0 6px;font-size:clamp(26px,5.5vw,40px);font-weight:700;letter-spacing:.05em;text-wrap:balance}
 .card h2{margin:0 0 10px;font-size:clamp(22px,4vw,30px);font-weight:700}
 .card p{margin:0 0 16px;color:var(--muted);font-size:clamp(13px,1.8vw,15px);line-height:1.6}
+.orientNote{position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:40;
+  max-width:min(92vw,560px);padding:9px 14px;border-radius:999px;font-size:13px;line-height:1.4;text-align:center;
+  color:var(--lime);background:rgba(10,18,40,.94);border:1px solid rgba(242,200,75,.45);
+  box-shadow:0 6px 22px rgba(0,0,0,.5);pointer-events:none}
 .moves{display:grid;gap:8px;margin:0 0 18px;text-align:left}
 .mv{display:flex;gap:12px;background:rgba(242,246,255,.06);border-radius:11px;padding:11px 13px}
 .mv b{color:var(--lime);font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;min-width:104px}
@@ -115,6 +119,7 @@ button[disabled]{opacity:.5;cursor:default}
   <div class="bar depth" id="depthWrap" hidden><i id="callDepth"></i></div>
 </div>
 
+<div class="orientNote" id="orientNote" hidden>You are sideways &mdash; portrait tracks your knees better and shows more road ahead.</div>
 <div class="overlay" id="oStart">
   <div class="card">
     <h1>Starry Night Circuit <span style="font-size:.55em;opacity:.65">v2</span></h1>
@@ -203,11 +208,17 @@ let W=0,H=0,DPR=1;
 function resize(){
   DPR = Math.min(2, window.devicePixelRatio||1);
   W = window.innerWidth; H = window.innerHeight;
-  roadWidth = (H > W) ? 950 : 1320;
+  roadWidth = (H > W) ? 1250 : 1320;
   cv.width = Math.floor(W*DPR); cv.height = Math.floor(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);
 }
-window.addEventListener('resize', function(){ resize(); skyCv=null; }); resize();
+function showOrientNote(){
+  const n=document.getElementById('orientNote');
+  // only on the start screen: once the camera is on, rotating no longer changes the frame
+  const onStart = !document.getElementById('oStart').hidden;
+  if(n) n.hidden = !(onStart && window.innerWidth > window.innerHeight);
+}
+window.addEventListener('resize', function(){ resize(); skyCv=null; showOrientNote(); }); resize();
 
 const ui = {
   hud:document.getElementById('hud'), spd:document.getElementById('hSpd'), dist:document.getElementById('hDist'),
@@ -325,7 +336,7 @@ async function begin(){
     const s = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:vW},height:{ideal:vH},facingMode:'user'}, audio:false });
     video.srcObject=s; await video.play();
     if(!landmarker) await loadTracker();
-    ui.loadMsg.hidden=true; ui.oStart.hidden=true; ui.oCal.hidden=false;
+    ui.loadMsg.hidden=true; ui.oStart.hidden=true; ui.oCal.hidden=false; showOrientNote();
     state='calibrate'; calSteady=0; keepAwake();
     requestAnimationFrame(frame);
   } catch(err){
@@ -1443,6 +1454,7 @@ document.getElementById('bAgain').addEventListener('click', function(){
 });
 document.getElementById('eBest').textContent=readBest();
 showStreak();
+showOrientNote();
 </script>
 </body>
 </html>
