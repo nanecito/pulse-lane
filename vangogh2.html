@@ -325,7 +325,35 @@ async function loadTracker(){
   try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
   catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
 }
+// the camera has to have actually started sending pictures. play() resolving
+// is not that, and on a phone it can resolve before a single frame exists.
+function waitForFrames(ms){
+  return new Promise(function(res, rej){
+    if(video.readyState >= 2) return res();
+    let done=false;
+    const ok=function(){ if(done) return; done=true; clean(); res(); };
+    const giveUp=function(){ if(done) return; done=true; clean();
+      rej(new Error('The camera turned on but sent no picture. Close any other app using it, then try again.')); };
+    const t=setTimeout(giveUp, ms||10000);
+    function clean(){ clearTimeout(t);
+      video.removeEventListener('loadeddata', ok); video.removeEventListener('playing', ok); }
+    video.addEventListener('loadeddata', ok); video.addEventListener('playing', ok);
+  });
+}
+function dropStream(){
+  const s=video.srcObject;
+  if(s){ try { s.getTracks().forEach(function(t){ t.stop(); }); } catch(e){} }
+  video.srcObject=null;
+}
+let starting=false;
 async function begin(){
+  // one start at a time. tapping twice used to run this twice over, and the
+  // second camera handed to the video element cancelled the first one's play(),
+  // which is the "play() request was interrupted by a new load request" error.
+  if(starting || state!=='idle') return;
+  starting=true;
+  const btn=document.getElementById('bStart');
+  if(btn) btn.disabled=true;
   ui.errMsg.hidden=true; ui.loadMsg.hidden=false;
   try {
     if(!actx) initAudio();
@@ -334,18 +362,32 @@ async function begin(){
     const tall = window.innerHeight > window.innerWidth;
     const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
     const s = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:vW},height:{ideal:vH},facingMode:'user'}, audio:false });
-    video.srcObject=s; await video.play();
+    dropStream();                 // never leave an older camera running
+    video.srcObject=s;
+    // an interrupted or auto-resumed play() is not a failure on its own; the
+    // only question that matters is whether frames arrive, which is next.
+    // play() never settles at all on a camera that opens but sends nothing,
+    // so it gets a bounded wait rather than an open-ended one.
+    try { await Promise.race([ video.play(),
+            new Promise(function(r){ setTimeout(r, 3000); }) ]); } catch(e){}
+    await waitForFrames(8000);
     if(!landmarker) await loadTracker();
     ui.loadMsg.hidden=true; ui.oStart.hidden=true; ui.oCal.hidden=false; showOrientNote();
     state='calibrate'; calSteady=0; keepAwake();
     requestAnimationFrame(frame);
   } catch(err){
+    dropStream();                 // a failed attempt must not hold the camera
     ui.loadMsg.hidden=true;
     let m='Something went wrong: '+(err&&err.message?err.message:err);
     if(err&&err.name==='NotAllowedError') m='Camera permission denied. Allow it in the address bar and reload.';
     if(err&&err.name==='NotFoundError') m='No camera found on this device.';
     if(err&&err.name==='NotReadableError') m='Another app is using the camera. Close it and try again.';
+    if(err&&err.name==='AbortError') m='The camera did not start. Tap once and give it a moment.';
     ui.errMsg.textContent=m; ui.errMsg.hidden=false;
+  } finally {
+    starting=false;
+    const btn2=document.getElementById('bStart');
+    if(btn2) btn2.disabled=false;
   }
 }
 const L={lsh:11,rsh:12,lel:13,rel:14,lwr:15,rwr:16,lhip:23,rhip:24,lkn:25,rkn:26,lank:27,rank:28};
