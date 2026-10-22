@@ -181,21 +181,22 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 12;          // bump on every deploy; shown on the start card
+const BUILD = 13;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
-const LANE_SEGS = 9;    // lane dashes get a slower period than the kerbs
+const LANE_SEGS = 12;   // lane dashes get a slower period than the kerbs
 // a tall screen needs a narrower road, or its edges fall off the sides where the motion matters most
 let roadWidth = 1200;
 const fieldOfView = 100, cameraHeight = 600, drawDistance = 150;
 const cameraDepth = 1/Math.tan((fieldOfView/2)*Math.PI/180);
 const playerZ = cameraHeight*cameraDepth;
-const maxSpeed = segmentLength*32;   // was *40; 20% slower, and the track is 20% shorter to match
-const accel = maxSpeed/11, coast = -maxSpeed/9, offRoadDecel = -maxSpeed/4;
+const maxSpeed = segmentLength*27;   // slower again; the track is shortened to match
+const accel = maxSpeed/11, coast = -maxSpeed/4.5, offRoadDecel = -maxSpeed/4;
 const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
-const FULL_CADENCE = 55;     // was 65: easier legs, and it puts the lead in reach
+const FULL_CADENCE = 130;   // a 1Hz march reads ~120, so this leaves a real gradient
+const CAD_WINDOW = 1800;     // ms of steps counted; shorter means stopping shows sooner
 /* Steps used to be measured against the lowest point the limb ever reached, with
    a fixed threshold. That works for a crisp march and dies the moment you settle
    into something smaller - which is exactly what happens when you start dancing
@@ -225,8 +226,8 @@ const CORNER_MIN    = 14;    // segments, below which it is just a kink
 const CORNER_PULL   = 1.7;   // how much harder a marked corner throws you wide
 const CORNER_GRIP   = 0.78;  // fraction of full steering lock a corner may demand
 const CORNER_CLEAN  = 0.82;  // fraction of the corner on-road to count as clean
-const CORNER_BOOST  = 4.0;   // seconds of push for getting one right
-const CORNER_OFF    = 0.26;  // speed you are cut to for running wide inside a corner
+const CORNER_BOOST  = 5.5;   // seconds of push for getting one right
+const CORNER_OFF    = 0.38;  // speed you are cut to for running wide inside a corner
 /* Steering. A wide dead band so bouncing and dancing do nothing, a gentle
    curve near the centre, and full lock only at a big, deliberate turn. Not
    more smoothing: that would add delay on top of the camera's. */
@@ -486,19 +487,19 @@ function buildTrack(){
   // fixed place on the road. The hills sum to zero, or the loop would not close
   // and there would be a step in the ground exactly under the gantry.
   addRoad(60,140,60, 0,  0);   // start/finish straight, long enough to see the line coming
-  addRoad(35, 55,35, 4, 20); addRoad(25, 35,25,-2,-16); addRoad(35, 70,35,-5,  0);
-  addRoad(25, 40,25, 3, 28); addRoad(40, 50,40, 0,-24); addRoad(35, 65,35,-3, 12);
-  addRoad(25, 35,25, 6,  0); addRoad(40, 55,40,-4,-20); addRoad(35, 50,35, 2, 16);
-  addRoad(50, 65,50, 0,  0); addRoad(35, 50,35,-6,  0); addRoad(25, 40,25, 5, 24);
-  addRoad(40, 70,40,-3,-28); addRoad(35, 55,35, 2,  0); addRoad(50, 80,50, 0, 16);
-  addRoad(25, 35,25,-7,  0); addRoad(40, 65,40, 4,-20); addRoad(35, 50,35,-2, 24);
-  addRoad(25, 40,25, 6,  0); addRoad(40, 55,40,-5,-16); addRoad(35, 70,35, 3,  0);
-  addRoad(50, 50,50, 0, 12); addRoad(25, 35,25,-4,-28); addRoad(40, 50,40, 2,  0);
+  addRoad(26, 40,26, 4, 20); addRoad(18, 26,18,-2,-16); addRoad(26, 52,26,-5,  0);
+  addRoad(18, 30,18, 3, 28); addRoad(30, 37,30, 0,-24); addRoad(26, 48,26,-3, 12);
+  addRoad(18, 26,18, 6,  0); addRoad(30, 40,30,-4,-20); addRoad(26, 37,26, 2, 16);
+  addRoad(37, 48,37, 0,  0); addRoad(26, 37,26,-6,  0); addRoad(18, 30,18, 5, 24);
+  addRoad(30, 52,30,-3,-28); addRoad(26, 40,26, 2,  0); addRoad(37, 60,37, 0, 16);
+  addRoad(18, 26,18,-7,  0); addRoad(30, 48,30, 4,-20); addRoad(26, 37,26,-2, 24);
+  addRoad(18, 30,18, 6,  0); addRoad(30, 40,30,-5,-16); addRoad(26, 52,26, 3,  0);
+  addRoad(37, 37,37, 0, 12); addRoad(18, 26,18,-4,-28); addRoad(30, 37,30, 2,  0);
   // THE HAIRPIN. A long flat approach so it is visible from a long way out,
   // then the sharpest corner on the circuit, then a short straight to recover.
   addRoad(60,130,60, 0,  0);
   addRoad(20, 70,20,-11, 0);
-  addRoad(40, 60,40, 0,  0);
+  addRoad(30, 45,30, 0,  0);
   addRoad(60,150,60, 0,  0);   // the run to the line
   trackLength = segments.length*segmentLength;
   // distance advances at speed*dt/125 and position at speed*dt, so one loop of
@@ -673,15 +674,29 @@ function limbLift(key, p, dt){
 function stepPair(tag, lp, rp, now, dt){
   if(!lp && !rp) return false;
   const sides = [['L',lp],['R',rp]];
-  for(let i=0;i<sides.length;i++){
-    const side = sides[i][0], p = sides[i][1];
-    if(!p) continue;
-    const lift = limbLift(tag+side, p, dt);
-    const k = tag+side;
-    if(lift == null){ limbUp[k]=false; continue; }
-    if(tag==='kn') lastLift = lift;
-    if(!limbUp[k] && lift>STEP_UP){ limbUp[k]=true; stepTimes.push(now); }
-    else if(limbUp[k] && lift<STEP_DOWN) limbUp[k]=false;
+  const lift = {};
+  // read both legs first
+  for(const [side,p] of sides){
+    if(!p){ lift[side]=null; continue; }
+    lift[side] = limbLift(tag+side, p, dt);
+    if(tag==='kn' && lift[side]!=null) lastLift = lift[side];
+  }
+  // release anything that has come down BEFORE testing what has gone up. In an
+  // even march the two legs cross at the same instant, and doing this in one
+  // pass let the falling leg block the rising one - which halved a real march.
+  for(const [side] of sides){
+    const k=tag+side;
+    if(lift[side]==null || lift[side] < STEP_DOWN) limbUp[k]=false;
+  }
+  // a rise only counts while the other leg is down: that is what makes it a
+  // step rather than a bounce on both feet
+  for(const [side,p] of sides){
+    if(!p || lift[side]==null) continue;
+    const k=tag+side, other=tag+(side==='L'?'R':'L');
+    if(!limbUp[k] && lift[side] > STEP_UP){
+      limbUp[k]=true;
+      if(!limbUp[other]) stepTimes.push(now);
+    }
   }
   return true;
 }
@@ -718,9 +733,10 @@ function readPose(dt, now){
     else if(stepPair('ar', lw, rw, now, dt)) driveSrc='arms';
     else { driveSrc='none'; lastLift=null; }
   }
-  while(stepTimes.length && now-stepTimes[0] > 3000) stepTimes.shift();
-  const rawCad = stepTimes.length * 20;
-  cadence += (rawCad - cadence) * Math.min(1, dt*2.5);
+  while(stepTimes.length && now-stepTimes[0] > CAD_WINDOW) stepTimes.shift();
+  const rawCad = stepTimes.length * (60000/CAD_WINDOW);
+  // falls faster than it rises: easing off should be felt, building should not be free
+  cadence += (rawCad - cadence) * Math.min(1, dt*(rawCad < cadence ? 5.0 : 2.5));
 
   let push=false, brake=false;
   if(lw&&rw&&base){
@@ -955,7 +971,7 @@ function update(dt, reading, now){
   // otherwise ploughing through every bend is quicker than braking for it
   const wideLimit = inCorner ? maxSpeed*CORNER_OFF : offRoadLimit;
   if((playerX<-1||playerX>1) && speed>wideLimit){
-    speed = Math.max(wideLimit, speed + offRoadDecel*(inCorner?2.2:1)*dt);
+    speed = Math.max(wideLimit, speed + offRoadDecel*(inCorner?1.6:1)*dt);
   }
   playerX = Math.max(-2,Math.min(2,playerX));
 
