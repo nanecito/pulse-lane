@@ -161,14 +161,6 @@ button[disabled]{opacity:.5;cursor:default}
   </div>
 </div>
 
-<div class="overlay" id="oWarm" hidden>
-  <div class="card">
-    <h2>Warm up</h2>
-    <p>Twenty seconds. March on the spot and roll your shoulders back a few times. This is the part that stops the first hard effort landing on a cold shoulder.</p>
-    <div class="stat" style="margin-bottom:16px"><b id="warmCount">20</b><span id="warmHint">Start marching</span></div>
-    <button id="bSkipWarm" class="ghost">Skip</button>
-  </div>
-</div>
 
 <div class="overlay" id="oEnd" hidden>
   <div class="card">
@@ -189,7 +181,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 10;          // bump on every deploy; shown on the start card
+const BUILD = 11;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -203,7 +195,18 @@ const maxSpeed = segmentLength*32;   // was *40; 20% slower, and the track is 20
 const accel = maxSpeed/11, coast = -maxSpeed/9, offRoadDecel = -maxSpeed/4;
 const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
-const FULL_CADENCE = 65;
+const FULL_CADENCE = 55;     // was 65: easier legs, and it puts the lead in reach
+/* Steps used to be measured against the lowest point the limb ever reached, with
+   a fixed threshold. That works for a crisp march and dies the moment you settle
+   into something smaller - which is exactly what happens when you start dancing
+   to the beat, and why it worked for a minute and then stopped. Each limb is now
+   judged against its OWN recent range, so a big march and a small dance both
+   count, and only the rhythm sets your cadence. */
+const STEP_MIN_RANGE = 0.045;  // of a torso: below this you are not moving, you are noise
+const STEP_UP = 0.72, STEP_DOWN = 0.28;
+const STEP_RELAX = 0.35;       // how fast the range forgets, as a fraction of itself
+const STEP_FLOOR = 0.010;      // with a small absolute floor, in torsos
+const STEP_SMOOTH = 0.08;      // seconds of low-pass before detection
 const PREVIEW = 3.0, WINDOW_START = 6.0, WINDOW_FLOOR = 4.2;
 let LAP_METRES = 6200;       // set from the track itself, so one loop IS one lap
 const FINISH_SEGS = 3;       // how much road the painted line covers
@@ -219,12 +222,14 @@ const SQUAT_DEPTH = 0.17;
    the lean, and the grade comes out the far side. */
 const CORNER_CURVE  = 3.5;   // |curve| that counts as a real corner
 const CORNER_MIN    = 14;    // segments, below which it is just a kink
-const CORNER_PULL   = 2.1;   // how much harder a marked corner throws you wide
-const CORNER_VSAFE  = 0.055; // safe speed falls this much per unit of curve
+const CORNER_PULL   = 1.7;   // how much harder a marked corner throws you wide
+const CORNER_GRIP   = 0.78;  // fraction of full steering lock a corner may demand
 const CORNER_CLEAN  = 0.82;  // fraction of the corner on-road to count as clean
-const CORNER_BOOST  = 2.6;   // seconds of push for getting one right
+const CORNER_BOOST  = 4.0;   // seconds of push for getting one right
+const CORNER_OFF    = 0.26;  // speed you are cut to for running wide inside a corner
 const BRAKE_LIFT    = 0.50;  // hands this far above the wheel, in torsos, = brake
-const BRAKE_RATE    = 3.2;   // how hard braking bleeds speed (maxSpeed/this per sec)
+const BRAKE_RATE    = 5.0;   // how hard braking bleeds speed (maxSpeed/this per sec)
+const BRAKE_EASE    = 0.55;  // seconds for the brake to come on, and to let go
 const SHADOW_GAP    = 30;    // metres it tries to hold behind you
 const SHADOW_DROP   = 0.68;  // it comes past below this fraction of YOUR normal pace
 const SHADOW_FLOOR  = 0.28;  // and always below this, however gentle your normal pace
@@ -269,16 +274,17 @@ const ui = {
   callSub:document.getElementById('callSub'), callBar:document.getElementById('callBar'),
   callDepth:document.getElementById('callDepth'), depthWrap:document.getElementById('depthWrap'),
   oStart:document.getElementById('oStart'), oCal:document.getElementById('oCal'),
-  oWarm:document.getElementById('oWarm'), oEnd:document.getElementById('oEnd'),
+  oEnd:document.getElementById('oEnd'),
   loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
   calHint:document.getElementById('calHint'),
-  bGo:document.getElementById('bGo'), warmCount:document.getElementById('warmCount'), warmHint:document.getElementById('warmHint'),
+  bGo:document.getElementById('bGo'),
   streakChip:document.getElementById('streakChip')
 };
 
 /* ---- audio: steady beat, layers follow speed ---- */
 const AC = window.AudioContext||window.webkitAudioContext;
 let actx=null, master=null, noiseBuf=null, engOsc=null, engGain=null, engFilt=null;
+let rivOsc=null, rivOsc2=null, rivGain=null, rivFilt=null;
 let bpm=100, nextTick=0, tickIndex=0, schedTimer=null, layer=0;
 function initAudio(){
   actx = new AC();
@@ -291,6 +297,15 @@ function initAudio(){
   engFilt = actx.createBiquadFilter(); engFilt.type='lowpass'; engFilt.frequency.value=900; engFilt.Q.value=6;
   engGain = actx.createGain(); engGain.gain.value=0;
   engOsc.connect(engFilt); engFilt.connect(engGain); engGain.connect(master); engOsc.start();
+  // the car behind you: lower and rougher than your own, two detuned saws so it
+  // beats slightly and sits apart from your engine instead of blending into it
+  rivOsc = actx.createOscillator(); rivOsc.type='sawtooth'; rivOsc.frequency.value=40;
+  rivOsc2= actx.createOscillator(); rivOsc2.type='sawtooth'; rivOsc2.frequency.value=40.7;
+  rivFilt= actx.createBiquadFilter(); rivFilt.type='lowpass'; rivFilt.frequency.value=380; rivFilt.Q.value=4;
+  rivGain= actx.createGain(); rivGain.gain.value=0;
+  rivOsc.connect(rivFilt); rivOsc2.connect(rivFilt);
+  rivFilt.connect(rivGain); rivGain.connect(master);
+  rivOsc.start(); rivOsc2.start();
 }
 function nz(){ const s=actx.createBufferSource(); s.buffer=noiseBuf; return s; }
 function kick(t){
@@ -473,6 +488,11 @@ function buildTrack(){
   addRoad(25, 35,25,-7,  0); addRoad(40, 65,40, 4,-20); addRoad(35, 50,35,-2, 24);
   addRoad(25, 40,25, 6,  0); addRoad(40, 55,40,-5,-16); addRoad(35, 70,35, 3,  0);
   addRoad(50, 50,50, 0, 12); addRoad(25, 35,25,-4,-28); addRoad(40, 50,40, 2,  0);
+  // THE HAIRPIN. A long flat approach so it is visible from a long way out,
+  // then the sharpest corner on the circuit, then a short straight to recover.
+  addRoad(60,130,60, 0,  0);
+  addRoad(20, 70,20,-11, 0);
+  addRoad(40, 60,40, 0,  0);
   addRoad(60,150,60, 0,  0);   // the run to the line
   trackLength = segments.length*segmentLength;
   // distance advances at speed*dt/125 and position at speed*dt, so one loop of
@@ -496,12 +516,21 @@ function buildCorners(){
         peak=Math.max(peak, Math.abs(segments[j].curve)); j++;
       }
       if(j-i >= CORNER_MIN){
+        // Derived, not guessed. Holding a line needs steer >= pct*curve*centrifugal*pull,
+        // so the fastest a corner can be held at all is pct = 1/(curve*centrifugal*pull).
+        // CORNER_GRIP leaves room below full lock so it is a corner, not a tightrope.
+        const hold = CORNER_GRIP/(peak*centrifugal*CORNER_PULL);
         const c={ a:i, b:j, dir:dir, peak:peak,
-                  vSafe: maxSpeed*Math.max(0.45, 1 - CORNER_VSAFE*peak) };
+                  vSafe: maxSpeed*Math.max(0.18, Math.min(0.95, hold)) };
         corners.push(c);
         for(let k=i;k<j;k++){ segments[k].corner=c; segments[k].cPhase='in'; }
-        // the braking zone: painted road ahead of the turn-in
-        for(let k=Math.max(0,i-30);k<i;k++){ segments[k].corner=c; segments[k].cPhase='brake'; }
+        // the braking zone, longer the sharper the corner, so the hairpin
+        // announces itself far enough out to do something about it
+        const zone = Math.round(30 + 11*Math.max(0, peak-4));
+        for(let k=Math.max(0,i-zone);k<i;k++){
+          if(segments[k].corner) break;          // never eat the corner before it
+          segments[k].corner=c; segments[k].cPhase='brake';
+        }
       }
       i=j;
     } else i++;
@@ -576,14 +605,13 @@ let position=0, speed=0, playerX=0, distance=0, movingTime=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let effortAvg=0, effortBase=0, chaserArmed=true;
 let curCorner=null, cFrames=0, cOff=0, cOver=0, cLean=0, cornerMsg=0, lastCorner=null;
-let braking=false;
+let braking=false, brakeRamp=0;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
 let rest={}, lastLift=null;
 let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START, callsHit=0;
-let warmUntil=0, warmSteps=0;
 const step=1/60;
 
 function today(){ return new Date().toISOString().slice(0,10); }
@@ -614,29 +642,39 @@ function showStreak(){
 }
 
 /* ---- one stepper, used for whichever limb pair the camera can actually see ---- */
+// returns where the limb sits inside its own recent range: 0 at its lowest,
+// 1 at its highest, or null when it is not moving enough to read
 function limbLift(key, p, dt){
   if(!p) return null;
-  let r = rest[key];
-  if(r == null || !isFinite(r)){ rest[key] = p.y; return 0; }
-  r -= 0.05 * base.torso * dt;   // slow upward drift so a stale baseline self-corrects
-  if(p.y > r) r = p.y;           // the standing position is the lowest the limb ever sits
-  rest[key] = r;
-  return (r - p.y)/base.torso;
+  let e = rest[key];
+  let y = p.y;
+  // a touch of low-pass first. Cadence is a 3s average anyway, so a few tens of
+  // a millisecond here costs nothing and stops noise chattering over the thresholds.
+  if(e && e.sm != null) y = e.sm + (y - e.sm)*Math.min(1, dt/STEP_SMOOTH);
+  if(!e || !isFinite(e.lo)){ rest[key] = {lo:y, hi:y, sm:y}; return null; }
+  e.sm = y;
+  const was = e.lo - e.hi;
+  // the range relaxes in proportion to how wide it is: a fixed rate would
+  // collapse a small movement as fast as the movement itself
+  const relax = Math.max(STEP_FLOOR*base.torso, was*STEP_RELAX) * dt;
+  e.lo = Math.max(y, e.lo - relax);
+  e.hi = Math.min(y, e.hi + relax);
+  const range = e.lo - e.hi;
+  if(range < STEP_MIN_RANGE*base.torso) return null;
+  return (e.lo - y)/range;
 }
-function stepPair(tag, lp, rp, baseKey, upT, dnT, now, dt){
+function stepPair(tag, lp, rp, now, dt){
   if(!lp && !rp) return false;
   const sides = [['L',lp],['R',rp]];
   for(let i=0;i<sides.length;i++){
     const side = sides[i][0], p = sides[i][1];
     if(!p) continue;
-    const lift = (baseKey==='wristY' && base[baseKey]!=null)
-      ? (base[baseKey]-p.y)/base.torso
-      : limbLift(tag+side, p, dt);
-    if(lift == null) continue;
-    if(tag==='kn') lastLift = lift;
+    const lift = limbLift(tag+side, p, dt);
     const k = tag+side;
-    if(!limbUp[k] && lift>upT){ limbUp[k]=true; stepTimes.push(now); }
-    else if(limbUp[k] && lift<dnT) limbUp[k]=false;
+    if(lift == null){ limbUp[k]=false; continue; }
+    if(tag==='kn') lastLift = lift;
+    if(!limbUp[k] && lift>STEP_UP){ limbUp[k]=true; stepTimes.push(now); }
+    else if(limbUp[k] && lift<STEP_DOWN) limbUp[k]=false;
   }
   return true;
 }
@@ -649,8 +687,15 @@ function readPose(dt, now){
 
   if(lw&&rw&&base){
     const ang=Math.atan2(rw.y-lw.y, rw.x-lw.x) - base.ang;
-    let s = Math.max(-1,Math.min(1, ang/0.55));
-    if(Math.abs(s) < 0.09) s = 0;
+    // full lock needs a bigger turn than it did, a wide dead band in the middle
+    // so bouncing does nothing, and a curve that stays gentle near centre
+    let s = Math.max(-1, Math.min(1, ang/0.80));
+    const dz = 0.18;
+    if(Math.abs(s) < dz) s = 0;
+    else {
+      const n = (Math.abs(s)-dz)/(1-dz);
+      s = (s<0?-1:1) * Math.pow(n, 1.4);
+    }
     steerRaw = s;
   } else { steerRaw *= 0.85; }
   steer = steer*0.72 + steerRaw*0.28;
@@ -665,9 +710,9 @@ function readPose(dt, now){
   if(base){
     const lk=pt(L.lkn,0.12), rk=pt(L.rkn,0.12);
     const la=pt(L.lank,0.12), ra=pt(L.rank,0.12);
-    if(stepPair('kn', lk, rk, 'kneeY', 0.10, 0.04, now, dt)) driveSrc='knees';
-    else if(stepPair('an', la, ra, 'ankleY', 0.07, 0.03, now, dt)) driveSrc='ankles';
-    else if(stepPair('ar', lw, rw, 'wristY', 0.16, 0.06, now, dt)) driveSrc='arms';
+    if(stepPair('kn', lk, rk, now, dt)) driveSrc='knees';
+    else if(stepPair('an', la, ra, now, dt)) driveSrc='ankles';
+    else if(stepPair('ar', lw, rw, now, dt)) driveSrc='arms';
     else { driveSrc='none'; lastLift=null; }
   }
   while(stepTimes.length && now-stepTimes[0] > 3000) stepTimes.shift();
@@ -798,7 +843,7 @@ function letSleep(){
   try { if(wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){ wakeLock = null; }
 }
 document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState === 'visible' && (state === 'race' || state === 'warm' || state === 'calibrate')) keepAwake();
+  if(document.visibilityState === 'visible' && (state === 'race' || state === 'calibrate')) keepAwake();
 });
 
 function showCall(word,sub,cls){
@@ -812,7 +857,7 @@ function startRace(fresh){
   LAPS = chosenLaps;
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
-  curCorner=null; cFrames=0; cOff=0; cOver=0; cLean=0; cornerMsg=0; lastCorner=null; braking=false;
+  curCorner=null; cFrames=0; cOff=0; cOver=0; cLean=0; cornerMsg=0; lastCorner=null; braking=false; brakeRamp=0;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
@@ -821,12 +866,13 @@ function startRace(fresh){
   schedTimer=setInterval(scheduler,25);
   engGain.gain.value=0.04;
   keepAwake();
-  ui.oCal.hidden=true; ui.oEnd.hidden=true; ui.oWarm.hidden=true; ui.hud.hidden=false;
+  ui.oCal.hidden=true; ui.oEnd.hidden=true; ui.hud.hidden=false;
 }
 function endRace(){
   state='over';
   if(schedTimer){ clearInterval(schedTimer); schedTimer=null; }
   if(engGain) engGain.gain.value=0;
+  if(rivGain) rivGain.gain.value=0;
   hideCall();
   const finished = finishTime > 0;
   const prev = readBestTime();
@@ -897,13 +943,30 @@ function update(dt, reading, now){
   } else {
     speed += Math.max(gap, coast*dt);
   }
-  if(braking) speed += (-maxSpeed/BRAKE_RATE)*dt;
+  // eases on and off, so it is a long press of the brake rather than a wall
+  brakeRamp += ((braking?1:0) - brakeRamp) * Math.min(1, dt/BRAKE_EASE);
+  if(brakeRamp > 0.01) speed += (-maxSpeed/BRAKE_RATE)*brakeRamp*dt;
   speed = Math.max(0, Math.min(maxSpeed*1.35, speed));
-  if((playerX<-1||playerX>1) && speed>offRoadLimit) speed = Math.max(offRoadLimit, speed+offRoadDecel*dt);
+  // going off in a marked corner costs far more than running wide on a straight:
+  // otherwise ploughing through every bend is quicker than braking for it
+  const wideLimit = inCorner ? maxSpeed*CORNER_OFF : offRoadLimit;
+  if((playerX<-1||playerX>1) && speed>wideLimit){
+    speed = Math.max(wideLimit, speed + offRoadDecel*(inCorner?2.2:1)*dt);
+  }
   playerX = Math.max(-2,Math.min(2,playerX));
 
   distance += speed*dt/125;
   layer = pct;
+  if(rivGain){
+    // whoever is nearest, ahead or behind, gets louder as they close
+    let near=1e9;
+    for(const c of cars){ const g=Math.abs(c.dist-distance); if(g<near) near=g; }
+    const close = Math.max(0, 1 - near/55);       // full volume inside a few metres
+    rivGain.gain.value = 0.085*close*close;
+    const f = 34 + 26*pct;
+    rivOsc.frequency.value = f; rivOsc2.frequency.value = f*1.018;
+    rivFilt.frequency.value = 300 + 500*pct;
+  }
   if(engGain){
     engGain.gain.value = 0.03 + 0.07*pct;
     engOsc.frequency.value = 58 + 150*pct + (boost>0?40:0);
@@ -1068,7 +1131,7 @@ function update(dt, reading, now){
       if(chGap > CHASER_WARN*1.8) chaserArmed=true;
     } else { ui.chaser.hidden=true; chaserArmed=true; }
   }
-  if(braking){ ui.foot.textContent='BRAKING'; ui.foot.className='foot warn'; }
+  if(brakeRamp>0.15){ ui.foot.textContent='BRAKING'; ui.foot.className='foot warn'; }
   else {
   ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb);
   ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn'; }
@@ -1729,7 +1792,7 @@ function beginRaceFrom(r){
   base = makeBase(r);
   limbUp={}; rest={}; lastLift=null; resetGrip(); resetFit();
   try { blip(680,0.18,0.3); } catch(e){}
-  goWarm();
+  startRace(true);
 }
 function calibrate(r,dt){
   const F = videoFit();
@@ -1850,16 +1913,6 @@ function frame(now){
 
   if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); return; }
 
-  if(state==='warm'){
-    drawMirror(0.4);
-    const left = Math.max(0, (warmUntil - now)/1000);
-    ui.warmCount.textContent = Math.ceil(left);
-    ui.warmHint.textContent = cadence > 40 ? 'Good — keep going'
-      : (driveSrc==='arms' ? 'Pump your arms' : 'March on the spot');
-    if(left<=0){ ui.oWarm.hidden=true; startRace(true); }
-    return;
-  }
-
   if(state==='race'){
     acc+=dt;
     while(acc>step){ update(step,r,now); acc-=step; if(state!=='race') break; }
@@ -1879,15 +1932,10 @@ document.querySelectorAll('.mode').forEach(function(m){
     LAPS = chosenLaps;
   });
 });
-function goWarm(){
-  ui.oCal.hidden=true; ui.oEnd.hidden=true; ui.oWarm.hidden=false;
-  state='warm'; warmUntil = performance.now() + 20000; stepTimes=[];
-}
 document.getElementById('bStart').addEventListener('click', begin);
 document.getElementById('bGo').addEventListener('click', function(){
   beginRaceFrom(readPose(0, performance.now()));
 });
-document.getElementById('bSkipWarm').addEventListener('click', function(){ ui.oWarm.hidden=true; startRace(true); });
 document.getElementById('bMore').addEventListener('click', function(){ stopFlag(); startRace(false); });
 document.getElementById('bAgain').addEventListener('click', function(){
   stopFlag();
