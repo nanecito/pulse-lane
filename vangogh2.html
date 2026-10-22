@@ -74,6 +74,7 @@ canvas{display:block;width:100%;height:100%}
 .mode.sel{border-color:var(--lime);background:rgba(198,255,61,.12)}
 .mode b{display:block;font-size:clamp(19px,3vw,25px);font-weight:700}
 .mode span{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+#endFlag{display:block;width:100%;max-width:280px;height:auto;margin:0 auto 10px}
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 18px}
 .stat{background:rgba(242,246,255,.07);border-radius:12px;padding:13px}
 .stat b{display:block;font-size:clamp(22px,4vw,30px);font-weight:700;font-variant-numeric:tabular-nums}
@@ -102,7 +103,7 @@ button[disabled]{opacity:.5;cursor:default}
       <div class="big" id="hDist">0</div><div class="lbl">metres</div>
       <div class="big" id="hPos" style="color:var(--amber)">P5</div><div class="lbl">position</div>
       <div class="big" id="hLap">1</div><div class="lbl">lap</div>
-      <div class="big" id="hClock">3:00</div><div class="lbl">left</div>
+      <div class="big" id="hClock">0:00</div><div class="lbl">time</div>
     </div>
   </div>
   <div class="bottom">
@@ -132,9 +133,9 @@ button[disabled]{opacity:.5;cursor:default}
       <div class="mv"><b>Push</b><span>Both palms forward, controlled. Not a fast punch.</span></div>
     </div>
     <div class="modes">
-      <div class="mode sel" data-min="3"><b>3</b><span>quick</span></div>
-      <div class="mode" data-min="8"><b>8</b><span>workout</span></div>
-      <div class="mode" data-min="15"><b>15</b><span>endurance</span></div>
+      <div class="mode sel" data-laps="1"><b>1</b><span>lap</span></div>
+      <div class="mode" data-laps="2"><b>2</b><span>laps</span></div>
+      <div class="mode" data-laps="3"><b>3</b><span>laps</span></div>
     </div>
     <button id="bStart">Turn on camera</button>
     <div class="load" id="loadMsg" hidden>Loading the body tracker, a few seconds&hellip;</div>
@@ -165,11 +166,12 @@ button[disabled]{opacity:.5;cursor:default}
 
 <div class="overlay" id="oEnd" hidden>
   <div class="card">
+    <canvas id="endFlag" width="560" height="340"></canvas>
     <h2 id="endTitle">Chequered flag</h2>
     <p id="endNote"></p>
     <div class="stats">
-      <div class="stat"><b id="eDist">0</b><span>metres</span></div>
-      <div class="stat"><b id="eBest">0</b><span>best run</span></div>
+      <div class="stat"><b id="eDist">--</b><span>your time</span></div>
+      <div class="stat"><b id="eBest">--</b><span>best time</span></div>
       <div class="stat"><b id="ePass">P5</b><span>finish</span></div>
       <div class="stat"><b id="eMove">0</b><span>best lap</span></div>
     </div>
@@ -181,8 +183,9 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 5;          // bump on every deploy; shown on the start card
-let ROUND = 180;
+const BUILD = 6;          // bump on every deploy; shown on the start card
+let LAPS = 1;                    // the race is a number of laps, not a clock
+const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
 // a tall screen needs a narrower road, or its edges fall off the sides where the motion matters most
 let roadWidth = 1200;
@@ -510,6 +513,12 @@ function today(){ return new Date().toISOString().slice(0,10); }
 function readLS(k,d){ try{ const v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
 function writeLS(k,v){ try{ localStorage.setItem(k,String(v)); }catch(e){} }
 function readBest(){ return parseInt(readLS('vgBest','0'),10)||0; }
+// a fixed-distance race is scored by the clock, and each lap count keeps its own
+function bestKey(){ return 'vgTime'+LAPS; }
+function readBestTime(){ const v=parseFloat(readLS(bestKey(),'0')); return (v>0)?v:0; }
+function fmtTime(s){ if(!(s>0)) return '--';
+  return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')+'.'+String(Math.floor((s*10)%10)); }
+let finishTime = 0;
 function streakInfo(){
   const last = readLS('vgLast',''), n = parseInt(readLS('vgStreak','0'),10)||0;
   return { last, n };
@@ -621,6 +630,79 @@ function pairBase(a,b){
 function kneeBase(){ return pairBase(L.lkn,L.rkn); }
 function ankleBase(){ return pairBase(L.lank,L.rank); }
 
+/* ---- the chequered flag, after Klee ----
+   A finish flag is already a grid of squares, which is the shape Klee spent
+   years on, so the chequerboard keeps its light/dark alternation (you have to
+   read it as a finish flag at a glance) and the colours vary inside each of
+   those two families the way his colour tables do. Nothing here copies a
+   painting; it is his method applied to a flag. */
+const KLEE_LIGHT = ['#F2D98D','#EBC467','#F3E6C4','#E3CE9B','#EFD071','#E8DDB5'];
+const KLEE_DARK  = ['#2E4A7D','#8C3B2E','#1F3A5F','#A8512A','#3B2E5A','#6B2F3A','#244C45'];
+let flagRAF = null, flagT0 = 0;
+// scaling the colour keeps Klee's hue; a dark wash over the top just makes mud
+function shadeHex(hex, k){
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.round(((n>>16)&255) * k));
+  const g = Math.min(255, Math.round(((n>>8)&255) * k));
+  const b = Math.min(255, Math.round((n&255) * k));
+  return 'rgb('+r+','+g+','+b+')';
+}
+function flagPick(list, cx, cy){
+  // a fixed, unchanging scatter: the same cell keeps its colour as it waves
+  const h = Math.abs(Math.sin((cx*12.9898 + cy*78.233) * 43758.5453) % 1);
+  return list[Math.floor(h*list.length) % list.length];
+}
+function drawFlag(g, W, H, t){
+  g.clearRect(0,0,W,H);
+  const NX=10, NY=7;
+  const poleW = Math.max(3, W*0.016);
+  const fx = poleW*2.2, fy = H*0.10, fw = W-fx-W*0.04, fh = H*0.74;
+  // a point on the cloth: it hangs from the pole, so the wave grows across it
+  const vert = (u,v) => {
+    const grow = u*u;
+    const ph = u*7.2 - t*3.1;
+    const z  = Math.sin(ph)*grow;
+    const z2 = Math.sin(ph*0.55 + v*2.1)*grow*0.5;
+    return {
+      x: fx + u*fw - grow*fw*0.05,
+      y: fy + v*fh + (z+z2)*fh*0.11 + Math.sin(ph*0.5)*grow*fh*0.05,
+      // the shade comes from how steeply the cloth is turning away
+      sh: 0.86 + 0.20*Math.cos(ph)
+    };
+  };
+  for(let i=0;i<NX;i++){
+    for(let j=0;j<NY;j++){
+      const u0=i/NX, u1=(i+1)/NX, v0=j/NY, v1=(j+1)/NY;
+      const a=vert(u0,v0), b=vert(u1,v0), c=vert(u1,v1), d=vert(u0,v1);
+      const dark = ((i+j)%2===0);
+      const col = flagPick(dark?KLEE_DARK:KLEE_LIGHT, i, j);
+      const sh = (a.sh+b.sh+c.sh+d.sh)/4;
+      g.save();
+      g.fillStyle = shadeHex(col, sh);
+      g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.lineTo(c.x,c.y); g.lineTo(d.x,d.y); g.closePath();
+      g.fill();
+      g.strokeStyle='rgba(20,22,30,0.50)'; g.lineWidth=Math.max(1,W*0.0035); g.stroke();
+      g.restore();
+    }
+  }
+  // the pole
+  g.fillStyle='rgba(246,235,203,0.92)';
+  g.fillRect(poleW*0.7, fy-H*0.06, poleW, fh+H*0.14);
+  g.fillStyle='rgba(242,200,75,0.95)';
+  g.beginPath(); g.arc(poleW*1.2, fy-H*0.07, poleW*1.3, 0, Math.PI*2); g.fill();
+}
+function startFlag(){
+  const cv2=document.getElementById('endFlag'); if(!cv2) return;
+  const g=cv2.getContext('2d'); if(!g) return;
+  stopFlag(); flagT0=performance.now();
+  const step=function(now){
+    drawFlag(g, cv2.width, cv2.height, (now-flagT0)/1000);
+    flagRAF=requestAnimationFrame(step);
+  };
+  flagRAF=requestAnimationFrame(step);
+}
+function stopFlag(){ if(flagRAF){ cancelAnimationFrame(flagRAF); flagRAF=null; } }
+
 /* ---- keep the screen awake while racing ---- */
 let wakeLock = null;
 async function keepAwake(){
@@ -646,7 +728,8 @@ function hideCall(){ ui.call.className='call'; }
 
 function startRace(fresh){
   if(fresh){ buildTrack(); buildProps(); distance=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; bestLap=0; }
-  buildCars(); lap=0; lapStart=0; squatDepth=0; ui.depthWrap.hidden=true;
+  LAPS = chosenLaps;
+  buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
@@ -662,28 +745,38 @@ function endRace(){
   if(schedTimer){ clearInterval(schedTimer); schedTimer=null; }
   if(engGain) engGain.gain.value=0;
   hideCall();
-  const d=Math.round(distance);
-  let best=readBest(); const rec=d>best;
-  if(rec){ best=d; writeLS('vgBest',best); }
+  const finished = finishTime > 0;
+  const prev = readBestTime();
+  const rec = finished && (prev===0 || finishTime < prev);
+  if(rec) writeLS(bestKey(), finishTime.toFixed(2));
   const n = bumpStreak();
-  document.getElementById('endTitle').textContent = rec?'Fastest run yet':'Chequered flag';
   const fin = rankNow();
+  document.getElementById('endTitle').textContent =
+    !finished ? 'Time up' : (rec ? 'Fastest yet' : 'Chequered flag');
   const who = cars.slice().sort(function(a,b){ return b.dist-a.dist; })[0];
-  document.getElementById('endNote').textContent = (fin===1)
-    ? 'You took the win. ' + (movingTime/ROUND > 0.7 ? 'And you kept moving for most of it.' : '') + ' Day ' + n + ' in a row.'
-    : who.name + ' took it. You finished P' + fin + '. Day ' + n + ' in a row.';
-  document.getElementById('eDist').textContent=d;
-  document.getElementById('eBest').textContent=best;
+  const lapWord = LAPS===1 ? 'the lap' : LAPS+' laps';
+  document.getElementById('endNote').textContent = !finished
+    ? 'You ran out of time before the line. Day ' + n + ' in a row.'
+    : ((fin===1)
+      ? 'You took the win over ' + lapWord + '. Day ' + n + ' in a row.'
+      : who.name + ' took it. You finished P' + fin + ' over ' + lapWord + '. Day ' + n + ' in a row.');
+  document.getElementById('eDist').textContent = finished ? fmtTime(finishTime) : '--';
+  document.getElementById('eBest').textContent = fmtTime(rec ? finishTime : prev);
   document.getElementById('ePass').textContent='P'+fin;
-  document.getElementById('eMove').textContent = bestLap>0 ? bestLap.toFixed(1)+'s' : '--';
+  const moveEl=document.getElementById('eMove');
+  const moveLbl=moveEl.nextElementSibling;
+  if(LAPS===1){ moveEl.textContent = n; if(moveLbl) moveLbl.textContent='day streak'; }
+  else { moveEl.textContent = bestLap>0 ? bestLap.toFixed(1)+'s' : '--';
+         if(moveLbl) moveLbl.textContent='best lap'; }
   ui.hud.hidden=true; ui.oEnd.hidden=false;
+  startFlag();
   letSleep();
   blip(300,0.5,0.28,'sine');
 }
 
 function update(dt, reading, now){
   const elapsed = performance.now()/1000 - startTime;
-  const left = Math.max(0, ROUND-elapsed);
+  const left = Math.max(0, HARD_CAP-elapsed);
 
   const pSeg = findSeg(position+playerZ);
   const pct = speed/maxSpeed;
@@ -739,6 +832,7 @@ function update(dt, reading, now){
     const lt = elapsed - lapStart;
     if(bestLap===0 || lt<bestLap) bestLap = lt;
     lap = lapsDone; lapStart = elapsed;
+    if(lap >= LAPS){ finishTime = elapsed; endRace(); return; }   // across the line
     showCall('LAP '+lap, 'P'+rankNow()+'  -  '+lt.toFixed(1)+'s', 'good');
     callTimer = 2.2;
     blip(760,0.3,0.3);
@@ -795,7 +889,7 @@ function update(dt, reading, now){
   ui.dist.textContent = Math.round(distance);
   ui.pos.textContent = 'P'+rankNow();
   ui.lap.textContent = (lap+1);
-  ui.clock.textContent = Math.floor(left/60)+':'+String(Math.floor(left%60)).padStart(2,'0');
+  ui.clock.textContent = Math.floor(elapsed/60)+':'+String(Math.floor(elapsed%60)).padStart(2,'0');
   ui.cad.style.width = Math.round(drive*100)+'%';
   const legs = (driveSrc==='knees' || driveSrc==='ankles');
   const verb = legs ? 'MARCH TO BUILD SPEED'
@@ -805,7 +899,7 @@ function update(dt, reading, now){
   ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn';
   ui.diag.textContent = diagText();
 
-  if(left<=0) endRace();
+  if(left<=0) endRace();     // the backstop; the finish line is what normally ends it
 }
 
 /* ---- render ---- */
@@ -1507,13 +1601,13 @@ function frame(now){
 }
 
 /* ---- wiring ---- */
-let chosenMin = 3;
+let chosenLaps = 1;
 document.querySelectorAll('.mode').forEach(function(m){
   m.addEventListener('click', function(){
     document.querySelectorAll('.mode').forEach(function(x){ x.classList.remove('sel'); });
     m.classList.add('sel');
-    chosenMin = parseInt(m.getAttribute('data-min'),10);
-    ROUND = chosenMin*60;
+    chosenLaps = parseInt(m.getAttribute('data-laps'),10);
+    LAPS = chosenLaps;
   });
 });
 function goWarm(){
@@ -1525,12 +1619,13 @@ document.getElementById('bGo').addEventListener('click', function(){
   beginRaceFrom(readPose(0, performance.now()));
 });
 document.getElementById('bSkipWarm').addEventListener('click', function(){ ui.oWarm.hidden=true; startRace(true); });
-document.getElementById('bMore').addEventListener('click', function(){ startRace(false); });
+document.getElementById('bMore').addEventListener('click', function(){ stopFlag(); startRace(false); });
 document.getElementById('bAgain').addEventListener('click', function(){
+  stopFlag();
   ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; calSteady=0; keepAwake();
 });
 const bn=document.getElementById('buildNo'); if(bn) bn.textContent=BUILD;
-document.getElementById('eBest').textContent=readBest();
+document.getElementById('eBest').textContent=fmtTime(readBestTime());
 showStreak();
 showOrientNote();
 </script>
