@@ -130,13 +130,14 @@ button[disabled]{opacity:.5;cursor:default}
   <div class="card">
     <h1>Starry Night Circuit <span style="font-size:.55em;opacity:.65">v2 &middot; build <span id="buildNo">?</span></span></h1>
     <div class="streak" id="streakChip" hidden></div>
-    <p>Same game, painted. You march to drive and steer with your hands. The road and the numbers stay plain so you can read them; the sky and the fields carry the brushwork.</p>
+    <p>You march to drive and steer with your hands. Four rivals race you over one lap, and the nearest one sits on your tail while you are working. The road and the numbers stay plain so you can read them; the sky and the fields carry the brushwork.</p>
     <div class="moves">
-      <div class="mv"><b>March</b><span>Step on the spot. Faster steps mean a faster car. Stop and it coasts down, no penalty.</span></div>
+      <div class="mv"><b>March</b><span>Step on the spot, or dance to the beat &mdash; any steady rhythm counts, however small. Faster steps mean a faster car. Ease off and you lose speed, and whoever is behind you will come past.</span></div>
       <div class="mv"><b>Steer</b><span>Hands at chest height, elbows bent, as if holding a wheel. Turn it to turn the car.</span></div>
       <div class="mv"><b>Squat</b><span>Called a few seconds ahead. Drop down once the word turns blue.</span></div>
       <div class="mv"><b>Push</b><span>Both palms forward, controlled. Not a fast punch.</span></div>
-      <div class="mv"><b>Brake</b><span>Lift both hands off the wheel. Use it to set up for a corner, then take the wheel again and lean.</span></div>
+      <div class="mv"><b>Brake</b><span>Lift both hands clear of the wheel. It eases the car down rather than stopping it dead.</span></div>
+      <div class="mv"><b>Corners</b><span>Chevrons and a coloured road warn you well ahead, and an arrow on screen shows which way it goes. Brake early, lean through it, and you get a burst of speed out the other side.</span></div>
     </div>
     <div class="modes">
       <div class="mode sel" data-laps="1"><b>1</b><span>lap</span></div>
@@ -181,7 +182,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 13;          // bump on every deploy; shown on the start card
+const BUILD = 14;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -358,7 +359,6 @@ function blip(freq,dur,vol,type){
 }
 const ROOTS = [98.00, 110.00, 87.31, 130.81];
 const PENTA = [392.00, 440.00, 523.25, 587.33, 659.25];
-let beatAt = 0, beatIndex = 0;
 function scheduler(){
   if(!actx) return;
   const spb = 60/bpm;
@@ -369,7 +369,6 @@ function scheduler(){
     hat(t, inBar%2===0 ? 0.16 : (layer>0.35 ? 0.1 : 0.03));
     if(inBar%2===0) bass(t, ROOTS[Math.floor(i/8)%4], spb*0.42);
     if(layer>0.68 && i%2===1 && Math.random()<0.5) lead(t, PENTA[Math.floor(Math.random()*5)], spb*0.3);
-    beatAt = t; beatIndex = i;
     nextTick += spb/2; tickIndex++;
   }
 }
@@ -434,7 +433,7 @@ async function begin(){
     await waitForFrames(8000);
     if(!landmarker) await loadTracker();
     ui.loadMsg.hidden=true; ui.oStart.hidden=true; ui.oCal.hidden=false; showOrientNote();
-    state='calibrate'; calSteady=0; keepAwake();
+    state='calibrate'; keepAwake();
     requestAnimationFrame(frame);
   } catch(err){
     dropStream();                 // a failed attempt must not hold the camera
@@ -451,8 +450,7 @@ async function begin(){
     if(btn2) btn2.disabled=false;
   }
 }
-const L={lsh:11,rsh:12,lel:13,rel:14,lwr:15,rwr:16,lhip:23,rhip:24,lkn:25,rkn:26,lank:27,rank:28};
-const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+const L={lsh:11,rsh:12,lwr:15,rwr:16,lhip:23,rhip:24,lkn:25,rkn:26,lank:27,rank:28};
 function pt(i,thr){
   if(!pose||!pose[i]) return null;
   const p=pose[i];
@@ -608,27 +606,33 @@ function project(p,camX,camY,camZ){
 
 /* ---- state ---- */
 let state='idle';
-let position=0, speed=0, playerX=0, distance=0, movingTime=0;
+let position=0, speed=0, playerX=0, distance=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let effortAvg=0, effortBase=0, chaserArmed=true;
-let curCorner=null, cFrames=0, cOff=0, cOver=0, cLean=0, cornerMsg=0, lastCorner=null;
+let curCorner=null, cFrames=0, cOff=0, cLean=0;
 let signAlpha=0, lastSignCorner=null;
 let braking=false, brakeRamp=0;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
-let base=null, calSteady=0, startTime=0, acc=0;
+let base=null, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
 let rest={}, lastLift=null;
-let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START, callsHit=0;
+let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START;
 const step=1/60;
 
 function today(){ return new Date().toISOString().slice(0,10); }
 function readLS(k,d){ try{ const v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
 function writeLS(k,v){ try{ localStorage.setItem(k,String(v)); }catch(e){} }
-function readBest(){ return parseInt(readLS('vgBest','0'),10)||0; }
 // a fixed-distance race is scored by the clock, and each lap count keeps its own
 function bestKey(){ return 'vgTime'+LAPS; }
-function readBestTime(){ const v=parseFloat(readLS(bestKey(),'0')); return (v>0)?v:0; }
+const BEST_FLOOR = 20;   // seconds: no real lap is quicker, so anything under is junk
+function readBestTime(){
+  const v=parseFloat(readLS(bestKey(),'0'));
+  // an earlier build could store a time of a hundredth of a second, which no
+  // honest run could ever beat. Discard those rather than leave them in the way.
+  if(v > 0 && v < BEST_FLOOR){ try{ localStorage.removeItem(bestKey()); }catch(e){} return 0; }
+  return (v>0)?v:0;
+}
 function fmtTime(s){ if(!(s>0)) return '--';
   return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')+'.'+String(Math.floor((s*10)%10)); }
 let finishTime = 0;
@@ -715,12 +719,14 @@ function readPose(dt, now){
 
   if(lw&&rw&&base){
     steerRaw = steerFromAngle(Math.atan2(rw.y-lw.y, rw.x-lw.x) - base.ang);
-  } else { steerRaw *= 0.85; }
-  steer = steer*0.72 + steerRaw*0.28;
+  } else { steerRaw *= Math.pow(0.85, dt*60); }
+  // frame-rate independent: at 30fps the old form doubled its time constant and
+  // quietly added lag on top of the camera's
+  steer += (steerRaw - steer) * (1 - Math.pow(0.72, dt*60));
 
   if(base){
     const hipDrop = (hp.y - base.hipY)/base.torso;
-    const shDrop  = (base.shY != null) ? (sh.y - base.shY)/base.torso : 0;
+    const shDrop  = (sh.y - base.shY)/base.torso;   // makeBase always gives a number
     squatDepth = Math.max(0, Math.max(hipDrop, shDrop)) / SQUAT_DEPTH;
     squatting = squatDepth >= 1;
   }
@@ -748,11 +754,9 @@ function readPose(dt, now){
     // your wrists, not their height, so lifting them together steers nothing.
     if((base.wristY - mid)/base.torso > BRAKE_LIFT) brake=true;
   }
-  return { torso, hipY:hp.y, shY:sh.y, kneeY:kneeBase(), ankleY:ankleBase(),
+  return { torso, hipY:hp.y, shY:sh.y,
            wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
-           ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0, hasHands:!!(lw&&rw),
-           hasKnees:!!(pt(L.lkn,0.12)||pt(L.rkn,0.12)),
-           hasFeet:!!(pt(L.lank,0.12)||pt(L.rank,0.12)),
+           ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0,
            spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push, brake:brake };
 }
 function vis(i){
@@ -766,14 +770,6 @@ function diagText(){
     + '  lift ' + (lastLift==null ? '--' : lastLift.toFixed(2))
     + '  cad ' + Math.round(cadence);
 }
-function pairBase(a,b){
-  const p=pt(a,0.12), q=pt(b,0.12);
-  if(p&&q) return (p.y+q.y)/2;
-  if(p) return p.y; if(q) return q.y;
-  return null;
-}
-function kneeBase(){ return pairBase(L.lkn,L.rkn); }
-function ankleBase(){ return pairBase(L.lank,L.rank); }
 
 /* ---- the chequered flag, after Klee ----
    A finish flag is already a grid of squares, which is the shape Klee spent
@@ -872,11 +868,15 @@ function showCall(word,sub,cls){
 function hideCall(){ ui.call.className='call'; }
 
 function startRace(fresh){
-  if(fresh){ buildTrack(); buildProps(); distance=0; movingTime=0; callsHit=0; callWindow=WINDOW_START; bestLap=0; }
+  if(fresh){ buildTrack(); buildProps(); callWindow=WINDOW_START; }
   LAPS = chosenLaps;
+  // every per-race value resets on EVERY race. distance used to live in the
+  // fresh branch, so "one more race" began already past the finish line.
+  distance=0; bestLap=0;
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
+  hitTimer=0; callTimer=0; steer=0; steerRaw=0;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
-  curCorner=null; cFrames=0; cOff=0; cOver=0; cLean=0; cornerMsg=0; lastCorner=null; braking=false; brakeRamp=0;
+  curCorner=null; cFrames=0; cOff=0; cLean=0; braking=false; brakeRamp=0;
   signAlpha=0; lastSignCorner=null;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
@@ -897,7 +897,7 @@ function endRace(){
   const finished = finishTime > 0;
   const prev = readBestTime();
   const rec = finished && (prev===0 || finishTime < prev);
-  if(rec) writeLS(bestKey(), finishTime.toFixed(2));
+  if(rec && finishTime >= BEST_FLOOR) writeLS(bestKey(), finishTime.toFixed(2));
   const n = bumpStreak();
   const fin = rankNow();
   document.getElementById('endTitle').textContent =
@@ -939,7 +939,6 @@ function update(dt, reading, now){
   playerX -= dx*pct*pSeg.curve*centrifugal*(inCorner ? CORNER_PULL : 1);
 
   const drive = Math.max(0, Math.min(1, cadence/FULL_CADENCE));
-  if(drive > 0.25) movingTime += dt;
   // Only while we can actually see a limb to read. If the tracker loses you
   // entirely, your effort freezes where it was rather than reading as a stop:
   // standing still with your knees in view is you choosing to rest, but losing
@@ -1040,15 +1039,14 @@ function update(dt, reading, now){
   }
 
   // the corner is scored across its whole length and graded on the way out
-  const segCorner = pSeg.corner && pSeg.cPhase==='in' ? pSeg.corner : null;
+  const segCorner = inCorner ? pSeg.corner : null;
   if(segCorner && segCorner!==curCorner){
-    curCorner=segCorner; cFrames=0; cOff=0; cOver=0; cLean=0;
+    curCorner=segCorner; cFrames=0; cOff=0; cLean=0;
   }
   if(curCorner){
     if(segCorner===curCorner){
       cFrames++;
       if(playerX<-1||playerX>1) cOff++;
-      if(speed > curCorner.vSafe) cOver++;
       // leaning the right way: steer sign matches the corner's direction
       if(steer*curCorner.dir > 0.12) cLean++;
     } else if(cFrames > 20){
@@ -1057,13 +1055,13 @@ function update(dt, reading, now){
       const held  = cLean/cFrames;
       if(clean >= CORNER_CLEAN && held >= 0.30){
         boost = Math.max(boost, CORNER_BOOST);
-        showCall('GOOD CORNER','', 'good'); callTimer=1.1; cornerMsg=1.1;
+        showCall('GOOD CORNER','', 'good'); callTimer=1.1;
         blip(820,0.22,0.3);
       } else if(clean < 0.6){
-        showCall('RAN WIDE','', 'ready'); callTimer=1.0; cornerMsg=1.0;
+        showCall('RAN WIDE','', 'ready'); callTimer=1.0;
         blip(190,0.24,0.26,'sawtooth');
       }
-      lastCorner=curCorner; curCorner=null; cFrames=0;
+      curCorner=null; cFrames=0;
     } else { curCorner=null; cFrames=0; }
   }
 
@@ -1106,8 +1104,7 @@ function update(dt, reading, now){
     }
     const done = (callMode==='squat' && squatting) || (callMode==='push' && reading && reading.push);
     if(done){
-      if(callMode==='squat'){ boost=4; } else { slip=3; }
-      callsHit++;
+      if(callMode==='squat'){ boost=Math.max(boost,4); } else { slip=Math.max(slip,3); }
       callWindow = Math.max(WINDOW_FLOOR, callWindow - 0.25);
       callMode=null; callPhase=null; nextCall=elapsed+20+Math.random()*8;
       ui.depthWrap.hidden = true;
@@ -1611,7 +1608,7 @@ function chevron(cx, cy, w, h, dir){
 function drawCornerSign(){
   const seg = findSeg(position+playerZ);
   const c = seg.corner;
-  signAlpha += ((c?1:0) - signAlpha) * 0.12;
+  signAlpha += ((c?1:0) - signAlpha) * (1 - Math.pow(0.88, Math.max(0.001,renderDt)*60));
   if(signAlpha < 0.02) return;
   if(c) lastSignCorner = c;
   const cc = c || lastSignCorner;
@@ -1708,33 +1705,12 @@ function videoFit(){
   const dw = vw*sc, dh = vh*sc;
   return { dx:(W-dw)/2, dy:(H-dh)/2, dw:dw, dh:dh, vw:vw, vh:vh };
 }
-function joint(i,thr){
+function joint(i){
   if(!pose||!pose[i]) return null;
   const q=pose[i];
   const v=(q.visibility===undefined)?1:q.visibility;
   const f=videoFit();
   return { x:f.dx+(1-q.x)*f.dw, y:f.dy+q.y*f.dh, v:v };
-}
-function drawSkeleton(){
-  // bones first, so the joints sit on top
-  for(const [a,b] of BONES){
-    const p=joint(a), q=joint(b);
-    if(!p||!q) continue;
-    const v=Math.min(p.v,q.v);
-    if(v<0.10) continue;
-    ctx.strokeStyle = v>0.5 ? 'rgba(242,200,75,0.92)' : 'rgba(242,200,75,0.34)';
-    ctx.lineWidth = Math.max(3, Math.min(W,H)*0.009);
-    ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
-  }
-  for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
-    const p=joint(i); if(!p||p.v<0.10) continue;
-    const key = (i===25||i===26||i===27||i===28);
-    const r = Math.max(4, Math.min(W,H)*(key?0.016:0.011));
-    ctx.fillStyle = p.v>0.5 ? (key?'rgba(127,178,217,0.98)':'rgba(246,235,203,0.95)')
-                            : 'rgba(246,235,203,0.38)';
-    ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill();
-  }
 }
 /* ---- taking the wheel, one hand at a time ----
    Each hand mark fills on its own and then latches. A latched hand stays
@@ -1844,9 +1820,11 @@ function makeBase(r){
     hipY:   (r && isFinite(r.hipY)) ? r.hipY : 0.55,
     shY:    (r && isFinite(r.shY))  ? r.shY  : 0.32,
     torso:  (r && r.torso > 0.03)   ? r.torso : 0.18,
-    kneeY:  r ? r.kneeY : null,
-    ankleY: r ? r.ankleY : null,
-    wristY: r ? r.wristY : null,
+    // null here reads as 0 (the top of the frame) wherever it is used, which
+    // silently kills brake and push for the whole race. Fall back to a wheel
+    // held just below the shoulders.
+    wristY: (r && isFinite(r.wristY)) ? r.wristY
+            : (((r && isFinite(r.shY)) ? r.shY : 0.32) + ((r && r.torso>0.03) ? r.torso : 0.18)*0.12),
     spread: Math.max(0.05, (r && r.spread) ? r.spread : 0.20)
   };
 }
@@ -1877,7 +1855,7 @@ function calibrate(r,dt){
     // marks apart, height is the part nobody can judge
     const d = j ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.55)) : 99;
     const near = !!(j && j.v>0.12 && d < 1 && fit);
-    state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d, hand:true});
+    state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d});
   }
 
   // each hand arrives on its own mark and latches there, one at a time
@@ -1943,7 +1921,6 @@ function calibrate(r,dt){
   ui.calSub.innerHTML = kneesSeen ? 'Legs tracked &mdash; march to drive'
                         : (anklesSeen ? 'Feet tracked &mdash; march to drive'
                                       : 'Legs not in frame &mdash; step back, or play with your arms');
-  ui.bGo.disabled = false;
 
   const kv = (i)=>{ const q = pose&&pose[i]; return (q&&q.visibility!==undefined)?q.visibility.toFixed(2):'--'; };
   ui.calDiag.innerHTML =
@@ -1958,11 +1935,11 @@ function calibrate(r,dt){
   if(holding && grip.both >= GRIP_BOTH) beginRaceFrom(r);
 }
 
-let lastT=0;
+let lastT=0, renderDt=1/60;
 function frame(now){
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.1,(now-lastT)/1000) : 0;
-  lastT=now;
+  lastT=now; renderDt=dt||1/60;
   if(video.readyState<2||!landmarker) return;
   if(video.currentTime!==lastVideoTime){
     lastVideoTime=video.currentTime;
@@ -2001,7 +1978,7 @@ document.getElementById('bGo').addEventListener('click', function(){
 document.getElementById('bMore').addEventListener('click', function(){ stopFlag(); startRace(false); });
 document.getElementById('bAgain').addEventListener('click', function(){
   stopFlag();
-  ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; calSteady=0; keepAwake();
+  ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; keepAwake();
 });
 const bn=document.getElementById('buildNo'); if(bn) bn.textContent=BUILD;
 document.getElementById('eBest').textContent=fmtTime(readBestTime());
