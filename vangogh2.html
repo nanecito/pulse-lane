@@ -34,10 +34,7 @@ canvas{display:block;width:100%;height:100%}
 .cad b{position:absolute;left:55%;top:0;bottom:0;width:2px;background:rgba(242,246,255,.55)}
 .foot{font-size:clamp(11px,1.5vw,16px);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
 .foot.warn{color:var(--amber)}
-@media (orientation: portrait){
-  .hud{justify-content:flex-start}
-  .bottom{margin-top:12px}
-}
+
 .diag{font-size:clamp(9px,1.1vw,12px);letter-spacing:.06em;color:var(--muted);opacity:.7;font-variant-numeric:tabular-nums}
 .call{position:fixed;left:0;right:0;top:34%;text-align:center;pointer-events:none;opacity:0;transition:opacity .12s}
 .call.on{opacity:1}
@@ -57,6 +54,7 @@ canvas{display:block;width:100%;height:100%}
 .setTop p{margin:0;color:var(--fg);opacity:.92;font-size:clamp(14px,3vw,19px);letter-spacing:.04em;text-shadow:0 3px 18px rgba(0,0,0,.95)}
 .setBot{text-align:center;padding:4px 10px}
 .setNote{font-size:clamp(11px,2.2vw,14px);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.9)}
+.setDiag{font:500 clamp(10px,2vw,13px)/1.5 ui-monospace,Menlo,monospace;color:var(--cyan);opacity:.95;margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.95)}
 .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,14,34,.93);
          padding:max(16px,env(safe-area-inset-left,0px));overflow:auto}
 .card{background:rgba(14,28,60,.96);border:1px solid rgba(242,246,255,.18);border-radius:18px;padding:26px;width:100%;max-width:560px;text-align:center}
@@ -146,6 +144,7 @@ button[disabled]{opacity:.5;cursor:default}
   </div>
   <div class="setBot">
     <div class="setNote" id="calSub">Hold the wheel with both hands to start</div>
+    <div class="setDiag" id="calDiag"></div>
     <button id="bGo" class="ghost">Start anyway</button>
   </div>
 </div>
@@ -193,10 +192,10 @@ const PREVIEW = 3.0, WINDOW_START = 6.0, WINDOW_FLOOR = 4.2;
 const LAP_METRES = 6200;
 const SQUAT_DEPTH = 0.17;
 const RIVALS = [
-  { key:'dali',     name:'DALI',     pace: 40, lane:-0.56 },
-  { key:'picasso',  name:'PICASSO',  pace: 42, lane: 0.56 },
-  { key:'frida',    name:'FRIDA',    pace: 41, lane:-0.21 },
-  { key:'mondrian', name:'MONDRIAN', pace: 39, lane: 0.21 }
+  { key:'dali',     name:'DALI',     pace: 40, lane:-0.62 },
+  { key:'picasso',  name:'PICASSO',  pace: 42, lane: 0.62 },
+  { key:'frida',    name:'FRIDA',    pace: 41, lane:-0.22 },
+  { key:'mondrian', name:'MONDRIAN', pace: 39, lane: 0.22 }
 ];
 
 const cv = document.getElementById('view'), ctx = cv.getContext('2d');
@@ -204,7 +203,7 @@ let W=0,H=0,DPR=1;
 function resize(){
   DPR = Math.min(2, window.devicePixelRatio||1);
   W = window.innerWidth; H = window.innerHeight;
-  roadWidth = (H > W) ? 850 : 1200;
+  roadWidth = (H > W) ? 950 : 1320;
   cv.width = Math.floor(W*DPR); cv.height = Math.floor(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);
 }
@@ -215,6 +214,7 @@ const ui = {
   pos:document.getElementById('hPos'), lap:document.getElementById('hLap'),
   diag:document.getElementById('hDiag'),
   calTitle:document.getElementById('calTitle'), calSub:document.getElementById('calSub'),
+  calDiag:document.getElementById('calDiag'),
   clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
   foot:document.getElementById('hFoot'),
   call:document.getElementById('call'), callWord:document.getElementById('callWord'),
@@ -377,7 +377,9 @@ function buildTrack(){
 function buildCars(){
   cars = RIVALS.map(function(r,i){
     return { key:r.key, name:r.name, basePace:r.pace, offset:r.lane,
-             dist: 80 + i*30, wob: i*1.7, bumped:0, z:0, dz:0 };
+             dist: 15 - i*2.6,        // a staggered grid, not a head start
+             v: 0,                    // and they launch from a standstill, like you
+             wob: i*1.7, bumped:0, z:0, dz:0 };
   });
 }
 function rankNow(){
@@ -439,6 +441,7 @@ function project(p,camX,camY,camZ){
 let state='idle';
 let position=0, speed=0, playerX=0, distance=0, movingTime=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
+let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
@@ -641,7 +644,7 @@ function update(dt, reading, now){
   const gap = target - speed;
   if(gap > 0){
     // a boost or a slipstream overrides the taper, so it still feels like a shove
-    const urge = (boost>0 || slip>0) ? 1 : Math.max(0.12, 1 - ACCEL_FALLOFF*(speed/maxSpeed));
+    const urge = (boost>0 || slip>0 || hitTimer>0) ? 1 : Math.max(0.12, 1 - ACCEL_FALLOFF*(speed/maxSpeed));
     speed += Math.min(gap, accel*urge*dt);
   } else {
     speed += Math.max(gap, coast*dt);
@@ -663,11 +666,15 @@ function update(dt, reading, now){
     const band = Math.max(-0.22, Math.min(0.22, gap/900));
     const wob = Math.sin(elapsed*0.45 + c.wob)*0.045;
     if(c.bumped>0) c.bumped -= dt;
-    c.dist += c.basePace * (1 + band + wob) * (c.bumped>0 ? 0.5 : 1) * dt;
+    const want = c.basePace * (1 + band + wob);
+    const rate = (c.v < want ? c.basePace/7 : c.basePace/3) * dt;   // launch slower than they slow
+    c.v += Math.max(-rate, Math.min(rate, want - c.v));
+    c.dist += Math.max(0, c.v) * (c.bumped>0 ? 0.5 : 1) * dt;
     c.dz = (c.dist - distance) * 125;
     c.z = wrap(position + c.dz);
-    if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < 0.40 && c.bumped<=0){
-      speed *= 0.62; shake=20; c.bumped=1.3; blip(110,0.25,0.3,'sawtooth');
+    if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < 0.20
+       && c.bumped<=0 && hitTimer<=0){
+      speed *= 0.85; shake=20; c.bumped=1.3; hitTimer=1.6; blip(110,0.25,0.3,'sawtooth');
     }
   }
 
@@ -721,6 +728,8 @@ function update(dt, reading, now){
       hideCall();
     }
   }
+
+  if(hitTimer>0) hitTimer -= dt;
 
   if(callTimer>0){ callTimer -= dt; if(callTimer<=0 && callPhase===null) hideCall(); }
 
@@ -955,7 +964,7 @@ function drawMondrian(w,h){
   ctx.strokeRect(-w/2,-h*0.86,w,h*0.84);
 }
 function drawCar(x,y,scale,car){
-  const w=roadWidth*0.00052*scale*W, h=w*0.52;
+  const w=roadWidth*0.00013*scale*W, h=w*0.52;
   if(w<2) return;
   ctx.save(); ctx.translate(x,y);
   ctx.fillStyle='rgba(0,0,0,0.42)';
@@ -1040,11 +1049,19 @@ function render(){
   if(shake>0){ ctx.fillStyle='rgba(255,75,92,'+Math.min(0.3,shake/50)+')'; ctx.fillRect(0,0,W,H); }
 }
 
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);           // contain: show the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw:dw, dh:dh, vw:vw, vh:vh };
+}
 function joint(i,thr){
   if(!pose||!pose[i]) return null;
   const q=pose[i];
   const v=(q.visibility===undefined)?1:q.visibility;
-  return { x:(1-q.x)*W, y:q.y*H, v:v };
+  const f=videoFit();
+  return { x:f.dx+(1-q.x)*f.dw, y:f.dy+q.y*f.dh, v:v };
 }
 function drawSkeleton(){
   // bones first, so the joints sit on top
@@ -1093,8 +1110,13 @@ function drawWheel(cx, cy, R, angle, lit, progress){
 }
 function drawMirror(alpha){
   ctx.clearRect(0,0,W,H);
+  const f = videoFit();
   ctx.save(); ctx.scale(-1,1); ctx.globalAlpha=alpha;
-  ctx.drawImage(video,-W,0,W,H); ctx.restore(); ctx.globalAlpha=1;
+  ctx.drawImage(video, -(f.dx+f.dw), f.dy, f.dw, f.dh);
+  ctx.restore(); ctx.globalAlpha=1;
+  // outline what the camera can actually see
+  ctx.strokeStyle='rgba(242,200,75,0.55)'; ctx.lineWidth=2;
+  ctx.setLineDash([8,8]); ctx.strokeRect(f.dx+1,f.dy+1,f.dw-2,f.dh-2); ctx.setLineDash([]);
   drawSkeleton();
 }
 
@@ -1128,7 +1150,9 @@ function calibrate(r,dt){
   if(!sh){
     // nothing to work with yet
   } else if(!hp){
-    title='Too close'; hint='Step back so I can see your hips';
+    title='Too close'; hint=(video.videoWidth>video.videoHeight && H>W)
+      ? 'Your camera is giving a wide frame, so step well back'
+      : 'Step back so I can see your hips';
   } else if(r && r.torso > 0.34){
     title='A bit too close'; hint='Step back a pace or two';
   } else if(r && r.torso < 0.10){
@@ -1155,13 +1179,16 @@ function calibrate(r,dt){
   if(gripping){ gripHold = Math.min(1.0, gripHold + dt); } else { gripHold = Math.max(0, gripHold - dt*0.5); }
 
 
-  let wx=W*0.5, wy=H*0.46, wr=Math.min(W,H)*0.15;
+  // everything on this screen must live in the camera's frame, not the canvas
+  const F = videoFit();
+  const SX = nx => F.dx + nx*F.dw, SY = ny => F.dy + ny*F.dh;
+  let wx=SX(0.5), wy=SY(0.46), wr=Math.min(F.dw,F.dh)*0.13;
   if(gripping && lw && rw){
-    wx=((lw.x+rw.x)/2)*W; wy=((lw.y+rw.y)/2)*H;
-    wr=Math.max(Math.min(W,H)*0.07, Math.hypot((rw.x-lw.x)*W,(rw.y-lw.y)*H)/2);
+    wx=SX((lw.x+rw.x)/2); wy=SY((lw.y+rw.y)/2);
+    wr=Math.max(Math.min(F.dw,F.dh)*0.06, Math.hypot((rw.x-lw.x)*F.dw,(rw.y-lw.y)*F.dh)/2);
   } else if(lsh && rsh && sh && r){
-    wx=((lsh.x+rsh.x)/2)*W; wy=(sh.y + r.torso*0.42)*H;
-    wr=Math.max(Math.min(W,H)*0.09, Math.abs(rsh.x-lsh.x)*W*0.95);
+    wx=SX((lsh.x+rsh.x)/2); wy=SY(sh.y + r.torso*0.42);
+    wr=Math.max(Math.min(F.dw,F.dh)*0.07, Math.abs(rsh.x-lsh.x)*F.dw*0.62);
   }
   drawWheel(wx, wy, wr, (gripping ? wheelAngle : 0), gripping, gripHold/1.0);
 
@@ -1171,6 +1198,18 @@ function calibrate(r,dt){
   ui.calSub.innerHTML = (knees||ankles) ? 'I can see your legs &mdash; you can march to drive'
                                         : 'I cannot see your legs &mdash; you can still play with your arms';
   ui.bGo.disabled = false;   // the escape hatch is never locked
+
+  const kv = (i)=>{ const q = pose&&pose[i]; return (q&&q.visibility!==undefined)?q.visibility.toFixed(2):'--'; };
+  const shwD = (lsh&&rsh)? Math.max(0.04,Math.abs(rsh.x-lsh.x)) : 0;
+  const sprD = (lw&&rw)? Math.abs(rw.x-lw.x) : 0;
+  ui.calDiag.innerHTML =
+      'cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
+    + ' &middot; torso ' + (r? r.torso.toFixed(2):'--')
+    + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; an ' + kv(27) + '/' + kv(28)
+    + ' &middot; hip ' + kv(23) + '/' + kv(24)
+    + '<br>wrists ' + (shwD? (sprD/shwD).toFixed(2):'--') + 'x shoulders'
+    + ' &middot; ok ' + (ok?'Y':'N') + ' &middot; grip ' + (gripping?'Y':'N')
+    + ' &middot; hold ' + gripHold.toFixed(2);
 
   if(ok && gripHold >= 1.0) beginRaceFrom(r);
 }
