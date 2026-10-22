@@ -122,7 +122,7 @@ button[disabled]{opacity:.5;cursor:default}
 <div class="orientNote" id="orientNote" hidden>You are sideways &mdash; portrait tracks your knees better and shows more road ahead.</div>
 <div class="overlay" id="oStart">
   <div class="card">
-    <h1>Starry Night Circuit <span style="font-size:.55em;opacity:.65">v2</span></h1>
+    <h1>Starry Night Circuit <span style="font-size:.55em;opacity:.65">v2 &middot; build <span id="buildNo">?</span></span></h1>
     <div class="streak" id="streakChip" hidden></div>
     <p>Same game, painted. You march to drive and steer with your hands. The road and the numbers stay plain so you can read them; the sky and the fields carry the brushwork.</p>
     <div class="moves">
@@ -181,6 +181,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
+const BUILD = 5;          // bump on every deploy; shown on the start card
 let ROUND = 180;
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
 // a tall screen needs a narrower road, or its edges fall off the sides where the motion matters most
@@ -368,8 +369,10 @@ async function begin(){
     // only question that matters is whether frames arrive, which is next.
     // play() never settles at all on a camera that opens but sends nothing,
     // so it gets a bounded wait rather than an open-ended one.
-    try { await Promise.race([ video.play(),
-            new Promise(function(r){ setTimeout(r, 3000); }) ]); } catch(e){}
+    const playing = video.play();
+    if(playing && playing.catch) playing.catch(function(){});   // never unhandled
+    await Promise.race([ playing ? playing.catch(function(){}) : Promise.resolve(),
+                         new Promise(function(r){ setTimeout(r, 3000); }) ]);
     await waitForFrames(8000);
     if(!landmarker) await loadTracker();
     ui.loadMsg.hidden=true; ui.oStart.hidden=true; ui.oCal.hidden=false; showOrientNote();
@@ -1456,7 +1459,7 @@ function calibrate(r,dt){
 
   const kv = (i)=>{ const q = pose&&pose[i]; return (q&&q.visibility!==undefined)?q.visibility.toFixed(2):'--'; };
   ui.calDiag.innerHTML =
-      'cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
+      'build ' + BUILD + ' &middot; cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
     + ' &middot; torso ' + (r? r.torso.toFixed(2):'--')
     + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; marks '
     + state.map(x=>x.near?'Y':'n').join('') + (kneesSeen?' kn+':' kn-')
@@ -1526,6 +1529,7 @@ document.getElementById('bMore').addEventListener('click', function(){ startRace
 document.getElementById('bAgain').addEventListener('click', function(){
   ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; calSteady=0; keepAwake();
 });
+const bn=document.getElementById('buildNo'); if(bn) bn.textContent=BUILD;
 document.getElementById('eBest').textContent=readBest();
 showStreak();
 showOrientNote();
