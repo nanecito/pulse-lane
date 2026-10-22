@@ -1152,29 +1152,95 @@ function drawSkeleton(){
     ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill();
   }
 }
-let gripHold = 0;
-function drawWheel(cx, cy, R, angle, lit, progress){
-  ctx.save(); ctx.translate(cx,cy); ctx.rotate(angle);
-  ctx.lineWidth = Math.max(5, R*0.17);
-  ctx.strokeStyle = lit ? 'rgba(242,200,75,0.95)' : 'rgba(242,246,255,0.26)';
-  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
-  ctx.lineWidth = Math.max(3, R*0.10);
-  for(const a of [Math.PI, 0, Math.PI/2]){
-    ctx.beginPath(); ctx.moveTo(0,0);
-    ctx.lineTo(Math.cos(a)*R*0.92, Math.sin(a)*R*0.92); ctx.stroke();
-  }
-  ctx.fillStyle = lit ? 'rgba(242,200,75,0.95)' : 'rgba(242,246,255,0.34)';
-  for(const a of [Math.PI, 0]){
-    ctx.beginPath(); ctx.arc(Math.cos(a)*R, Math.sin(a)*R, R*0.22, 0, Math.PI*2); ctx.fill();
+/* ---- taking the wheel, one hand at a time ----
+   Each hand mark fills on its own and then latches. A latched hand stays
+   latched through tracking flicker and only lets go if the wrist is visibly
+   away for long enough. At 150-250 ms you cannot ask someone to hold two
+   things steady at once and judge it; you can ask them to arrive twice. */
+const GRIP_FILL = 0.45;   // s a hand must sit on its mark before it locks
+const GRIP_BOTH = 0.40;   // s both hands held before the race starts
+const GRIP_FREE = 0.70;   // s visibly away before a locked hand lets go
+let grip = null;
+function resetGrip(){
+  grip = { both:0, L:{fill:0,lock:false,off:0}, R:{fill:0,lock:false,off:0} };
+}
+resetGrip();
+
+function drawGlove(x,y,R,flip,locked){
+  ctx.save(); ctx.translate(x,y); ctx.scale(flip,1);
+  ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.lineWidth = Math.max(1.5, R*0.16);
+  ctx.fillStyle   = locked ? 'rgba(246,235,203,0.98)' : 'rgba(246,235,203,0.26)';
+  ctx.strokeStyle = locked ? 'rgba(28,38,74,0.90)'    : 'rgba(246,235,203,0.78)';
+  // a mitt closing on the rim, fingers wrapping toward the wheel
+  ctx.beginPath();
+  ctx.moveTo(-R*0.86,-R*0.52);
+  ctx.quadraticCurveTo(-R*0.20,-R*0.92,  R*0.46,-R*0.78);
+  ctx.quadraticCurveTo( R*1.00,-R*0.66,  R*1.00,-R*0.12);
+  ctx.quadraticCurveTo( R*1.00, R*0.52,  R*0.36, R*0.62);
+  ctx.quadraticCurveTo(-R*0.26, R*0.72, -R*0.86, R*0.42);
+  ctx.quadraticCurveTo(-R*1.10, R*0.00, -R*0.86,-R*0.52);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-R*0.70, R*0.10);
+  ctx.quadraticCurveTo(-R*0.20, R*0.46, R*0.18, R*0.98);
+  ctx.quadraticCurveTo(-R*0.30, R*0.86, -R*0.74, R*0.46);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  if(locked){
+    ctx.lineWidth=Math.max(1,R*0.12); ctx.strokeStyle='rgba(28,38,74,0.60)';
+    for(const fy of [-R*0.42, -R*0.06, R*0.30]){
+      ctx.beginPath(); ctx.moveTo(R*0.10,fy); ctx.quadraticCurveTo(R*0.62,fy-R*0.06,R*0.84,fy); ctx.stroke();
+    }
   }
   ctx.restore();
-  if(progress > 0.01){
-    ctx.save(); ctx.translate(cx,cy);
+}
+
+function drawHandMark(x,y,R,fill,locked,flip){
+  ctx.save(); ctx.lineCap='butt';
+  ctx.fillStyle = locked ? 'rgba(242,200,75,0.24)' : 'rgba(12,17,34,0.74)';
+  ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.fill();
+  ctx.lineWidth=Math.max(3,R*0.16);
+  ctx.strokeStyle = locked ? 'rgba(242,200,75,0.98)' : 'rgba(246,235,203,0.82)';
+  ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.stroke();
+  if(!locked && fill>0.01){
     ctx.strokeStyle='rgba(127,178,217,0.98)';
-    ctx.lineWidth=Math.max(4,R*0.16); ctx.lineCap='round';
-    ctx.beginPath(); ctx.arc(0,0,R*1.38,-Math.PI/2,-Math.PI/2+progress*Math.PI*2); ctx.stroke();
-    ctx.restore();
+    ctx.lineWidth=Math.max(4,R*0.26); ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(x,y,R*1.24,-Math.PI/2,-Math.PI/2+fill*Math.PI*2); ctx.stroke();
   }
+  ctx.restore();
+  drawGlove(x,y,R*0.92,flip,locked);
+}
+
+function drawSetupWheel(cx,cy,R,g){
+  const dim='rgba(246,235,203,0.78)', hot='rgba(242,200,75,0.96)';
+  const rim=Math.max(5,R*0.17);
+  ctx.save(); ctx.translate(cx,cy); ctx.lineCap='butt';
+  // a dark backing, so the wheel reads as an object and not as more skeleton
+  ctx.strokeStyle='rgba(12,17,34,0.80)'; ctx.lineWidth=rim*1.85;
+  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+  ctx.lineWidth=rim;
+  ctx.strokeStyle = g.L.lock?hot:dim;
+  ctx.beginPath(); ctx.arc(0,0,R,Math.PI*0.5,Math.PI*1.5); ctx.stroke();
+  ctx.strokeStyle = g.R.lock?hot:dim;
+  ctx.beginPath(); ctx.arc(0,0,R,-Math.PI*0.5,Math.PI*0.5); ctx.stroke();
+  const both = g.L.lock && g.R.lock;
+  ctx.lineCap='round';
+  for(const pass of [0,1]){
+    ctx.strokeStyle = pass ? (both?hot:dim) : 'rgba(12,17,34,0.80)';
+    ctx.lineWidth = pass ? Math.max(3,R*0.10) : Math.max(3,R*0.10)*2.1;
+    for(const a of [Math.PI, 0, Math.PI/2]){
+      ctx.beginPath(); ctx.moveTo(0,0);
+      ctx.lineTo(Math.cos(a)*R*0.92, Math.sin(a)*R*0.92); ctx.stroke();
+    }
+  }
+  ctx.beginPath(); ctx.arc(0,0,R*0.16,0,Math.PI*2);
+  ctx.fillStyle = both?hot:dim; ctx.fill();
+  if(both && g.both>0.01){
+    ctx.strokeStyle='rgba(127,178,217,0.98)'; ctx.lineCap='round';
+    ctx.lineWidth=rim*0.62;
+    ctx.beginPath(); ctx.arc(0,0,R,-Math.PI/2,-Math.PI/2+(g.both/GRIP_BOTH)*Math.PI*2); ctx.stroke();
+  }
+  ctx.restore();
 }
 function drawMirror(alpha){
   ctx.clearRect(0,0,W,H);
@@ -1202,7 +1268,7 @@ function makeBase(r){
 }
 function beginRaceFrom(r){
   base = makeBase(r);
-  limbUp={}; rest={}; lastLift=null; gripHold=0;
+  limbUp={}; rest={}; lastLift=null; resetGrip();
   try { blip(680,0.18,0.3); } catch(e){}
   goWarm();
 }
@@ -1217,43 +1283,85 @@ function calibrate(r,dt){
   for(const c of CHECKS){
     const tx=X(GUIDE[c.g][0]), ty=Y(GUIDE[c.g][1]);
     const j = joint(c.i);
-    const near = !!(j && j.v>0.12 && Math.hypot(j.x-tx, j.y-ty) < tol);
-    state.push({c:c, tx:tx, ty:ty, j:j, near:near});
+    const isHand = (c.i===15 || c.i===16);
+    // the two hand marks take an ellipse, taller than it is wide: side-to-side
+    // is what tells the marks apart, height is the part nobody can judge
+    const d = j ? (isHand ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.55))
+                          : Math.hypot(j.x-tx, j.y-ty)/tol) : 99;
+    const near = !!(j && j.v>0.12 && d < 1);
+    state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d, hand:isHand});
   }
-  const hands = state[0].near && state[1].near;
   const knees = state[2].near && state[3].near;
   const kneesSeen = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
+
+  // each hand arrives on its own mark and latches there, one at a time
+  for(let k=0;k<2;k++){
+    const g = k ? grip.R : grip.L, st = state[k];
+    const lost = !(st.j && st.j.v>0.12);   // no wrist in view: no information, so change nothing
+    if(lost) continue;
+    if(st.near){
+      g.off=0;
+      if(!g.lock){
+        g.fill=Math.min(GRIP_FILL, g.fill+dt);
+        if(g.fill>=GRIP_FILL){ g.lock=true; try{ blip(k?659:523,0.13,0.24); }catch(e){} }
+      }
+    } else if(g.lock){
+      g.off = (st.d > 1.7) ? g.off+dt : 0;
+      if(g.off>=GRIP_FREE){ g.lock=false; g.fill=0; g.off=0; }
+    } else {
+      g.fill=Math.max(0, g.fill-dt*0.5);   // build fast, forget slowly
+    }
+  }
+  const hands = grip.L.lock && grip.R.lock;
+  // the last hold has to be a real hold: a latched hand drifting off stops the
+  // count, a hand the tracker has merely lost does not
+  const holding = hands && grip.L.off===0 && grip.R.off===0;
+  grip.both = holding ? Math.min(GRIP_BOTH, grip.both+dt) : 0;
 
   // the wheel sits between the two hand marks, so standing into the shape is taking the wheel
   const wx=(state[0].tx+state[1].tx)/2, wy=(state[0].ty+state[1].ty)/2;
   const wr=Math.max(U*0.07, Math.hypot(state[1].tx-state[0].tx, state[1].ty-state[0].ty)/2);
-  if(hands){ gripHold = Math.min(1.0, gripHold + dt); }
-  else { gripHold = Math.max(0, gripHold - dt*0.5); }
-  drawWheel(wx, wy, wr, 0, hands, gripHold/1.0);
+  drawSetupWheel(wx, wy, wr, grip);
 
   // the marks themselves
-  for(const st of state){
-    ctx.beginPath(); ctx.arc(st.tx, st.ty, U*0.042, 0, Math.PI*2);
-    ctx.fillStyle = st.near ? 'rgba(127,224,160,0.95)' : 'rgba(224,74,58,0.90)';
-    ctx.fill();
-    ctx.lineWidth=Math.max(1.5,U*0.008);
-    ctx.strokeStyle = st.near ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.40)';
-    ctx.stroke();
+  for(let k=0;k<state.length;k++){
+    const st = state[k];
+    if(st.hand){
+      const g = k ? grip.R : grip.L;
+      drawHandMark(st.tx, st.ty, U*0.034, g.fill/GRIP_FILL, g.lock, k?-1:1);
+    } else {
+      ctx.beginPath(); ctx.arc(st.tx, st.ty, U*0.042, 0, Math.PI*2);
+      ctx.fillStyle = st.near ? 'rgba(127,224,160,0.95)' : 'rgba(224,74,58,0.90)';
+      ctx.fill();
+      ctx.lineWidth=Math.max(1.5,U*0.008);
+      ctx.strokeStyle = st.near ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.40)';
+      ctx.stroke();
+    }
     // where that limb actually is, so you can see which way to move
-    if(st.j && st.j.v>0.12 && !st.near){
-      ctx.fillStyle='rgba(246,235,203,0.95)';
-      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.022, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle='rgba(246,235,203,0.45)'; ctx.lineWidth=Math.max(1,U*0.006);
+    const settled = st.hand ? (k?grip.R:grip.L).lock : st.near;
+    if(st.j && st.j.v>0.12 && !settled){
+      ctx.save(); ctx.lineCap='round'; ctx.setLineDash([Math.max(6,U*0.020), Math.max(5,U*0.018)]);
+      ctx.strokeStyle='rgba(12,17,34,0.75)'; ctx.lineWidth=Math.max(4,U*0.014);
       ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
+      ctx.strokeStyle='rgba(246,235,203,0.80)'; ctx.lineWidth=Math.max(2,U*0.007);
+      ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle='rgba(12,17,34,0.85)';
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.026, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(246,235,203,0.96)';
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.020, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
     }
   }
 
   let title, hint;
   if(!pose){            title='Finding you';     hint='Step into the picture'; }
-  else if(!hands){      title='Stand in the shape'; hint='Put your hands on the two marks'; }
+  else if(!hands){      title='Stand in the shape';
+                        hint=(grip.L.lock||grip.R.lock) ? 'Good &mdash; now the other hand'
+                                                        : 'Put your hands on the two marks'; }
   else if(!knees){      title='Almost';          hint=kneesSeen ? 'Line your knees up with the lower marks'
                                                                 : 'Step back so your knees are in the picture'; }
-  else {                title='That is it';      hint = gripHold>0.7 ? 'Hold it&hellip;' : 'Hold still'; }
+  else {                title='That is it';      hint = holding ? 'Hold it&hellip;' : 'Hold still'; }
 
   ui.calTitle.innerHTML = title;
   ui.calHint.innerHTML = hint;
@@ -1266,9 +1374,12 @@ function calibrate(r,dt){
       'cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
     + ' &middot; torso ' + (r? r.torso.toFixed(2):'--')
     + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; marks '
-    + state.map(x=>x.near?'Y':'n').join('') + ' &middot; hold ' + gripHold.toFixed(2);
+    + state.map(x=>x.near?'Y':'n').join('')
+    + ' &middot; grip ' + (grip.L.lock?'L':'-') + (grip.R.lock?'R':'-')
+    + ' ' + grip.L.fill.toFixed(2) + '/' + grip.R.fill.toFixed(2)
+    + ' &middot; both ' + grip.both.toFixed(2);
 
-  if(hands && gripHold >= 1.0) beginRaceFrom(r);
+  if(holding && grip.both >= GRIP_BOTH) beginRaceFrom(r);
 }
 
 let lastT=0;
