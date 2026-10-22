@@ -181,7 +181,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 11;          // bump on every deploy; shown on the start card
+const BUILD = 12;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -227,6 +227,12 @@ const CORNER_GRIP   = 0.78;  // fraction of full steering lock a corner may dema
 const CORNER_CLEAN  = 0.82;  // fraction of the corner on-road to count as clean
 const CORNER_BOOST  = 4.0;   // seconds of push for getting one right
 const CORNER_OFF    = 0.26;  // speed you are cut to for running wide inside a corner
+/* Steering. A wide dead band so bouncing and dancing do nothing, a gentle
+   curve near the centre, and full lock only at a big, deliberate turn. Not
+   more smoothing: that would add delay on top of the camera's. */
+const STEER_FULL    = 0.80;  // radians of wrist angle for full lock
+const STEER_DEAD    = 0.26;  // dead band, as a fraction of full
+const STEER_CURVE   = 1.30;   // >1 keeps small movements small
 const BRAKE_LIFT    = 0.50;  // hands this far above the wheel, in torsos, = brake
 const BRAKE_RATE    = 5.0;   // how hard braking bleeds speed (maxSpeed/this per sec)
 const BRAKE_EASE    = 0.55;  // seconds for the brake to come on, and to let go
@@ -605,6 +611,7 @@ let position=0, speed=0, playerX=0, distance=0, movingTime=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let effortAvg=0, effortBase=0, chaserArmed=true;
 let curCorner=null, cFrames=0, cOff=0, cOver=0, cLean=0, cornerMsg=0, lastCorner=null;
+let signAlpha=0, lastSignCorner=null;
 let braking=false, brakeRamp=0;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
@@ -680,23 +687,19 @@ function stepPair(tag, lp, rp, now, dt){
 }
 
 /* ---- pose reading: legs drive, hands steer ---- */
+function steerFromAngle(ang){
+  let s = Math.max(-1, Math.min(1, ang/STEER_FULL));
+  if(Math.abs(s) < STEER_DEAD) return 0;
+  const n = (Math.abs(s)-STEER_DEAD)/(1-STEER_DEAD);
+  return (s<0?-1:1) * Math.pow(n, STEER_CURVE);
+}
 function readPose(dt, now){
   const lw=pt(L.lwr), rw=pt(L.rwr), sh=mid(L.lsh,L.rsh), hp=mid(L.lhip,L.rhip);
   if(!sh||!hp) return null;
   const torso=Math.max(0.05,Math.abs(hp.y-sh.y));
 
   if(lw&&rw&&base){
-    const ang=Math.atan2(rw.y-lw.y, rw.x-lw.x) - base.ang;
-    // full lock needs a bigger turn than it did, a wide dead band in the middle
-    // so bouncing does nothing, and a curve that stays gentle near centre
-    let s = Math.max(-1, Math.min(1, ang/0.80));
-    const dz = 0.18;
-    if(Math.abs(s) < dz) s = 0;
-    else {
-      const n = (Math.abs(s)-dz)/(1-dz);
-      s = (s<0?-1:1) * Math.pow(n, 1.4);
-    }
-    steerRaw = s;
+    steerRaw = steerFromAngle(Math.atan2(rw.y-lw.y, rw.x-lw.x) - base.ang);
   } else { steerRaw *= 0.85; }
   steer = steer*0.72 + steerRaw*0.28;
 
@@ -858,6 +861,7 @@ function startRace(fresh){
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
   curCorner=null; cFrames=0; cOff=0; cOver=0; cLean=0; cornerMsg=0; lastCorner=null; braking=false; brakeRamp=0;
+  signAlpha=0; lastSignCorner=null;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
@@ -1524,11 +1528,12 @@ function render(){
     if(s.index===0 && s.p1.screen.y<=s.clip+2) drawGantry(s, performance.now()/1000);
     // chevron boards on the outside of the bend, through the braking zone and
     // round the turn itself: the thing you read, rather than react to
-    if(s.corner && s.p1.screen.y<=s.clip+2 && s.index%6===0){
+    if(s.corner && s.p1.screen.y<=s.clip+2 && s.index%5===0){
       const out = s.corner.dir>0 ? -1 : 1;   // measured: negative curve bends left, so its outside is the right
       const p=s.p1.screen;
       if(isFinite(p.x) && p.w>1){
-        const bx=p.x+out*p.w*1.55, by=p.y, bw=p.w*0.36, bh=bw*0.62;
+        // closer to the road and larger, so they stay in frame further into the bend
+        const bx=p.x+out*p.w*1.30, by=p.y, bw=p.w*0.50, bh=bw*0.62;
         ctx.save();
         ctx.fillStyle='rgba(12,17,34,0.88)';
         ctx.fillRect(bx-bw/2, by-bh*1.9, bw, bh);
@@ -1572,7 +1577,48 @@ function render(){
     }
   }
   drawPlayerCar();
+  drawCornerSign();
   if(shake>0){ ctx.fillStyle='rgba(255,75,92,'+Math.min(0.3,shake/50)+')'; ctx.fillRect(0,0,W,H); }
+}
+
+function chevron(cx, cy, w, h, dir){
+  ctx.beginPath();
+  ctx.moveTo(cx - dir*w*0.5, cy - h*0.5);
+  ctx.lineTo(cx + dir*w*0.5, cy);
+  ctx.lineTo(cx - dir*w*0.5, cy + h*0.5);
+  ctx.lineTo(cx - dir*w*0.12, cy);
+  ctx.closePath(); ctx.fill();
+}
+/* The roadside boards sit outside the road edge, so once you are actually in
+   the bend they are off the side of the screen - the one moment you most need
+   to know which way it goes. This one is fixed to the screen instead. */
+function drawCornerSign(){
+  const seg = findSeg(position+playerZ);
+  const c = seg.corner;
+  signAlpha += ((c?1:0) - signAlpha) * 0.12;
+  if(signAlpha < 0.02) return;
+  if(c) lastSignCorner = c;
+  const cc = c || lastSignCorner;
+  if(!cc) return;
+  const dir = cc.dir > 0 ? 1 : -1;        // positive curve turns right on screen
+  const n = cc.peak >= 9 ? 3 : (cc.peak >= 6 ? 2 : 1);
+  const inIt = !!(c && seg.cPhase === 'in');
+  const t = performance.now()/1000;
+  const pulse = inIt ? (0.80 + 0.20*Math.sin(t*7)) : (0.66 + 0.16*Math.sin(t*4));
+  const u = Math.min(W,H);
+  const w = u*0.115, h = u*0.145, gap = w*0.72;
+  const cx = W/2 + dir*u*0.10, cy = H*0.30;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, signAlpha)*pulse;
+  ctx.fillStyle='rgba(10,16,36,0.55)';
+  const pw = gap*(n-1)+w+u*0.07, ph = h+u*0.055;
+  ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(cx-pw/2, cy-ph/2, pw, ph, u*0.03);
+  else ctx.rect(cx-pw/2, cy-ph/2, pw, ph);
+  ctx.fill();
+  ctx.fillStyle = inIt ? '#F2C84B' : '#E8A33D';
+  for(let i=0;i<n;i++) chevron(cx + (i-(n-1)/2)*gap*dir, cy, w, h, dir);
+  ctx.restore();
 }
 
 /* The shape to stand into. These numbers are PROPORTIONS, not screen positions:
