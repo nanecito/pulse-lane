@@ -1104,7 +1104,11 @@ function render(){
   if(shake>0){ ctx.fillStyle='rgba(255,75,92,'+Math.min(0.3,shake/50)+')'; ctx.fillRect(0,0,W,H); }
 }
 
-/* the shape to stand into. fitting it puts you at the right distance by construction. */
+/* The shape to stand into. These numbers are PROPORTIONS, not screen positions:
+   they are read through fitGuide(), which anchors them to the shoulders you
+   actually have and scales them by your own shoulder width and torso. A tall
+   player far back and a short player close by both get a shape that fits, so
+   nobody has to find one magic distance. */
 const GUIDE = {
   head:[0.500,0.150], lsh:[0.398,0.300], rsh:[0.602,0.300],
   lel:[0.330,0.400],  rel:[0.670,0.400],
@@ -1113,19 +1117,55 @@ const GUIDE = {
   lkn:[0.446,0.745],  rkn:[0.554,0.745],
   lank:[0.446,0.935], rank:[0.554,0.935]
 };
-const CHECKS = [ {g:'lwr',i:15}, {g:'rwr',i:16}, {g:'lkn',i:25}, {g:'rkn',i:26} ];
-function drawGuide(F){
-  const X=n=>F.dx+n*F.dw, Y=n=>F.dy+n*F.dh, U=Math.min(F.dw,F.dh);
+const CHECKS = [ {g:'lwr',i:15}, {g:'rwr',i:16} ];
+// the guide's own shoulder line and torso, the units everything else is measured in
+const G_SHY = GUIDE.lsh[1], G_HALF = (GUIDE.rsh[0]-GUIDE.lsh[0])/2, G_TORSO = GUIDE.lhip[1]-GUIDE.lsh[1];
+let fitG = null;
+function resetFit(){ fitG = null; }
+// fit the shape to the body in front of the camera; null until there is one
+function fitGuide(F, dt){
+  const lsh=pt(L.lsh,0.15), rsh=pt(L.rsh,0.15), hp=mid(L.lhip,L.rhip);
+  let target = null;
+  if(lsh && rsh && hp){
+    const half = Math.abs(rsh.x-lsh.x)/2;
+    const shY  = (lsh.y+rsh.y)/2;
+    const torso = Math.abs(hp.y-shY);
+    if(half > 0.02 && torso > 0.03) target = { cx:(lsh.x+rsh.x)/2, cy:shY, half:half, torso:torso };
+  }
+  if(target){
+    // tracking jitters, and a shape that twitches is one you cannot stand into:
+    // move toward the body slowly enough that the target holds still
+    if(!fitG) fitG = Object.assign({}, target);
+    else { const a = 1-Math.exp(-dt*3.5);
+           fitG.cx += (target.cx-fitG.cx)*a; fitG.cy += (target.cy-fitG.cy)*a;
+           fitG.half += (target.half-fitG.half)*a; fitG.torso += (target.torso-fitG.torso)*a; }
+  }
+  if(!fitG) return null;
+  const kx = fitG.half/G_HALF, ky = fitG.torso/G_TORSO;
+  return {
+    X: g => F.dx + (fitG.cx + (GUIDE[g][0]-0.5)*kx) * F.dw,
+    Y: g => F.dy + (fitG.cy + (GUIDE[g][1]-G_SHY)*ky) * F.dh,
+    // one unit of the fitted body, in screen pixels: marks scale with the player
+    U: Math.max(14, fitG.torso*F.dh)
+  };
+}
+function drawGuide(F, fit, legsLit){
+  const U = fit ? fit.U : Math.min(F.dw,F.dh)*0.25;
+  const X = fit ? fit.X : (g => F.dx + GUIDE[g][0]*F.dw);
+  const Y = fit ? fit.Y : (g => F.dy + GUIDE[g][1]*F.dh);
   ctx.save();
+  ctx.lineWidth=Math.max(2,U*0.052); ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.setLineDash([Math.max(5,U*0.112), Math.max(5,U*0.088)]);
+  const seg=(a,b,lit)=>{ ctx.strokeStyle = lit ? 'rgba(127,224,160,0.80)' : 'rgba(242,246,255,0.34)';
+    ctx.beginPath(); ctx.moveTo(X(a),Y(a)); ctx.lineTo(X(b),Y(b)); ctx.stroke(); };
   ctx.strokeStyle='rgba(242,246,255,0.34)';
-  ctx.lineWidth=Math.max(2,U*0.013); ctx.lineCap='round'; ctx.lineJoin='round';
-  ctx.setLineDash([Math.max(5,U*0.028), Math.max(5,U*0.022)]);
-  ctx.beginPath(); ctx.arc(X(GUIDE.head[0]),Y(GUIDE.head[1]),U*0.080,0,Math.PI*2); ctx.stroke();
-  const seg=(a,b)=>{ ctx.beginPath();
-    ctx.moveTo(X(GUIDE[a][0]),Y(GUIDE[a][1])); ctx.lineTo(X(GUIDE[b][0]),Y(GUIDE[b][1])); ctx.stroke(); };
+  ctx.beginPath(); ctx.arc(X('head'),Y('head'),U*0.32,0,Math.PI*2); ctx.stroke();
   seg('lsh','rsh'); seg('lsh','lel'); seg('lel','lwr'); seg('rsh','rel'); seg('rel','rwr');
   seg('lsh','lhip'); seg('rsh','rhip'); seg('lhip','rhip');
-  seg('lhip','lkn'); seg('lkn','lank'); seg('rhip','rkn'); seg('rkn','rank');
+  // the legs light up when the camera can actually see them, which is the
+  // only thing standing further back was ever for
+  seg('lhip','lkn',legsLit); seg('lkn','lank',legsLit);
+  seg('rhip','rkn',legsLit); seg('rkn','rank',legsLit);
   ctx.setLineDash([]); ctx.restore();
 }
 function videoFit(){
@@ -1279,31 +1319,33 @@ function makeBase(r){
 }
 function beginRaceFrom(r){
   base = makeBase(r);
-  limbUp={}; rest={}; lastLift=null; resetGrip();
+  limbUp={}; rest={}; lastLift=null; resetGrip(); resetFit();
   try { blip(680,0.18,0.3); } catch(e){}
   goWarm();
 }
 function calibrate(r,dt){
   const F = videoFit();
-  const X=n=>F.dx+n*F.dw, Y=n=>F.dy+n*F.dh, U=Math.min(F.dw,F.dh);
-  drawGuide(F);
+  const fit = fitGuide(F, dt);
+  const kneesSeen  = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
+  const anklesSeen = !!(pt(L.lank,0.12)||pt(L.rank,0.12));
+  // knees are no longer a place to put your knee. being seen IS the whole goal,
+  // and it is the only reason standing further back ever mattered.
+  drawGuide(F, fit, kneesSeen);
 
-  // four points to land on. hands are required, knees are what you are aiming for.
-  const tol = U*0.115;
+  // the two hand marks, on the shape as fitted to this body
+  const U = fit ? fit.U : Math.min(F.dw,F.dh)*0.25;
+  const tol = U*0.46;
   const state = [];
   for(const c of CHECKS){
-    const tx=X(GUIDE[c.g][0]), ty=Y(GUIDE[c.g][1]);
+    const tx = fit ? fit.X(c.g) : F.dx+GUIDE[c.g][0]*F.dw;
+    const ty = fit ? fit.Y(c.g) : F.dy+GUIDE[c.g][1]*F.dh;
     const j = joint(c.i);
-    const isHand = (c.i===15 || c.i===16);
-    // the two hand marks take an ellipse, taller than it is wide: side-to-side
-    // is what tells the marks apart, height is the part nobody can judge
-    const d = j ? (isHand ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.55))
-                          : Math.hypot(j.x-tx, j.y-ty)/tol) : 99;
-    const near = !!(j && j.v>0.12 && d < 1);
-    state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d, hand:isHand});
+    // an ellipse, taller than it is wide: side-to-side is what tells the two
+    // marks apart, height is the part nobody can judge
+    const d = j ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.55)) : 99;
+    const near = !!(j && j.v>0.12 && d < 1 && fit);
+    state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d, hand:true});
   }
-  const knees = state[2].near && state[3].near;
-  const kneesSeen = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
 
   // each hand arrives on its own mark and latches there, one at a time
   for(let k=0;k<2;k++){
@@ -1331,53 +1373,43 @@ function calibrate(r,dt){
 
   // the wheel sits between the two hand marks, so standing into the shape is taking the wheel
   const wx=(state[0].tx+state[1].tx)/2, wy=(state[0].ty+state[1].ty)/2;
-  const wr=Math.max(U*0.07, Math.hypot(state[1].tx-state[0].tx, state[1].ty-state[0].ty)/2);
+  const wr=Math.max(U*0.28, Math.hypot(state[1].tx-state[0].tx, state[1].ty-state[0].ty)/2);
   drawSetupWheel(wx, wy, wr, grip);
 
   // the marks themselves
   for(let k=0;k<state.length;k++){
     const st = state[k];
-    if(st.hand){
-      const g = k ? grip.R : grip.L;
-      drawHandMark(st.tx, st.ty, U*0.034, g.fill/GRIP_FILL, g.lock, k?-1:1);
-    } else {
-      ctx.beginPath(); ctx.arc(st.tx, st.ty, U*0.042, 0, Math.PI*2);
-      ctx.fillStyle = st.near ? 'rgba(127,224,160,0.95)' : 'rgba(224,74,58,0.90)';
-      ctx.fill();
-      ctx.lineWidth=Math.max(1.5,U*0.008);
-      ctx.strokeStyle = st.near ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.40)';
-      ctx.stroke();
-    }
+    const g = k ? grip.R : grip.L;
+    drawHandMark(st.tx, st.ty, U*0.136, g.fill/GRIP_FILL, g.lock, k?-1:1);
     // where that limb actually is, so you can see which way to move
-    const settled = st.hand ? (k?grip.R:grip.L).lock : st.near;
+    const settled = (k?grip.R:grip.L).lock;
     if(st.j && st.j.v>0.12 && !settled){
-      ctx.save(); ctx.lineCap='round'; ctx.setLineDash([Math.max(6,U*0.020), Math.max(5,U*0.018)]);
-      ctx.strokeStyle='rgba(12,17,34,0.75)'; ctx.lineWidth=Math.max(4,U*0.014);
+      ctx.save(); ctx.lineCap='round'; ctx.setLineDash([Math.max(6,U*0.080), Math.max(5,U*0.072)]);
+      ctx.strokeStyle='rgba(12,17,34,0.75)'; ctx.lineWidth=Math.max(4,U*0.056);
       ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
-      ctx.strokeStyle='rgba(246,235,203,0.80)'; ctx.lineWidth=Math.max(2,U*0.007);
+      ctx.strokeStyle='rgba(246,235,203,0.80)'; ctx.lineWidth=Math.max(2,U*0.028);
       ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle='rgba(12,17,34,0.85)';
-      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.026, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.104, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle='rgba(246,235,203,0.96)';
-      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.020, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.080, 0, Math.PI*2); ctx.fill();
       ctx.restore();
     }
   }
 
   let title, hint;
-  if(!pose){            title='Finding you';     hint='Step into the picture'; }
-  else if(!hands){      title='Stand in the shape';
+  if(!pose || !fit){    title='Finding you';     hint='Step into the picture'; }
+  else if(!hands){      title='Take the wheel';
                         hint=(grip.L.lock||grip.R.lock) ? 'Good &mdash; now the other hand'
-                                                        : 'Put your hands on the two marks'; }
-  else if(!knees){      title='Almost';          hint=kneesSeen ? 'Line your knees up with the lower marks'
-                                                                : 'Step back so your knees are in the picture'; }
+                                                        : 'A hand on each mark, one at a time'; }
   else {                title='That is it';      hint = holding ? 'Hold it&hellip;' : 'Hold still'; }
 
   ui.calTitle.innerHTML = title;
   ui.calHint.innerHTML = hint;
-  ui.calSub.innerHTML = knees ? 'Legs tracked &mdash; march to drive'
-                              : (kneesSeen ? 'I can see your legs' : 'Legs not in frame &mdash; arms will drive');
+  ui.calSub.innerHTML = kneesSeen ? 'Legs tracked &mdash; march to drive'
+                        : (anklesSeen ? 'Feet tracked &mdash; march to drive'
+                                      : 'Legs not in frame &mdash; step back, or play with your arms');
   ui.bGo.disabled = false;
 
   const kv = (i)=>{ const q = pose&&pose[i]; return (q&&q.visibility!==undefined)?q.visibility.toFixed(2):'--'; };
@@ -1385,7 +1417,7 @@ function calibrate(r,dt){
       'cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
     + ' &middot; torso ' + (r? r.torso.toFixed(2):'--')
     + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; marks '
-    + state.map(x=>x.near?'Y':'n').join('')
+    + state.map(x=>x.near?'Y':'n').join('') + (kneesSeen?' kn+':' kn-')
     + ' &middot; grip ' + (grip.L.lock?'L':'-') + (grip.R.lock?'R':'-')
     + ' ' + grip.L.fill.toFixed(2) + '/' + grip.R.fill.toFixed(2)
     + ' &middot; both ' + grip.both.toFixed(2);
