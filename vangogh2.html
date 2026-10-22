@@ -136,6 +136,7 @@ button[disabled]{opacity:.5;cursor:default}
       <div class="mv"><b>Steer</b><span>Hands at chest height, elbows bent, as if holding a wheel. Turn it to turn the car.</span></div>
       <div class="mv"><b>Squat</b><span>Called a few seconds ahead. Drop down once the word turns blue.</span></div>
       <div class="mv"><b>Push</b><span>Both palms forward, controlled. Not a fast punch.</span></div>
+      <div class="mv"><b>Brake</b><span>Lift both hands off the wheel. Use it to set up for a corner, then take the wheel again and lean.</span></div>
     </div>
     <div class="modes">
       <div class="mode sel" data-laps="1"><b>1</b><span>lap</span></div>
@@ -188,7 +189,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 9;          // bump on every deploy; shown on the start card
+const BUILD = 10;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -212,6 +213,18 @@ const SQUAT_DEPTH = 0.17;
    speed: at 150-250ms of camera lag, running wide is usually the tracker's
    fault, and being passed for that would feel like the game cheating. Being
    passed because you stopped marching is something you did. */
+/* Corners. The whole corner is judged, never a moment inside it: at
+   150-250ms of camera lag anything needing a correction at an exact instant
+   would feel like the game cheating. You see it coming, you set up, you hold
+   the lean, and the grade comes out the far side. */
+const CORNER_CURVE  = 3.5;   // |curve| that counts as a real corner
+const CORNER_MIN    = 14;    // segments, below which it is just a kink
+const CORNER_PULL   = 2.1;   // how much harder a marked corner throws you wide
+const CORNER_VSAFE  = 0.055; // safe speed falls this much per unit of curve
+const CORNER_CLEAN  = 0.82;  // fraction of the corner on-road to count as clean
+const CORNER_BOOST  = 2.6;   // seconds of push for getting one right
+const BRAKE_LIFT    = 0.50;  // hands this far above the wheel, in torsos, = brake
+const BRAKE_RATE    = 3.2;   // how hard braking bleeds speed (maxSpeed/this per sec)
 const SHADOW_GAP    = 30;    // metres it tries to hold behind you
 const SHADOW_DROP   = 0.68;  // it comes past below this fraction of YOUR normal pace
 const SHADOW_FLOOR  = 0.28;  // and always below this, however gentle your normal pace
@@ -466,6 +479,33 @@ function buildTrack(){
   // the track is exactly this many metres. Deriving it means the painted line
   // and the lap counter can never drift apart.
   LAP_METRES = trackLength/125;
+  buildCorners();
+}
+let corners=[];
+function buildCorners(){
+  corners=[];
+  const n=segments.length;
+  for(const sg of segments){ sg.corner=null; sg.cPhase=null; }
+  let i=0;
+  while(i<n){
+    if(Math.abs(segments[i].curve) >= CORNER_CURVE){
+      const dir=Math.sign(segments[i].curve);
+      let j=i, peak=0;
+      while(j<n && Math.sign(segments[j].curve)===dir
+                && Math.abs(segments[j].curve) >= CORNER_CURVE*0.45){
+        peak=Math.max(peak, Math.abs(segments[j].curve)); j++;
+      }
+      if(j-i >= CORNER_MIN){
+        const c={ a:i, b:j, dir:dir, peak:peak,
+                  vSafe: maxSpeed*Math.max(0.45, 1 - CORNER_VSAFE*peak) };
+        corners.push(c);
+        for(let k=i;k<j;k++){ segments[k].corner=c; segments[k].cPhase='in'; }
+        // the braking zone: painted road ahead of the turn-in
+        for(let k=Math.max(0,i-30);k<i;k++){ segments[k].corner=c; segments[k].cPhase='brake'; }
+      }
+      i=j;
+    } else i++;
+  }
 }
 function buildCars(){
   cars = RIVALS.map(function(r,i){
@@ -535,6 +575,8 @@ let state='idle';
 let position=0, speed=0, playerX=0, distance=0, movingTime=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let effortAvg=0, effortBase=0, chaserArmed=true;
+let curCorner=null, cFrames=0, cOff=0, cOver=0, cLean=0, cornerMsg=0, lastCorner=null;
+let braking=false;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, calSteady=0, startTime=0, acc=0;
@@ -632,18 +674,22 @@ function readPose(dt, now){
   const rawCad = stepTimes.length * 20;
   cadence += (rawCad - cadence) * Math.min(1, dt*2.5);
 
-  let push=false;
+  let push=false, brake=false;
   if(lw&&rw&&base){
     const spread=Math.abs(rw.x-lw.x)/base.spread;
-    const height=Math.abs(((lw.y+rw.y)/2) - base.wristY)/base.torso;
+    const mid=(lw.y+rw.y)/2;
+    const height=Math.abs(mid - base.wristY)/base.torso;
     if(spread<0.75 && height<0.35) push=true;
+    // both hands lifted clear of the wheel. Steering reads the ANGLE between
+    // your wrists, not their height, so lifting them together steers nothing.
+    if((base.wristY - mid)/base.torso > BRAKE_LIFT) brake=true;
   }
   return { torso, hipY:hp.y, shY:sh.y, kneeY:kneeBase(), ankleY:ankleBase(),
            wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
            ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0, hasHands:!!(lw&&rw),
            hasKnees:!!(pt(L.lkn,0.12)||pt(L.rkn,0.12)),
            hasFeet:!!(pt(L.lank,0.12)||pt(L.rank,0.12)),
-           spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push };
+           spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push, brake:brake };
 }
 function vis(i){
   const p = pose && pose[i];
@@ -766,6 +812,7 @@ function startRace(fresh){
   LAPS = chosenLaps;
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
+  curCorner=null; cFrames=0; cOff=0; cOver=0; cLean=0; cornerMsg=0; lastCorner=null; braking=false;
   position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null; callMode=null; callPhase=null; nextCall=8;
   state='race'; startTime=performance.now()/1000; acc=0;
@@ -818,8 +865,12 @@ function update(dt, reading, now){
   const pct = speed/maxSpeed;
   const dx = dt*2.6*pct;
   position = wrap(position + dt*speed);
+  braking = !!(reading && reading.brake);
+  const inCorner = pSeg.corner && pSeg.cPhase==='in';
   playerX += steer*dx;
-  playerX -= dx*pct*pSeg.curve*centrifugal;
+  // a marked corner pulls harder, so carrying too much speed really does take
+  // you out to the kerb and off. This is the whole reason corners matter.
+  playerX -= dx*pct*pSeg.curve*centrifugal*(inCorner ? CORNER_PULL : 1);
 
   const drive = Math.max(0, Math.min(1, cadence/FULL_CADENCE));
   if(drive > 0.25) movingTime += dt;
@@ -846,6 +897,7 @@ function update(dt, reading, now){
   } else {
     speed += Math.max(gap, coast*dt);
   }
+  if(braking) speed += (-maxSpeed/BRAKE_RATE)*dt;
   speed = Math.max(0, Math.min(maxSpeed*1.35, speed));
   if((playerX<-1||playerX>1) && speed>offRoadLimit) speed = Math.max(offRoadLimit, speed+offRoadDecel*dt);
   playerX = Math.max(-2,Math.min(2,playerX));
@@ -904,6 +956,34 @@ function update(dt, reading, now){
     }
   }
 
+  // the corner is scored across its whole length and graded on the way out
+  const segCorner = pSeg.corner && pSeg.cPhase==='in' ? pSeg.corner : null;
+  if(segCorner && segCorner!==curCorner){
+    curCorner=segCorner; cFrames=0; cOff=0; cOver=0; cLean=0;
+  }
+  if(curCorner){
+    if(segCorner===curCorner){
+      cFrames++;
+      if(playerX<-1||playerX>1) cOff++;
+      if(speed > curCorner.vSafe) cOver++;
+      // leaning the right way: steer sign matches the corner's direction
+      if(steer*curCorner.dir > 0.12) cLean++;
+    } else if(cFrames > 20){
+      // out the far side: grade it
+      const clean = 1 - cOff/cFrames;
+      const held  = cLean/cFrames;
+      if(clean >= CORNER_CLEAN && held >= 0.30){
+        boost = Math.max(boost, CORNER_BOOST);
+        showCall('GOOD CORNER','', 'good'); callTimer=1.1; cornerMsg=1.1;
+        blip(820,0.22,0.3);
+      } else if(clean < 0.6){
+        showCall('RAN WIDE','', 'ready'); callTimer=1.0; cornerMsg=1.0;
+        blip(190,0.24,0.26,'sawtooth');
+      }
+      lastCorner=curCorner; curCorner=null; cFrames=0;
+    } else { curCorner=null; cFrames=0; }
+  }
+
   const lapsDone = Math.floor(distance/LAP_METRES);
   if(lapsDone > lap){
     const lt = elapsed - lapStart;
@@ -916,7 +996,8 @@ function update(dt, reading, now){
   }
 
   // calls: preview, then a generous window, non-punitive
-  if(callMode===null && elapsed > nextCall && left > 14){
+  const cornerBusy = !!(pSeg.corner);
+  if(callMode===null && elapsed > nextCall && left > 14 && !cornerBusy){
     const ahead = cars.some(function(c){
       let dz=c.z-(position+playerZ);
       if(dz>trackLength/2) dz-=trackLength;
@@ -987,8 +1068,10 @@ function update(dt, reading, now){
       if(chGap > CHASER_WARN*1.8) chaserArmed=true;
     } else { ui.chaser.hidden=true; chaserArmed=true; }
   }
+  if(braking){ ui.foot.textContent='BRAKING'; ui.foot.className='foot warn'; }
+  else {
   ui.foot.textContent = drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb);
-  ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn';
+  ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn'; }
   ui.diag.textContent = diagText() + ' eff ' + effortAvg.toFixed(2)
     + '/' + effortBase.toFixed(2) + (holding?' hold':' RELEASED');
 
@@ -1130,6 +1213,22 @@ function renderSeg(s){
       poly(x1-lw1,p1.y,x1+lw1,p1.y,x2+lw2,p2.y,x2-lw2,p2.y,'rgba(242,227,176,0.5)');
       x1+=l1; x2+=l2;
     }
+  }
+  if(s.corner && s.cPhase==='brake'){
+    // a band of colour on the road, so the corner is something you see coming
+    const t0=0.08, t1=0.92;
+    const x1a=(p1.x-p1.w)+(p1.w*2)*t0, x1b=(p1.x-p1.w)+(p1.w*2)*t1;
+    const x2a=(p2.x-p2.w)+(p2.w*2)*t0, x2b=(p2.x-p2.w)+(p2.w*2)*t1;
+    poly(x1a,p1.y,x1b,p1.y,x2b,p2.y,x2a,p2.y,
+         (Math.floor(s.index/4)%2===0) ? 'rgba(232,163,61,0.30)' : 'rgba(232,163,61,0.13)');
+  }
+  if(s.corner && s.cPhase==='in'){
+    // the inside kerb lights up through the turn
+    const inside = s.corner.dir>0 ? 1 : -1;  // and the inside is the other side
+    const r1=p1.w/7, r2=p2.w/7;
+    const x1=p1.x+inside*p1.w, x2=p2.x+inside*p2.w;
+    poly(x1,p1.y,x1+inside*r1,p1.y,x2+inside*r2,p2.y,x2,p2.y,
+         (Math.floor(s.index/3)%2===0) ? '#E8A33D' : '#F2E3B0');
   }
   if(s.index < FINISH_SEGS){
     // the chequered line across the road, one row of squares per segment
@@ -1303,8 +1402,11 @@ function drawCar(x,y,scale,car){
 function drawPlayerCar(){
   const bob=Math.sin(performance.now()/80)*(speed/maxSpeed)*2;
   const x=W/2+(shake?(Math.random()-0.5)*shake:0);
-  const y=H*0.86+bob, w=W*0.20, h=w*0.60;
-  ctx.save(); ctx.translate(x,y); ctx.rotate(steer*0.045);
+  // bigger on screen only. Overtaking uses playerX against each rival's lane,
+  // which is in track space and has not changed, so the gaps stay exactly as
+  // wide as they were.
+  const y=H*0.86+bob, w=W*0.26, h=w*0.60;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(steer*0.075);
   ctx.fillStyle='rgba(0,0,0,0.45)';
   ctx.beginPath(); ctx.ellipse(0,h*0.16,w*0.58,h*0.17,0,0,Math.PI*2); ctx.fill();
   if(boost>0){
@@ -1357,6 +1459,34 @@ function render(){
     const s=segments[(base_.index+n)%segments.length];
     if(s.p1.camera.z<=cameraDepth) continue;
     if(s.index===0 && s.p1.screen.y<=s.clip+2) drawGantry(s, performance.now()/1000);
+    // chevron boards on the outside of the bend, through the braking zone and
+    // round the turn itself: the thing you read, rather than react to
+    if(s.corner && s.p1.screen.y<=s.clip+2 && s.index%6===0){
+      const out = s.corner.dir>0 ? -1 : 1;   // measured: negative curve bends left, so its outside is the right
+      const p=s.p1.screen;
+      if(isFinite(p.x) && p.w>1){
+        const bx=p.x+out*p.w*1.55, by=p.y, bw=p.w*0.36, bh=bw*0.62;
+        ctx.save();
+        ctx.fillStyle='rgba(12,17,34,0.88)';
+        ctx.fillRect(bx-bw/2, by-bh*1.9, bw, bh);
+        ctx.strokeStyle='rgba(232,163,61,0.9)'; ctx.lineWidth=Math.max(1,bw*0.06);
+        ctx.strokeRect(bx-bw/2, by-bh*1.9, bw, bh);
+        ctx.fillStyle='#E8A33D';
+        // the board sits outside the bend, but the arrows point INTO it,
+        // the way real chevrons do
+        const arrow = -out;
+        for(let k=0;k<2;k++){
+          const cx=bx-bw*0.18+k*bw*0.34, cy=by-bh*1.9+bh*0.5;
+          ctx.beginPath();
+          ctx.moveTo(cx-arrow*bw*0.12, cy-bh*0.28);
+          ctx.lineTo(cx+arrow*bw*0.13, cy);
+          ctx.lineTo(cx-arrow*bw*0.12, cy+bh*0.28);
+          ctx.lineTo(cx-arrow*bw*0.02, cy);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
     for(const pr of props){
       if(findSeg(pr.z).index!==s.index) continue;
       const pp=(pr.z%segmentLength)/segmentLength;
