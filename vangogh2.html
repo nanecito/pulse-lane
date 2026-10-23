@@ -185,7 +185,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 18;          // bump on every deploy; shown on the start card
+const BUILD = 19;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -1294,7 +1294,14 @@ function poly(x1,y1,x2,y2,x3,y3,x4,y4,c){
   ctx.closePath(); ctx.fill();
 }
 /* ---- painted sky: swirling strokes on an offscreen canvas, painted once ---- */
-const SKY = ['#0B1B3A','#13275A','#1B3C7E','#2A5A9B','#3E7CB8','#5E9BC9'];
+/* Van Gogh does not leave canvas showing. The old sky was ~270 thin strokes
+   scattered over a flat gradient, which reads as scratches on paper rather
+   than paint. This covers the whole surface, builds it in three passes
+   (underpaint, swirl bands, highlights) and gives every stroke a dark edge
+   and a lit ridge so it sits proud like loaded paint. It is all painted once
+   into an offscreen canvas, so none of this costs anything per frame. */
+const SKY  = ['#0B1B3A','#13275A','#1B3C7E','#2A5A9B','#3E7CB8','#5E9BC9','#8FBBDD'];
+const SKY_HI = ['#A8CDE8','#CFE4F3','#E8F2FA'];
 const GOLD = ['#F2C84B','#FFE9A3','#E0A93A'];
 let skyCv = null;
 
@@ -1304,24 +1311,71 @@ function flowAngle(nx,ny){
        + Math.cos(ny*4.4 - nx*2.2)*1.5
        + Math.sin((nx+ny)*3.6)*0.9;
 }
-function strokeRibbon(g, x, y, steps, len, width, color, alpha, swirlAt){
-  g.globalAlpha = alpha;
-  g.strokeStyle = color;
-  g.lineWidth = width;
-  g.lineCap = 'round';
-  g.beginPath(); g.moveTo(x,y);
-  for(let i=0;i<steps;i++){
+function shade(hex,k){
+  const n=parseInt(hex.slice(1),16);
+  const r=Math.max(0,Math.min(255,Math.round(((n>>16)&255)*k)));
+  const g=Math.max(0,Math.min(255,Math.round(((n>>8)&255)*k)));
+  const b=Math.max(0,Math.min(255,Math.round((n&255)*k)));
+  return 'rgb('+r+','+g+','+b+')';
+}
+/* One loaded brushstroke: a tapered ribbon, drawn three times - a dark lip,
+   the body, then a thin lit ridge pushed up-left. That triple is what makes
+   it read as paint standing off the canvas instead of a drawn line. */
+function brush(g, x, y, steps, len, width, color, alpha, swirlAt, lit){
+  const pts=[];
+  for(let i=0;i<=steps;i++){
+    pts.push([x,y]);
     let a = flowAngle(x/skyCv.width, y/skyCv.height);
     if(swirlAt){
-      const dx = x-swirlAt.x, dy = y-swirlAt.y;
-      const d = Math.hypot(dx,dy);
+      const dx=x-swirlAt.x, dy=y-swirlAt.y, d=Math.hypot(dx,dy);
       if(d < swirlAt.r) a = Math.atan2(dy,dx) + Math.PI/2 + (d/swirlAt.r)*1.2;
     }
     x += Math.cos(a)*len; y += Math.sin(a)*len;
-    g.lineTo(x,y);
   }
-  g.stroke();
-  g.globalAlpha = 1;
+  const run=(col,w,al,ox,oy)=>{
+    g.globalAlpha=al; g.strokeStyle=col; g.lineCap='round'; g.lineJoin='round';
+    for(let i=0;i<pts.length-1;i++){
+      // taper: fat in the middle of the stroke, thin at both ends
+      const t=i/(pts.length-1), taper=0.45+0.55*Math.sin(Math.PI*t);
+      g.lineWidth=Math.max(0.4,w*taper);
+      g.beginPath();
+      g.moveTo(pts[i][0]+ox,   pts[i][1]+oy);
+      g.lineTo(pts[i+1][0]+ox, pts[i+1][1]+oy);
+      g.stroke();
+    }
+  };
+  run(shade(color,0.45), width*1.25, alpha*0.55,  0.9,  0.9);   // dark lip below
+  run(color,             width,      alpha,       0,    0  );   // the body
+  if(lit) run(lit,       width*0.30, alpha*0.75, -0.8, -0.8);    // lit ridge above
+  g.globalAlpha=1;
+}
+/* Concentric arcs around a swirl centre, broken into separate strokes so the
+   eye reads brushwork rather than a drawn spiral. */
+function swirlBand(g, c, seed){
+  for(let r=c.r*0.10; r<c.r*1.02; r+=c.r*0.062){
+    const n = Math.max(5, Math.floor(r/9));
+    const tone = Math.min(1, r/c.r);
+    for(let k=0;k<n;k++){
+      const jitter = srand(seed+r*0.7+k*3.3);
+      if(jitter < 0.22) continue;                       // gaps, not a perfect ring
+      const a0 = (k/n)*Math.PI*2 + srand(seed+r+k)*0.5;
+      // sweep varies a lot on purpose: equal-length arcs read as machined
+      // dashes, which is exactly what the first attempt looked like
+      const sweep = (0.14 + jitter*jitter*1.5) * (Math.PI*2/n);
+      const col = SKY[Math.min(SKY.length-1, 1+Math.floor(tone*4 + jitter*1.6))];
+      const lit = (jitter>0.90) ? SKY_HI[Math.floor(jitter*3)%3] : null;
+      const w = (2.2 + jitter*4.6) * (0.55 + tone*0.6);
+      g.globalAlpha = 0.52 + jitter*0.42;
+      const draw=(col2,ww,al,ox,oy)=>{
+        g.globalAlpha=al; g.strokeStyle=col2; g.lineWidth=ww; g.lineCap='round';
+        g.beginPath(); g.arc(c.x+ox, c.y+oy, r, a0, a0+sweep); g.stroke();
+      };
+      draw(shade(col,0.42), w*1.25, 0.30+jitter*0.22,  0.9, 0.9);
+      draw(col,             w,      0.40+jitter*0.28, 0,   0  );
+      if(lit) draw(lit,     w*0.26, 0.38,            -0.8,-0.8);
+    }
+  }
+  g.globalAlpha=1;
 }
 function paintSky(){
   skyCv = document.createElement('canvas');
@@ -1333,43 +1387,97 @@ function paintSky(){
   base.addColorStop(0,'#060D22'); base.addColorStop(0.55,'#13275A'); base.addColorStop(1,'#24487E');
   g.fillStyle = base; g.fillRect(0,0,w,h);
 
-  const moon = { x: w*0.80, y: h*0.17, r: Math.min(w,h)*0.085 };
+  const moon   = { x: w*0.80, y: h*0.17, r: Math.min(w,h)*0.085 };
   const swirlA = { x: w*0.30, y: h*0.22, r: Math.min(w,h)*0.34 };
   const swirlB = { x: w*0.62, y: h*0.36, r: Math.min(w,h)*0.26 };
+  const swirlC = { x: w*0.08, y: h*0.52, r: Math.min(w,h)*0.22 };
+  const swirls = [swirlA, swirlB, swirlC];
+  const nearest = (x,y) => {
+    let best=swirls[0], bd=1e9;
+    for(const c of swirls){ const d=Math.hypot(x-c.x,y-c.y)/c.r; if(d<bd){bd=d;best=c;} }
+    return best;
+  };
 
-  const n = Math.floor((w*h)/1400);
-  for(let i=0;i<n;i++){
-    const x = srand(i*2.1)*w, y = srand(i*3.7)*h*0.92;
-    const c = SKY[Math.floor(srand(i*5.3)*SKY.length)];
-    const len = 5 + srand(i*7.9)*9;
-    const wd  = 1.6 + srand(i*11.3)*4.4;
-    const al  = 0.30 + srand(i*13.1)*0.45;
-    const dA = Math.hypot(x-swirlA.x, y-swirlA.y)/swirlA.r;
-    const dB = Math.hypot(x-swirlB.x, y-swirlB.y)/swirlB.r;
-    strokeRibbon(g, x, y, 7 + Math.floor(srand(i*17.7)*6), len, wd, c, al, dA<dB?swirlA:swirlB);
+  // PASS 1 - underpaint. Enough strokes to bury the gradient completely.
+  const n1 = Math.floor((w*h)/420);
+  for(let i=0;i<n1;i++){
+    const x = srand(i*2.1)*w, y = srand(i*3.7)*h*0.98;
+    const r = srand(i*5.3);
+    const col = SKY[Math.floor(r*5)];
+    brush(g, x, y, 6+Math.floor(srand(i*17.7)*5), 6+srand(i*7.9)*8,
+          4.5+srand(i*11.3)*7, col, 0.55+srand(i*13.1)*0.35, nearest(x,y), null);
   }
 
-  for(let i=0;i<11;i++){
-    const sx = srand(i*23.3)*w, sy = srand(i*29.1)*h*0.62;
+  // PASS 2 - the swirls themselves, as concentric brushwork
+  swirlBand(g, swirlA, 11.3);
+  swirlBand(g, swirlB, 57.9);
+  swirlBand(g, swirlC, 91.7);
+
+  // PASS 3 - highlights riding on top of the wet paint
+  const n3 = Math.floor((w*h)/4200);
+  for(let i=0;i<n3;i++){
+    const x = srand(i*19.3+5)*w, y = srand(i*23.9+5)*h*0.9;
+    const r = srand(i*29.7);
+    brush(g, x, y, 5+Math.floor(r*4), 7+r*9, 1.8+r*2.6,
+          SKY[4+Math.floor(r*2)], 0.28+r*0.26, nearest(x,y),
+          r>0.6 ? SKY_HI[Math.floor(r*3)%3] : null);
+  }
+
+  /* Knock the top band back BEFORE the lights go on. Painted after them it
+     greyed out the moon and the upper stars into flat discs - the scrim is
+     meant to quiet the swirls behind the HUD, not dim the light sources. */
+  const hud = g.createLinearGradient(0,0,0,h*0.32);
+  hud.addColorStop(0,'rgba(6,13,34,0.52)');
+  hud.addColorStop(1,'rgba(6,13,34,0)');
+  g.fillStyle = hud; g.fillRect(0,0,w,h*0.32);
+
+  // stars: a bloom, then concentric rings of short strokes, the way he rings them
+  for(let i=0;i<13;i++){
+    const sx = srand(i*23.3)*w, sy = srand(i*29.1)*h*0.66;
     const sr = Math.min(w,h)*(0.012 + srand(i*31.7)*0.022);
-    const halo = g.createRadialGradient(sx,sy,0,sx,sy,sr*4.2);
-    halo.addColorStop(0,'rgba(255,233,163,0.85)');
-    halo.addColorStop(0.35,'rgba(242,200,75,0.35)');
+    const halo = g.createRadialGradient(sx,sy,0,sx,sy,sr*4.6);
+    halo.addColorStop(0,'rgba(255,236,176,0.92)');
+    halo.addColorStop(0.35,'rgba(242,200,75,0.40)');
     halo.addColorStop(1,'rgba(242,200,75,0)');
-    g.fillStyle = halo; g.beginPath(); g.arc(sx,sy,sr*4.2,0,Math.PI*2); g.fill();
-    g.fillStyle = '#FFF4CF'; g.beginPath(); g.arc(sx,sy,sr,0,Math.PI*2); g.fill();
-    for(let k=0;k<7;k++){
-      const a = (k/7)*Math.PI*2 + srand(i*37.1)*2;
-      strokeRibbon(g, sx+Math.cos(a)*sr*1.6, sy+Math.sin(a)*sr*1.6, 4, sr*0.9,
-                   sr*0.34, GOLD[k%3], 0.55, { x:sx, y:sy, r:sr*5 });
+    g.fillStyle = halo; g.beginPath(); g.arc(sx,sy,sr*4.6,0,Math.PI*2); g.fill();
+    // two broken rings, not three even ones. Evenly spaced equal arcs read as
+    // a dashed circle - a clock face - which is what the first pass gave.
+    for(let ring=1; ring<=2; ring++){
+      const rr = sr*(1.30 + ring*0.80);
+      const cnt = 6 + ring*3;
+      for(let k=0;k<cnt;k++){
+        const jj = srand(i*7.7 + ring*13.1 + k*3.9);
+        if(jj < 0.34) continue;
+        const a0 = (k/cnt)*Math.PI*2 + jj*1.3;
+        const sweep = (0.12+jj*jj*1.1)*(Math.PI*2/cnt);
+        g.globalAlpha = (0.34 - ring*0.09) + jj*0.16;
+        g.strokeStyle = GOLD[Math.floor(jj*3)%3];
+        g.lineWidth = sr*(0.26 - ring*0.07)*(0.6+jj*0.8); g.lineCap='round';
+        g.beginPath(); g.arc(sx,sy,rr,a0,a0+sweep); g.stroke();
+      }
     }
+    g.globalAlpha=1;
+    g.fillStyle = '#FFF4CF'; g.beginPath(); g.arc(sx,sy,sr,0,Math.PI*2); g.fill();
   }
 
-  const mh = g.createRadialGradient(moon.x,moon.y,0,moon.x,moon.y,moon.r*3.4);
+  const mh = g.createRadialGradient(moon.x,moon.y,0,moon.x,moon.y,moon.r*3.8);
   mh.addColorStop(0,'rgba(255,240,190,0.75)');
   mh.addColorStop(0.4,'rgba(242,200,75,0.3)');
   mh.addColorStop(1,'rgba(242,200,75,0)');
-  g.fillStyle = mh; g.beginPath(); g.arc(moon.x,moon.y,moon.r*3.4,0,Math.PI*2); g.fill();
+  g.fillStyle = mh; g.beginPath(); g.arc(moon.x,moon.y,moon.r*3.8,0,Math.PI*2); g.fill();
+  for(let ring=1; ring<=3; ring++){
+    const rr = moon.r*(1.18 + ring*0.46), cnt = 9 + ring*3;
+    for(let k=0;k<cnt;k++){
+      const jj = srand(ring*17.3 + k*5.1);
+      if(jj < 0.32) continue;
+      const a0 = (k/cnt)*Math.PI*2 + jj*1.4;
+      g.globalAlpha = (0.34 - ring*0.07) + jj*0.16;
+      g.strokeStyle = GOLD[Math.floor(jj*3)%3];
+      g.lineWidth = moon.r*(0.13 - ring*0.028)*(0.6+jj*0.8); g.lineCap='round';
+      g.beginPath(); g.arc(moon.x,moon.y,rr,a0,a0+(0.12+jj*jj*0.9)*(Math.PI*2/cnt)); g.stroke();
+    }
+  }
+  g.globalAlpha=1;
   g.fillStyle = '#FFF0BE';
   g.beginPath();
   g.arc(moon.x, moon.y, moon.r, Math.PI*0.5, Math.PI*1.5);
@@ -1377,11 +1485,7 @@ function paintSky(){
                   moon.x + moon.r*0.62, moon.y + moon.r*0.72,
                   moon.x, moon.y + moon.r);
   g.closePath(); g.fill();
-  for(let k=0;k<9;k++){
-    const a = Math.PI*0.5 + (k/8)*Math.PI;
-    strokeRibbon(g, moon.x+Math.cos(a)*moon.r*1.35, moon.y+Math.sin(a)*moon.r*1.35,
-                 5, moon.r*0.34, moon.r*0.13, GOLD[k%3], 0.5, { x:moon.x, y:moon.y, r:moon.r*4 });
-  }
+
 }
 
 function drawSky(){
@@ -1390,31 +1494,83 @@ function drawSky(){
 }
 function renderSeg(s){
   const p1=s.p1.screen,p2=s.p2.screen;
-  ctx.fillStyle = s.dark?'#6E5410':'#7D6016';
+  /* The fields. Two alternating flat ochres used to leave hard horizontal
+     seams right across the screen, which was the least painted thing in the
+     picture. The two tones are much closer now so the seam stops shouting,
+     and the colour comes from strokes laid over it instead: warm ochres with
+     olive and violet worked through them, the way he keeps a field alive by
+     putting its complement next to it rather than by changing the fill.
+     Stroke count scales with how tall the band is on screen, so near ground
+     gets real brushwork and the far ground stays cheap. */
+  ctx.fillStyle = s.dark?'#705713':'#775C15';
   ctx.fillRect(0,p2.y,W,p1.y-p2.y+1);
   const band = p1.y-p2.y;
-  if(band > 4){
-    const cols = ['#9C7A1C','#C39A28','#E0B840','#5C4510'];
-    for(let q=0;q<10;q++){
-      const r1=srand(s.index*7.3+q*2.9), r2=srand(s.index*11.7+q*5.1), r3=srand(s.index*3.1+q*8.7);
-      const px = r1*W;
-      if(px > p1.x-p1.w*1.3 && px < p1.x+p1.w*1.3) continue;
-      const py = p2.y + r2*band;
-      const len = 5 + r3*11, ang = -1.15 + r1*0.5;
-      ctx.strokeStyle = cols[q%4];
-      ctx.lineWidth = 1.2 + r2*2.1;
-      ctx.globalAlpha = 0.55 + r3*0.4;
-      ctx.beginPath(); ctx.moveTo(px,py);
-      ctx.lineTo(px+Math.cos(ang)*len, py+Math.sin(ang)*len);
-      ctx.stroke();
+  // far bands are only a pixel or two tall; brushwork there costs a lot of
+  // strokes for nothing visible, and this runs every frame
+  if(band > 2.2){
+    const WARM = ['#9C7A1C','#C39A28','#E0B840','#B8871F','#D8A82F'];
+    const COOL = ['#53702A','#3E5E22','#6E5A3A','#2F4A2E','#7A5E2B'];
+    /* Place strokes IN the verges rather than over the whole width and throw
+       away the ones that land on the road. Near the camera the road fills most
+       of the screen, so that threw away nearly all of them and left the near
+       ground bare - which is exactly where the brushwork needs to be visible. */
+    const gutNear = Math.max(0, p1.x-p1.w) + Math.max(0, W-(p1.x+p1.w));
+    if(gutNear > 1.5){
+      const q0 = Math.max(3, Math.min(13, Math.round(Math.sqrt(gutNear*band)*0.62)));
+      for(let q=0;q<q0;q++){
+        const r1=srand(s.index*7.3+q*2.9), r2=srand(s.index*11.7+q*5.1), r3=srand(s.index*3.1+q*8.7);
+        const py = p2.y + r2*band;
+        const t  = band>0 ? (py-p2.y)/band : 0;              // 0 far, 1 near
+        const cx = p2.x + (p1.x-p2.x)*t, cw = p2.w + (p1.w-p2.w)*t;
+        const lg = Math.max(0, cx-cw), rg = Math.max(0, W-(cx+cw));
+        if(lg+rg < 1) continue;
+        const pick = r1*(lg+rg);
+        const px = pick < lg ? pick : (cx+cw) + (pick-lg);
+        // strokes fan out from up the road, so the field reads in perspective
+        // instead of every mark leaning the same way
+        const ang = Math.atan2(py-p2.y+1, px-p2.x) + (flowAngle(px/W,py/H))*0.13;
+        const near = Math.min(1, band/26);
+        const len = (3.5 + r3*8) * (0.45 + near*1.9);
+        ctx.strokeStyle = (r3 > 0.60) ? COOL[q%5] : WARM[q%5];
+        ctx.lineWidth = (1.0 + r2*2.0) * (0.55 + near*1.2);
+        ctx.globalAlpha = 0.45 + r3*0.45;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(px,py);
+        ctx.lineTo(px+Math.cos(ang)*len, py+Math.sin(ang)*len);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      ctx.lineCap = 'butt';
     }
-    ctx.globalAlpha = 1;
   }
   const r1=p1.w/8, r2=p2.w/8;
   const rb = s.dark?'#F2E3B0':'#C84B2E';
   poly(p1.x-p1.w-r1,p1.y,p1.x-p1.w,p1.y,p2.x-p2.w,p2.y,p2.x-p2.w-r2,p2.y,rb);
   poly(p1.x+p1.w+r1,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x+p2.w+r2,p2.y,rb);
   poly(p1.x-p1.w,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x-p2.w,p2.y, s.dark?'#1E2436':'#242B40');
+  /* The road gets a whisper of the same brushwork so it does not sit in the
+     picture as the one flat plastic surface. Kept very low contrast on
+     purpose: this is the thing the player has to read at speed, and a
+     painterly road that hides the lane lines would be a bad trade. */
+  if(band > 5){
+    for(let q=0;q<4;q++){
+      const r1=srand(s.index*5.9+q*3.7), r2=srand(s.index*13.3+q*7.1);
+      const py = p2.y + r2*band;
+      const t  = (py-p2.y)/band;
+      const cx = p2.x + (p1.x-p2.x)*t, cw = p2.w + (p1.w-p2.w)*t;
+      const px = cx - cw + r1*cw*2;
+      const len = (4 + r2*9)*Math.min(2.2, band/14);
+      ctx.strokeStyle = (r1>0.5) ? '#39415C' : '#141A2A';
+      ctx.lineWidth = 1.3 + r2*2.4;
+      ctx.globalAlpha = 0.30 + r2*0.24;
+      ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(px,py);
+      ctx.lineTo(px+Math.cos(Math.atan2(py-p2.y+1,px-p2.x))*len,
+                 py+Math.sin(Math.atan2(py-p2.y+1,px-p2.x))*len);
+      ctx.stroke();
+    }
+    ctx.globalAlpha=1; ctx.lineCap='butt';
+  }
   if(s.laneOn){
     const lw1=p1.w/60, lw2=p2.w/60, l1=(p1.w*2)/lanes, l2=(p2.w*2)/lanes;
     let x1=p1.x-p1.w+l1, x2=p2.x-p2.w+l2;
