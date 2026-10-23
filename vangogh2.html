@@ -190,7 +190,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 20;          // bump on every deploy; shown on the start card
+const BUILD = 21;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -204,7 +204,8 @@ const maxSpeed = segmentLength*27;   // slower again; the track is shortened to 
 const accel = maxSpeed/11, coast = -maxSpeed/4.5, offRoadDecel = -maxSpeed/4;
 const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
-const FULL_CADENCE = 105;   // a 1Hz march reads ~120, so this is full speed at a normal march
+const FULL_CADENCE = 70;    // a 1Hz march reads ~120, so full speed now comes at a
+                            // slow 0.6Hz shuffle - deliberately easy for now
 /* How effort turns into speed. Below 1 this bends in the player's favour: a
    gentle march already gets most of the speed, while the gradient and the
    quick response to stopping both survive, which a lower FULL_CADENCE alone
@@ -246,6 +247,11 @@ const CORNER_PULL   = 1.7;   // how much harder a marked corner throws you wide
 const CORNER_GRIP   = 0.78;  // fraction of full steering lock a corner may demand
 const CORNER_CLEAN  = 0.82;  // fraction of the corner on-road to count as clean
 const CORNER_BOOST  = 5.5;   // seconds of push for getting one right
+/* How sharp every corner is. Swept against the sim: the test is whether
+   never braking is still faster than braking, which is what decides whether
+   the brake is a real decision or decoration. */
+const CURVE_SCALE   = 1.15;
+const BRAKE_REWARD  = 1.6;   // exit boost for a corner you actually braked for
 const CORNER_OFF    = 0.38;  // speed you are cut to for running wide inside a corner
 /* Steering. A wide dead band so bouncing and dancing do nothing, a gentle
    curve near the centre, and full lock only at a big, deliberate turn. Not
@@ -286,10 +292,10 @@ const CHASER_WARN   = 25;    // metres: when it is close enough to say so
    drive - you cannot march while you are down - which made an easy march fall
    from P2 to P4. This puts the ladder back where it was. */
 const RIVALS = [
-  { key:'dali',     name:'DALI',     pace: 26, lane:-0.62 },
-  { key:'picasso',  name:'PICASSO',  pace: 28, lane: 0.62 },
-  { key:'frida',    name:'FRIDA',    pace: 28, lane:-0.22 },
-  { key:'mondrian', name:'MONDRIAN', pace: 29, lane: 0.22 }
+  { key:'dali',     name:'DALI',     pace: 25, lane:-0.62 },
+  { key:'picasso',  name:'PICASSO',  pace: 27, lane: 0.62 },
+  { key:'frida',    name:'FRIDA',    pace: 27, lane:-0.22 },
+  { key:'mondrian', name:'MONDRIAN', pace: 28, lane: 0.22 }
 ];
 
 const cv = document.getElementById('view'), ctx = cv.getContext('2d');
@@ -501,43 +507,48 @@ function mid(a,b){ const p=pt(a),q=pt(b); if(!p||!q) return null; return {x:(p.x
 
 /* ---- track ---- */
 let segments=[], trackLength=0, cars=[];
-function lastY(){ return segments.length===0?0:segments[segments.length-1].p2.world.y; }
 function easeIn(a,b,p){ return a+(b-a)*p*p; }
 function easeInOut(a,b,p){ return a+(b-a)*((-Math.cos(p*Math.PI)/2)+0.5); }
-function addSeg(curve,y){
+function addSeg(curve){
   const n=segments.length;
   segments.push({ index:n,
-    p1:{world:{y:lastY(),z:n*segmentLength},camera:{},screen:{}},
-    p2:{world:{y:y,z:(n+1)*segmentLength},camera:{},screen:{}},
+    p1:{world:{y:0,z:n*segmentLength},camera:{},screen:{}},
+    p2:{world:{y:0,z:(n+1)*segmentLength},camera:{},screen:{}},
     curve:curve, dark:Math.floor(n/rumbleLength)%2===0,
     laneOn:Math.floor(n/LANE_SEGS)%2===0, clip:0, looped:false, fog:0 });
 }
-function addRoad(enter,hold,leave,curve,y){
-  const sY=lastY(), eY=sY+y*segmentLength, total=enter+hold+leave;
-  for(let i=0;i<enter;i++) addSeg(easeIn(0,curve,i/enter), easeInOut(sY,eY,i/total));
-  for(let i=0;i<hold;i++)  addSeg(curve, easeInOut(sY,eY,(enter+i)/total));
-  for(let i=0;i<leave;i++) addSeg(easeInOut(curve,0,i/leave), easeInOut(sY,eY,(enter+hold+i)/total));
+/* The road is flat. The hills were never anything but drawn - world.y only
+   ever reached the camera projection, never speed - so cresting one did not
+   actually make you faster. What it did do was make the road LOOK faster as
+   it dropped away, which breaks the one thing the game is about: your speed
+   coming from your legs and nothing else. Worse, a crest hides the road
+   beyond it, and seeing a long way ahead is the only thing that makes a
+   corner readable through 150-250ms of camera lag. */
+function addRoad(enter,hold,leave,curve){
+  curve *= CURVE_SCALE;
+  for(let i=0;i<enter;i++) addSeg(easeIn(0,curve,i/enter));
+  for(let i=0;i<hold;i++)  addSeg(curve);
+  for(let i=0;i<leave;i++) addSeg(easeInOut(curve,0,i/leave));
 }
 function buildTrack(){
   segments=[];
-  // A real circuit: one loop is one lap, so the start/finish line can live at a
-  // fixed place on the road. The hills sum to zero, or the loop would not close
-  // and there would be a step in the ground exactly under the gantry.
-  addRoad(60,140,60, 0,  0);   // start/finish straight, long enough to see the line coming
-  addRoad(26, 40,26, 4, 20); addRoad(18, 26,18,-2,-16); addRoad(26, 52,26,-5,  0);
-  addRoad(18, 30,18, 3, 28); addRoad(30, 37,30, 0,-24); addRoad(26, 48,26,-3, 12);
-  addRoad(18, 26,18, 6,  0); addRoad(30, 40,30,-4,-20); addRoad(26, 37,26, 2, 16);
-  addRoad(37, 48,37, 0,  0); addRoad(26, 37,26,-6,  0); addRoad(18, 30,18, 5, 24);
-  addRoad(30, 52,30,-3,-28); addRoad(26, 40,26, 2,  0); addRoad(37, 60,37, 0, 16);
-  addRoad(18, 26,18,-7,  0); addRoad(30, 48,30, 4,-20); addRoad(26, 37,26,-2, 24);
-  addRoad(18, 30,18, 6,  0); addRoad(30, 40,30,-5,-16); addRoad(26, 52,26, 3,  0);
-  addRoad(37, 37,37, 0, 12); addRoad(18, 26,18,-4,-28); addRoad(30, 37,30, 2,  0);
-  // THE HAIRPIN. A long flat approach so it is visible from a long way out,
+  // A real circuit: one loop is one lap, so the start/finish line can live at
+  // a fixed place on the road.
+  addRoad(60,140,60, 0);   // start/finish straight, long enough to see the line coming
+  addRoad(26, 40,26, 4); addRoad(18, 26,18,-2); addRoad(26, 52,26,-5);
+  addRoad(18, 30,18, 3); addRoad(30, 37,30, 0); addRoad(26, 48,26,-3);
+  addRoad(18, 26,18, 6); addRoad(30, 40,30,-4); addRoad(26, 37,26, 2);
+  addRoad(37, 48,37, 0); addRoad(26, 37,26,-6); addRoad(18, 30,18, 5);
+  addRoad(30, 52,30,-3); addRoad(26, 40,26, 2); addRoad(37, 60,37, 0);
+  addRoad(18, 26,18,-7); addRoad(30, 48,30, 4); addRoad(26, 37,26,-2);
+  addRoad(18, 30,18, 6); addRoad(30, 40,30,-5); addRoad(26, 52,26, 3);
+  addRoad(37, 37,37, 0); addRoad(18, 26,18,-4); addRoad(30, 37,30, 2);
+  // THE HAIRPIN. A long approach so it is visible from a long way out,
   // then the sharpest corner on the circuit, then a short straight to recover.
-  addRoad(60,130,60, 0,  0);
-  addRoad(20, 70,20,-11, 0);
-  addRoad(30, 45,30, 0,  0);
-  addRoad(60,150,60, 0,  0);   // the run to the line
+  addRoad(60,130,60, 0);
+  addRoad(20, 70,20,-11);
+  addRoad(30, 45,30, 0);
+  addRoad(60,150,60, 0);   // the run to the line
   trackLength = segments.length*segmentLength;
   // distance advances at speed*dt/125 and position at speed*dt, so one loop of
   // the track is exactly this many metres. Deriving it means the painted line
@@ -648,7 +659,7 @@ let state='idle';
 let position=0, speed=0, playerX=0, distance=0;
 let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let effortAvg=0, effortBase=0, chaserArmed=true;
-let curCorner=null, cFrames=0, cOff=0, cLean=0;
+let curCorner=null, cFrames=0, cOff=0, cLean=0, cBrake=0;
 let signAlpha=0, lastSignCorner=null;
 let braking=false, brakeRamp=0, brakeAmt=0;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
@@ -986,7 +997,7 @@ function startRace(fresh){
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   hitTimer=0; callTimer=0; steer=0; steerRaw=0;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
-  curCorner=null; cFrames=0; cOff=0; cLean=0; braking=false; brakeRamp=0; brakeAmt=0;
+  curCorner=null; cFrames=0; cOff=0; cLean=0; cBrake=0; braking=false; brakeRamp=0; brakeAmt=0;
   signAlpha=0; lastSignCorner=null;
   position=0; speed=0; playerX=0; boost=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
@@ -1180,7 +1191,7 @@ function update(dt, reading, now){
   // the corner is scored across its whole length and graded on the way out
   const segCorner = inCorner ? pSeg.corner : null;
   if(segCorner && segCorner!==curCorner){
-    curCorner=segCorner; cFrames=0; cOff=0; cLean=0;
+    curCorner=segCorner; cFrames=0; cOff=0; cLean=0; cBrake=0;
   }
   if(curCorner){
     if(segCorner===curCorner){
@@ -1188,14 +1199,25 @@ function update(dt, reading, now){
       if(playerX<-1||playerX>1) cOff++;
       // leaning the right way: steer sign matches the corner's direction
       if(steer*curCorner.dir > 0.12) cLean++;
+      if(brakeRamp > 0.25) cBrake++;
     } else if(cFrames > 20){
       // out the far side: grade it
       const clean = 1 - cOff/cFrames;
       const held  = cLean/cFrames;
+      /* Braking is rewarded rather than not-braking punished. Measured: with
+         the brake as it was, never braking was 15-40s a lap FASTER, because
+         running wide only caps your speed for the length of a corner while
+         braking costs you the whole climb back afterwards. Sharpening the
+         corners made that worse (up to 97s), cutting the off-road floor to
+         0.10 barely moved it, and faster acceleration only narrowed it while
+         wrecking the clean line. The one lever that does not mean re-adding
+         the off-road punishment Hugo asked to have removed is to pay for the
+         brake on the way out. */
+      const braked = cBrake/cFrames >= 0.18;
       if(clean >= CORNER_CLEAN && held >= 0.30){
-        boost = Math.max(boost, CORNER_BOOST);
-        showCall('GOOD CORNER','', 'good'); callTimer=1.1;
-        blip(820,0.22,0.3);
+        boost = Math.max(boost, braked ? CORNER_BOOST*BRAKE_REWARD : CORNER_BOOST*0.45);
+        showCall(braked?'GOOD CORNER':'GOOD LINE','', 'good'); callTimer=1.1;
+        blip(braked?820:700,0.22,0.3);
       } else if(clean < 0.6){
         showCall('RAN WIDE','', 'ready'); callTimer=1.0;
         blip(190,0.24,0.26,'sawtooth');
@@ -1489,9 +1511,20 @@ function renderSeg(s){
   ctx.fillStyle = s.dark?'#705713':'#775C15';
   ctx.fillRect(0,p2.y,W,p1.y-p2.y+1);
   const band = p1.y-p2.y;
-  // far bands are only a pixel or two tall; brushwork there costs a lot of
-  // strokes for nothing visible, and this runs every frame
-  if(band > 2.2){
+  /* A segment thinner than a pixel still cost six polygons for kerbs, road and
+     lane lines that cannot be seen. That did not matter when hills hid a third
+     of the road; on a flat track almost nothing is culled and every one of
+     them reaches the screen. Ground fill plus the road surface only. */
+  if(band < 1.1){
+    poly(p1.x-p1.w,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x-p2.w,p2.y, s.dark?'#1E2436':'#242B40');
+    if(s.fog>0.01){ ctx.fillStyle='rgba(19,39,90,'+s.fog.toFixed(3)+')'; ctx.fillRect(0,p2.y,W,p1.y-p2.y+1); }
+    return;
+  }
+  /* Far bands are only a pixel or two tall; brushwork there costs a lot of
+     strokes for nothing visible, and this runs every frame. Raised from 2.2
+     when the road went flat: with no crests to hide behind, far more segments
+     reach the screen, and the frame cost went 7.34ms -> 9.52ms. */
+  if(band > 3.4){
     const WARM = ['#9C7A1C','#C39A28','#E0B840','#B8871F','#D8A82F'];
     const COOL = ['#53702A','#3E5E22','#6E5A3A','#2F4A2E','#7A5E2B'];
     /* Place strokes IN the verges rather than over the whole width and throw
@@ -1536,7 +1569,7 @@ function renderSeg(s){
      picture as the one flat plastic surface. Kept very low contrast on
      purpose: this is the thing the player has to read at speed, and a
      painterly road that hides the lane lines would be a bad trade. */
-  if(band > 5){
+  if(band > 8){
     for(let q=0;q<4;q++){
       const r1=srand(s.index*5.9+q*3.7), r2=srand(s.index*13.3+q*7.1);
       const py = p2.y + r2*band;
