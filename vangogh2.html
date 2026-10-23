@@ -182,7 +182,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 15;          // bump on every deploy; shown on the start card
+const BUILD = 16;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -621,6 +621,17 @@ let hitTimer=0;   // brief shield + untapered pull-away after contact
 let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
 let base=null, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
+// Visibility hysteresis. It takes a clear view to ACQUIRE a limb pair, but only
+// a faint one to KEEP the pair already driving. Measured: with one hard 0.12
+// gate, a knee hovering near it flipped knees<->ankles 41-149 times in 30s, and
+// since every source feeds the SAME stepTimes array with its own up/down state,
+// the flipping both dropped real steps and injected phantom ones - a steady
+// 110 march read as 44-82 or as 181-253. Steady visibility at ANY level was
+// always fine; only crossing the line broke it.
+const VIS_GET = 0.15, VIS_KEEP = 0.04, SRC_HOLD = 600;
+const SRC_NAME = {kn:'knees', an:'ankles', ar:'arms'};
+let srcLost = 0;
+const seenLatch = {kn:false, an:false};
 let rest={}, lastLift=null;
 let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START;
 const step=1/60;
@@ -737,12 +748,54 @@ function readPose(dt, now){
   }
 
   if(base){
-    const lk=pt(L.lkn,0.12), rk=pt(L.rkn,0.12);
-    const la=pt(L.lank,0.12), ra=pt(L.rank,0.12);
-    if(stepPair('kn', lk, rk, now, dt)) driveSrc='knees';
-    else if(stepPair('an', la, ra, now, dt)) driveSrc='ankles';
-    else if(stepPair('ar', lw, rw, now, dt)) driveSrc='arms';
-    else { driveSrc='none'; lastLift=null; }
+    const cur = Object.keys(SRC_NAME).find(t => SRC_NAME[t]===driveSrc) || null;
+    const see = (tag, i1, i2) => {
+      const thr = (tag===cur) ? VIS_KEEP : VIS_GET;
+      const a=pt(i1,thr), b=pt(i2,thr);
+      return (a||b) ? [a,b] : null;
+    };
+    const avail = {
+      kn: see('kn', L.lkn,  L.rkn),
+      an: see('an', L.lank, L.rank),
+      ar: (lw||rw) ? [lw,rw] : null
+    };
+    // a faintly-seen pair is still better than falling through to the arms, so
+    // acquisition has a second tier at the KEEP level. It cannot cause flipping:
+    // a pair already driving is held at that same level by the branch above.
+    const faint = {
+      kn: (pt(L.lkn,VIS_KEEP)||pt(L.rkn,VIS_KEEP)) ? [pt(L.lkn,VIS_KEEP),pt(L.rkn,VIS_KEEP)] : null,
+      an: (pt(L.lank,VIS_KEEP)||pt(L.rank,VIS_KEEP)) ? [pt(L.lank,VIS_KEEP),pt(L.rank,VIS_KEEP)] : null,
+      ar: avail.ar
+    };
+    const pick = () => avail.kn ? 'kn' : avail.an ? 'an'
+                     : faint.kn ? 'kn' : faint.an ? 'an' : avail.ar ? 'ar' : null;
+    // exactly ONE source runs per frame. Running the fallback in the same frame
+    // as the primary is what let two detectors push into one step history.
+    let tag = null;
+    if(cur && avail[cur]){ tag = cur; srcLost = 0; }
+    else if(cur){
+      // don't abandon a source the instant it blinks out - coast on the last
+      // one for SRC_HOLD, then fall through to whatever is actually visible
+      srcLost += dt*1000;
+      if(srcLost < SRC_HOLD) tag = null;
+      else tag = pick();
+    } else {
+      tag = pick();
+      srcLost = 0;
+    }
+    if(tag && tag!==cur){
+      // a real handover: drop the old pair's up/down state so a limb left
+      // mid-stride cannot fire a phantom step when it comes back
+      for(const k of Object.keys(limbUp)) if(!k.startsWith(tag)) limbUp[k]=false;
+      srcLost = 0;
+    }
+    if(tag){
+      const pr = avail[tag] || faint[tag];
+      stepPair(tag, pr[0], pr[1], now, dt);
+      driveSrc = SRC_NAME[tag];
+    } else if(srcLost === 0 || !cur){
+      driveSrc='none'; lastLift=null;
+    }
   }
   while(stepTimes.length && now-stepTimes[0] > CAD_WINDOW) stepTimes.shift();
   const rawCad = stepTimes.length * (60000/CAD_WINDOW);
@@ -1842,8 +1895,14 @@ function beginRaceFrom(r){
 function calibrate(r,dt){
   const F = videoFit();
   const fit = fitGuide(F, dt);
-  const kneesSeen  = !!(pt(L.lkn,0.12)||pt(L.rkn,0.12));
-  const anklesSeen = !!(pt(L.lank,0.12)||pt(L.rank,0.12));
+  // same hysteresis as the drive gate: a limb hovering on one threshold made
+  // the guide strobe between seen and not-seen, which reads as broken tracking
+  const latch = (k, i1, i2) => {
+    const thr = seenLatch[k] ? VIS_KEEP : VIS_GET;
+    return (seenLatch[k] = !!(pt(i1,thr)||pt(i2,thr)));
+  };
+  const kneesSeen  = latch('kn', L.lkn,  L.rkn);
+  const anklesSeen = latch('an', L.lank, L.rank);
   // knees are no longer a place to put your knee. being seen IS the whole goal,
   // and it is the only reason standing further back ever mattered.
   drawGuide(F, fit, kneesSeen);
