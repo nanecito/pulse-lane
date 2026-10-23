@@ -190,7 +190,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 21;          // bump on every deploy; shown on the start card
+const BUILD = 22;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -275,6 +275,22 @@ const STEER_CURVE   = 1.30;   // >1 keeps small movements small
    It also now costs you drive, because you cannot march while you are down:
    cadence fell 105 -> 81 through a squat, against 105 -> 122 with hands up,
    which is why braking with your hands never cost anything. */
+/* Your standing height is tracked, not frozen. It used to be captured once at
+   calibration and compared against forever, so ANY sustained change read as a
+   permanent partial squat: settling into a marching stance, drifting a step
+   nearer the camera, nudging the phone. Measured on the old code, standing
+   0.25 of a torso lower than you calibrated - about 15cm - held the brake at
+   0.91 for as long as you marched. That is the "it was braking the whole
+   time" bug, and it was never the hip bob I tuned for.
+   The reference follows you UP quickly, because standing taller is simply
+   your new height, and DOWN slowly, so a squat still reads at once but a
+   slump is forgiven within a few seconds. Same idea as the step detector:
+   judge the body against its own recent self, not against a frozen pose. */
+const REF_UP       = 0.5;   // seconds to accept a taller stance
+const REF_DOWN     = 3.5;   // seconds to forgive a lower one. This also sets how
+                            // long you can hold the brake before the reference
+                            // catches up: it is a tap, not a handbrake. A corner
+                            // approach needs 1-2s, so 3.5 is comfortably enough.
 const SQUAT_DEAD   = 0.55;  // fraction of a full squat before any brake at all,
                             // so the hip bob of a normal march brakes nothing
 const BRAKE_RATE    = 5.0;   // how hard braking bleeds speed (maxSpeed/this per sec)
@@ -678,6 +694,7 @@ const SRC_NAME = {kn:'knees', an:'ankles'};   // legs only: hands never drive
 let srcLost = 0;
 let angSm = null, angPrev = 0, angSpd = 0;
 let legsSeen = false, legsGone = 0, legsWarned = false;
+let hipRef = null, shRef = null;
 const seenLatch = {kn:false, an:false};
 let rest={}, lastLift=null;
 const step=1/60;
@@ -799,8 +816,12 @@ function readPose(dt, now){
   steer += (steerRaw - steer) * (1 - Math.pow(0.72, dt*60));
 
   if(base){
-    const hipDrop = (hp.y - base.hipY)/base.torso;
-    const shDrop  = (sh.y - base.shY)/base.torso;   // makeBase always gives a number
+    if(hipRef===null){ hipRef = base.hipY; shRef = base.shY; }
+    const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y < ref ? REF_UP : REF_DOWN));
+    hipRef = follow(hipRef, hp.y);
+    shRef  = follow(shRef,  sh.y);
+    const hipDrop = (hp.y - hipRef)/base.torso;
+    const shDrop  = (sh.y - shRef )/base.torso;
     squatDepth = Math.max(0, Math.max(hipDrop, shDrop)) / SQUAT_DEPTH;
   }
 
@@ -1001,7 +1022,7 @@ function startRace(fresh){
   signAlpha=0; lastSignCorner=null;
   position=0; speed=0; playerX=0; boost=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
-  legsSeen=false; legsGone=0; legsWarned=false; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
+  legsSeen=false; legsGone=0; legsWarned=false; hipRef=null; shRef=null; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
   state='race'; startTime=performance.now()/1000; acc=0;
   bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
   if(schedTimer) clearInterval(schedTimer);
