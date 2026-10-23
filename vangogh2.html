@@ -37,6 +37,12 @@ canvas{display:block;width:100%;height:100%}
   border-radius:999px;padding:4px 13px;margin-bottom:7px}
 .chaser.near{color:var(--ink);background:var(--red);border-color:var(--red);font-weight:700}
 .foot{font-size:clamp(11px,1.5vw,16px);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+/* how hard you are braking, right under the effort bar: the two things your
+   body is doing, side by side */
+.brake{width:100%;max-width:640px;height:clamp(8px,1.3vw,14px);border-radius:999px;
+  background:rgba(242,246,255,.10);overflow:hidden;margin-top:5px}
+.brake i{display:block;height:100%;width:0%;background:var(--amber);transition:width .07s linear}
+.brake i.full{background:var(--red)}
 .foot.warn{color:var(--amber)}
 
 .diag{font-size:clamp(9px,1.1vw,12px);letter-spacing:.06em;color:var(--muted);opacity:.7;font-variant-numeric:tabular-nums}
@@ -115,6 +121,7 @@ button[disabled]{opacity:.5;cursor:default}
   </div>
   <div class="bottom">
     <div class="cad"><i id="hCad"></i><b></b></div>
+    <div class="brake" id="depthWrap" hidden><i id="callDepth"></i></div>
     <div class="chaser" id="hChaser" hidden></div>
     <div class="foot" id="hFoot">March to build speed</div>
     <div class="diag" id="hDiag"></div>
@@ -124,8 +131,6 @@ button[disabled]{opacity:.5;cursor:default}
 <div class="call" id="call">
   <div class="word" id="callWord"></div>
   <div class="sub" id="callSub"></div>
-  <div class="bar"><i id="callBar"></i></div>
-  <div class="bar depth" id="depthWrap" hidden><i id="callDepth"></i></div>
 </div>
 
 <div class="orientNote" id="orientNote" hidden>You are sideways &mdash; portrait tracks your knees better and shows more road ahead.</div>
@@ -137,7 +142,7 @@ button[disabled]{opacity:.5;cursor:default}
     <div class="moves">
       <div class="mv"><b>March</b><span>Step on the spot, or dance to the beat &mdash; any steady rhythm counts, however small. Faster steps mean a faster car. Ease off and you lose speed, and whoever is behind you will come past.</span></div>
       <div class="mv"><b>Steer</b><span>Hands at chest height, elbows bent, as if holding a wheel. Turn it to turn the car.</span></div>
-      <div class="mv"><b>Squat</b><span>Called a few seconds ahead. Drop down once the word turns blue.</span></div>
+      <div class="mv"><b>Squat</b><span>Squat to brake. The deeper you go, the harder it brakes.</span></div>
       <div class="mv"><b>Push</b><span>Both palms forward, controlled. Not a fast punch.</span></div>
       <div class="mv"><b>Brake</b><span>Lift both hands clear of the wheel. It eases the car down rather than stopping it dead.</span></div>
       <div class="mv"><b>Corners</b><span>Chevrons and a coloured road warn you well ahead, and an arrow on screen shows which way it goes. Brake early, lean through it, and you get a burst of speed out the other side.</span></div>
@@ -185,7 +190,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 19;          // bump on every deploy; shown on the start card
+const BUILD = 20;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -217,10 +222,15 @@ const STEP_UP = 0.72, STEP_DOWN = 0.28;
 const STEP_RELAX = 0.35;       // how fast the range forgets, as a fraction of itself
 const STEP_FLOOR = 0.010;      // with a small absolute floor, in torsos
 const STEP_SMOOTH = 0.08;      // seconds of low-pass before detection
-const PREVIEW = 3.0, WINDOW_START = 6.0, WINDOW_FLOOR = 4.2;
 let LAP_METRES = 6200;       // set from the track itself, so one loop IS one lap
 const FINISH_SEGS = 3;       // how much road the painted line covers
-const SQUAT_DEPTH = 0.17;
+/* Raised from 0.17. At 0.17 a marching hip bob of 0.12 torso reached 0.71 of
+   a squat and braked the car by 0.35 while the player was trying to go - the
+   game slowing you down for marching hard is the worst possible failure here.
+   A bob and a squat are the same shape, so amplitude is what separates them:
+   at 0.26 a 0.12 bob reads 0.46, under the dead band, and a deliberate dip of
+   a quarter of your torso is still a small movement. */
+const SQUAT_DEPTH = 0.26;
 /* The shadow. One rival sits just off your tail while you are working, and
    comes through when you stop working. It reads your MARCHING, never your
    speed: at 150-250ms of camera lag, running wide is usually the tracker's
@@ -251,7 +261,16 @@ const STEER_MINCUT  = 0.7;   // Hz of low-pass when the hands are still
 const STEER_BETA    = 1.6;   // how fast the filter opens up as they move
 const STEER_DCUT    = 0.80;  // smoothing on the speed estimate itself
 const STEER_CURVE   = 1.30;   // >1 keeps small movements small
-const BRAKE_LIFT    = 0.50;  // hands this far above the wheel, in torsos, = brake
+/* The brake is a squat now. Lifting your hands made you let go of the wheel
+   exactly when a corner arrived, which is when you need to steer; a squat
+   keeps both hands on it. Measured: a squat registers in 0.28-0.48s from the
+   moment you start moving and hands-up in 0.27-0.47s, so the swap costs
+   nothing in response - how fast you move is the bottleneck, not the camera.
+   It also now costs you drive, because you cannot march while you are down:
+   cadence fell 105 -> 81 through a squat, against 105 -> 122 with hands up,
+   which is why braking with your hands never cost anything. */
+const SQUAT_DEAD   = 0.55;  // fraction of a full squat before any brake at all,
+                            // so the hip bob of a normal march brakes nothing
 const BRAKE_RATE    = 5.0;   // how hard braking bleeds speed (maxSpeed/this per sec)
 const BRAKE_EASE    = 0.55;  // seconds for the brake to come on, and to let go
 const SHADOW_GAP    = 30;    // metres it tries to hold behind you
@@ -263,11 +282,14 @@ const SHADOW_KEY    = 'frida';  // ONE car is the shadow, not whoever is nearest
 const SHADOW_MIN    = 12;    // metres it can never get closer than, while you are working
 const CHASER_SHOW   = 60;    // metres: when a chaser appears on the HUD
 const CHASER_WARN   = 25;    // metres: when it is close enough to say so
+/* Dropped one notch each when the brake became a squat. A squat costs you
+   drive - you cannot march while you are down - which made an easy march fall
+   from P2 to P4. This puts the ladder back where it was. */
 const RIVALS = [
-  { key:'dali',     name:'DALI',     pace: 27, lane:-0.62 },
-  { key:'picasso',  name:'PICASSO',  pace: 29, lane: 0.62 },
-  { key:'frida',    name:'FRIDA',    pace: 29, lane:-0.22 },
-  { key:'mondrian', name:'MONDRIAN', pace: 30, lane: 0.22 }
+  { key:'dali',     name:'DALI',     pace: 26, lane:-0.62 },
+  { key:'picasso',  name:'PICASSO',  pace: 28, lane: 0.62 },
+  { key:'frida',    name:'FRIDA',    pace: 28, lane:-0.22 },
+  { key:'mondrian', name:'MONDRIAN', pace: 29, lane: 0.22 }
 ];
 
 const cv = document.getElementById('view'), ctx = cv.getContext('2d');
@@ -296,7 +318,7 @@ const ui = {
   clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
   foot:document.getElementById('hFoot'), chaser:document.getElementById('hChaser'),
   call:document.getElementById('call'), callWord:document.getElementById('callWord'),
-  callSub:document.getElementById('callSub'), callBar:document.getElementById('callBar'),
+  callSub:document.getElementById('callSub'),
   callDepth:document.getElementById('callDepth'), depthWrap:document.getElementById('depthWrap'),
   oStart:document.getElementById('oStart'), oCal:document.getElementById('oCal'),
   oEnd:document.getElementById('oEnd'),
@@ -628,9 +650,9 @@ let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
 let effortAvg=0, effortBase=0, chaserArmed=true;
 let curCorner=null, cFrames=0, cOff=0, cLean=0;
 let signAlpha=0, lastSignCorner=null;
-let braking=false, brakeRamp=0;
+let braking=false, brakeRamp=0, brakeAmt=0;
 let hitTimer=0;   // brief shield + untapered pull-away after contact
-let steer=0, steerRaw=0, squatting=false, boost=0, slip=0, shake=0;
+let steer=0, steerRaw=0, boost=0, shake=0;
 let base=null, startTime=0, acc=0;
 let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
 // Visibility hysteresis. It takes a clear view to ACQUIRE a limb pair, but only
@@ -647,7 +669,6 @@ let angSm = null, angPrev = 0, angSpd = 0;
 let legsSeen = false, legsGone = 0, legsWarned = false;
 const seenLatch = {kn:false, an:false};
 let rest={}, lastLift=null;
-let callMode=null, callPhase=null, callUntil=0, nextCall=0, callWindow=WINDOW_START;
 const step=1/60;
 
 function today(){ return new Date().toISOString().slice(0,10); }
@@ -770,7 +791,6 @@ function readPose(dt, now){
     const hipDrop = (hp.y - base.hipY)/base.torso;
     const shDrop  = (sh.y - base.shY)/base.torso;   // makeBase always gives a number
     squatDepth = Math.max(0, Math.max(hipDrop, shDrop)) / SQUAT_DEPTH;
-    squatting = squatDepth >= 1;
   }
 
   if(base){
@@ -841,20 +861,13 @@ function readPose(dt, now){
   // falls faster than it rises: easing off should be felt, building should not be free
   cadence += (rawCad - cadence) * Math.min(1, dt*(rawCad < cadence ? 5.0 : 2.5));
 
-  let push=false, brake=false;
-  if(lw&&rw&&base){
-    const spread=Math.abs(rw.x-lw.x)/base.spread;
-    const mid=(lw.y+rw.y)/2;
-    const height=Math.abs(mid - base.wristY)/base.torso;
-    if(spread<0.75 && height<0.35) push=true;
-    // both hands lifted clear of the wheel. Steering reads the ANGLE between
-    // your wrists, not their height, so lifting them together steers nothing.
-    if((base.wristY - mid)/base.torso > BRAKE_LIFT) brake=true;
-  }
+  // how hard you are braking, from how deep you are: a dip brakes gently, a
+  // full squat brakes hard. Below SQUAT_DEAD nothing happens at all.
+  const brakeAmt = Math.max(0, Math.min(1, (squatDepth - SQUAT_DEAD)/(1 - SQUAT_DEAD)));
   return { torso, hipY:hp.y, shY:sh.y,
            wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
            ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0,
-           spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, push:push, brake:brake };
+           spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, brakeAmt: brakeAmt };
 }
 function vis(i){
   const p = pose && pose[i];
@@ -965,7 +978,7 @@ function showCall(word,sub,cls){
 function hideCall(){ ui.call.className='call'; }
 
 function startRace(fresh){
-  if(fresh){ buildTrack(); buildProps(); callWindow=WINDOW_START; }
+  if(fresh){ buildTrack(); buildProps(); }
   LAPS = chosenLaps;
   // every per-race value resets on EVERY race. distance used to live in the
   // fresh branch, so "one more race" began already past the finish line.
@@ -973,11 +986,11 @@ function startRace(fresh){
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   hitTimer=0; callTimer=0; steer=0; steerRaw=0;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
-  curCorner=null; cFrames=0; cOff=0; cLean=0; braking=false; brakeRamp=0;
+  curCorner=null; cFrames=0; cOff=0; cLean=0; braking=false; brakeRamp=0; brakeAmt=0;
   signAlpha=0; lastSignCorner=null;
-  position=0; speed=0; playerX=0; boost=0; slip=0; shake=0;
+  position=0; speed=0; playerX=0; boost=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
-  legsSeen=false; legsGone=0; legsWarned=false; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none'; callMode=null; callPhase=null; nextCall=8;
+  legsSeen=false; legsGone=0; legsWarned=false; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
   state='race'; startTime=performance.now()/1000; acc=0;
   bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
   if(schedTimer) clearInterval(schedTimer);
@@ -1029,7 +1042,8 @@ function update(dt, reading, now){
   const pct = speed/maxSpeed;
   const dx = dt*2.6*pct;
   position = wrap(position + dt*speed);
-  braking = !!(reading && reading.brake);
+  brakeAmt = reading ? reading.brakeAmt : 0;
+  braking = brakeAmt > 0;
   const inCorner = pSeg.corner && pSeg.cPhase==='in';
   playerX += steer*dx;
   // a marked corner pulls harder, so carrying too much speed really does take
@@ -1068,17 +1082,16 @@ function update(dt, reading, now){
   }
   let target = maxSpeed*(0.12 + 0.88*Math.pow(drive, DRIVE_CURVE));
   if(boost>0){ target = Math.max(target, maxSpeed*1.3); boost -= dt; }
-  if(slip>0){ target = Math.max(target, maxSpeed*1.12); slip -= dt; }
   const gap = target - speed;
   if(gap > 0){
-    // a boost or a slipstream overrides the taper, so it still feels like a shove
-    const urge = (boost>0 || slip>0 || hitTimer>0) ? 1 : Math.max(0.12, 1 - ACCEL_FALLOFF*(speed/maxSpeed));
+    // a boost overrides the taper, so it still feels like a shove
+    const urge = (boost>0 || hitTimer>0) ? 1 : Math.max(0.12, 1 - ACCEL_FALLOFF*(speed/maxSpeed));
     speed += Math.min(gap, accel*urge*dt);
   } else {
     speed += Math.max(gap, coast*dt);
   }
   // eases on and off, so it is a long press of the brake rather than a wall
-  brakeRamp += ((braking?1:0) - brakeRamp) * Math.min(1, dt/BRAKE_EASE);
+  brakeRamp += (brakeAmt - brakeRamp) * Math.min(1, dt/BRAKE_EASE);
   if(brakeRamp > 0.01) speed += (-maxSpeed/BRAKE_RATE)*brakeRamp*dt;
   speed = Math.max(0, Math.min(maxSpeed*1.35, speed));
   // going off in a marked corner costs far more than running wide on a straight:
@@ -1202,50 +1215,21 @@ function update(dt, reading, now){
     blip(760,0.3,0.3);
   }
 
-  // calls: preview, then a generous window, non-punitive
-  const cornerBusy = !!(pSeg.corner);
-  if(callMode===null && elapsed > nextCall && left > 14 && !cornerBusy){
-    const ahead = cars.some(function(c){
-      let dz=c.z-(position+playerZ);
-      if(dz>trackLength/2) dz-=trackLength;
-      return dz>segmentLength*3 && dz<segmentLength*14 && Math.abs(playerX-c.offset)<0.6;
-    });
-    callMode = ahead ? 'push' : 'squat';
-    callPhase = 'preview'; callUntil = elapsed + PREVIEW;
-    showCall(callMode==='push'?'PUSH':'SQUAT','get ready','ready');
-    blip(440,0.12,0.22);
-  }
-  if(callPhase==='preview' && elapsed > callUntil){
-    callPhase='active'; callUntil = elapsed + callWindow;
-    showCall(callMode==='push'?'PUSH':'SQUAT','now',callMode);
-    blip(callMode==='push'?700:520,0.16,0.3);
-  }
-  if(callPhase==='active'){
-    ui.callBar.style.width = Math.max(0,Math.min(1,(callUntil-elapsed)/callWindow))*100 + '%';
-    if(callMode==='squat'){
-      ui.depthWrap.hidden = false;
-      const dp = Math.max(0, Math.min(1, squatDepth));
-      ui.callDepth.style.width = (dp*100)+'%';
-      ui.callDepth.className = dp>=1 ? 'full' : '';
-    }
-    const done = (callMode==='squat' && squatting) || (callMode==='push' && reading && reading.push);
-    if(done){
-      if(callMode==='squat'){ boost=Math.max(boost,4); } else { slip=Math.max(slip,3); }
-      callWindow = Math.max(WINDOW_FLOOR, callWindow - 0.25);
-      callMode=null; callPhase=null; nextCall=elapsed+20+Math.random()*8;
-      ui.depthWrap.hidden = true;
-      showCall('GO','','good'); callTimer = 0.9;
-      blip(880,0.22,0.3);
-    } else if(elapsed > callUntil){
-      callMode=null; callPhase=null; nextCall=elapsed+18+Math.random()*8;
-      ui.depthWrap.hidden = true;
-      hideCall();
-    }
+  /* The called moves are gone. Squat was the boost and is now the brake, and
+     it cannot be both; the palm push was not reading reliably, so it went too.
+     Corner calls and lap calls stay - those are about the track, not tricks.
+     The depth bar is reused to show how hard you are braking. */
+  if(brakeAmt > 0){
+    ui.depthWrap.hidden = false;
+    ui.callDepth.style.width = (brakeAmt*100)+'%';
+    ui.callDepth.className = brakeAmt>=0.99 ? 'full' : '';
+  } else if(!ui.depthWrap.hidden){
+    ui.depthWrap.hidden = true;
   }
 
   if(hitTimer>0) hitTimer -= dt;
 
-  if(callTimer>0){ callTimer -= dt; if(callTimer<=0 && callPhase===null) hideCall(); }
+  if(callTimer>0){ callTimer -= dt; if(callTimer<=0) hideCall(); }
 
   if(shake>0) shake=Math.max(0,shake-dt*60);
 
