@@ -67,6 +67,30 @@ canvas{display:block;width:100%;height:100%}
 .setTop p{margin:0;color:var(--fg);opacity:.92;font-size:clamp(14px,3vw,19px);letter-spacing:.04em;text-shadow:0 3px 18px rgba(0,0,0,.95)}
 .setBot{text-align:center;padding:4px 10px}
 /* the count has to be readable from two metres away, standing up */
+/* THE STUDY CARD. You do not read the boards while you are racing - Hugo was
+   clear about that - so the learning cannot live out on the road. The painting
+   and the painter are shown for five seconds before the lights go out, then
+   that same painting appears on a board halfway round as a reminder, and the
+   name is asked at the finish. Seeing it twice is what makes it stick. */
+.study{position:fixed;inset:0;background:rgba(8,12,24,.93);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:5vw;z-index:40}
+/* flex:0 0 auto and an explicit ratio, or the column stretches the canvas:
+   measured at 304x656 against a 520x340 backing store, which squashed every
+   painting into a portrait box. */
+#studyArt{width:auto;height:auto;flex:0 0 auto;aspect-ratio:26/17;
+  max-width:min(93vw,520px);max-height:46vh;border-radius:12px;
+  background:rgba(242,246,255,.06);box-shadow:0 18px 60px rgba(0,0,0,.6)}
+.study .nm{font-family:var(--display);font-weight:700;color:var(--amber);
+  font-size:clamp(26px,7.5vw,48px);line-height:1.05;text-align:center;letter-spacing:.01em}
+.study .ti{color:var(--fg);opacity:.8;font-size:clamp(13px,3.4vw,19px);text-align:center;font-style:italic}
+.study .cue{color:var(--muted);font-size:clamp(10px,2.6vw,13px);letter-spacing:.22em;
+  text-transform:uppercase;text-align:center}
+.study .cnt{font-family:var(--display);font-weight:700;color:var(--fg);opacity:.85;
+  font-size:clamp(40px,13vw,86px);line-height:1}
+/* the setup and ready screens are read while standing two metres back */
+.setTop h2{font-size:clamp(30px,8vw,52px)!important}
+.setTop p{font-size:clamp(17px,4.6vw,26px)!important}
+.setNote{font-size:clamp(12px,3.2vw,16px)}
 #oCal.counting .setTop{padding-top:12vh}
 #oCal.counting h2{font-size:clamp(110px,40vw,300px);line-height:.9;color:var(--amber);
   text-shadow:0 6px 40px rgba(0,0,0,.95)}
@@ -95,7 +119,15 @@ canvas{display:block;width:100%;height:100%}
 #endFlag{display:block;width:100%;max-width:280px;height:auto;margin:0 auto 10px}
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 18px}
 .stat{background:rgba(242,246,255,.07);border-radius:12px;padding:13px}
+.stat.wide{grid-column:1 / -1;background:rgba(198,255,61,.09);border:1px solid rgba(198,255,61,.25)}
 .stat b{display:block;font-size:clamp(22px,4vw,30px);font-weight:700;font-variant-numeric:tabular-nums}
+.stat.wide small{display:block;font-size:10px;color:var(--muted);margin-top:4px;letter-spacing:.04em;
+  text-transform:none}
+.wt{display:flex;gap:8px;align-items:center;justify-content:center;margin:0 0 14px;flex-wrap:wrap}
+.wt input{width:92px;padding:11px 10px;border-radius:10px;border:1px solid rgba(242,246,255,.25);
+  background:rgba(242,246,255,.07);color:var(--fg);font-family:var(--display);font-size:16px;text-align:center}
+.wt label{font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.wt button{padding:11px 18px;font-size:12px;margin:0}
 .stat span{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
 #quizWrap{margin:4px 0 10px}
 #quizArt{width:100%;max-width:520px;border-radius:10px;background:rgba(242,246,255,.06)}
@@ -171,6 +203,11 @@ button[disabled]{opacity:.5;cursor:default}
       <div class="mode" data-laps="2"><b>2</b><span>laps</span></div>
       <div class="mode" data-laps="3"><b>3</b><span>laps</span></div>
     </div>
+    <div class="wt" id="wtRow">
+      <label for="wtIn">Your weight, for the calorie count</label>
+      <input id="wtIn" type="number" inputmode="numeric" min="25" max="250" placeholder="kg">
+      <button id="bSkipWt" class="ghost">Skip</button>
+    </div>
     <button id="bStart">Turn on camera</button>
     <div class="load" id="loadMsg" hidden>Loading the body tracker, a few seconds&hellip;</div>
     <div class="err" id="errMsg" hidden></div>
@@ -190,6 +227,14 @@ button[disabled]{opacity:.5;cursor:default}
 </div>
 
 
+<div class="study" id="oStudy" hidden>
+  <div class="cue" id="studyCue">Remember the painter</div>
+  <canvas id="studyArt" width="520" height="340"></canvas>
+  <div class="nm" id="studyName"></div>
+  <div class="ti" id="studyTitle"></div>
+  <div class="cnt" id="studyCount">5</div>
+</div>
+
 <div class="overlay" id="oEnd" hidden>
   <div class="card">
     <canvas id="endFlag" width="560" height="340"></canvas>
@@ -200,6 +245,7 @@ button[disabled]{opacity:.5;cursor:default}
       <div class="stat"><b id="eBest">--</b><span>best time</span></div>
       <div class="stat"><b id="ePass">P5</b><span>finish</span></div>
       <div class="stat"><b id="eMove">0</b><span>best lap</span></div>
+      <div class="stat wide"><b id="eKcal">--</b><span>effort</span><small id="eKcalNote"></small></div>
     </div>
     <div id="quizWrap" hidden>
       <canvas id="quizArt" width="520" height="300"></canvas>
@@ -219,7 +265,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 25;          // bump on every deploy; shown on the start card
+const BUILD = 26;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -407,6 +453,10 @@ const ui = {
   loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
   calHint:document.getElementById('calHint'),
   bGo:document.getElementById('bGo'),
+  oStudy:document.getElementById('oStudy'), studyArt:document.getElementById('studyArt'),
+  studyName:document.getElementById('studyName'), studyTitle:document.getElementById('studyTitle'),
+  studyCount:document.getElementById('studyCount'),
+  kcal:document.getElementById('eKcal'), kcalNote:document.getElementById('eKcalNote'),
   streakChip:document.getElementById('streakChip')
 };
 
@@ -713,6 +763,23 @@ const ART = [
  ['Grant Wood - American Gothic - Google Art Project.jpg','American Gothic','Grant Wood']
 ];
 const ART_N = 6;             // boards on the circuit, a fresh set each race
+const STUDY_SECS  = 5;      // how long the painting is shown before the race
+const STUDY_BOARD = 3;      // which board carries it again: (3+0.5)/6 = 58% of the lap
+/* The brake is not armed until you are actually racing. Hugo kept tripping it
+   while still settling into position, which pinned the car at the line. It
+   arms at the first of: you are properly moving, or ten seconds gone. */
+const BRAKE_ARM_SPEED = 0.22;   // fraction of top speed that counts as under way
+const BRAKE_ARM_MAX   = 10;     // seconds, after which it arms regardless
+/* Calories. Taken from CADENCE, not from drive: drive is capped at 1 and
+   FULL_CADENCE is only 48, so a slow shuffle already pins drive at full and a
+   score built on it gave 30 kcal for a shuffle against 33 for a hard march -
+   measured. Steps per minute keeps rising after the car has stopped getting
+   faster, which is exactly what a workout score should follow.
+   MET = 2.2 + 0.035*cadence, capped at 9: a 0.4Hz shuffle (cadence ~48) is
+   3.9 METs, a 1Hz march (~120) is 6.4, a hard 1.2Hz (~140) is 7.1.
+   kcal/min = MET * 3.5 * kg / 200. An estimate, and labelled as one. */
+const KCAL_MET_BASE = 2.2, KCAL_MET_PER_CAD = 0.035, KCAL_MET_MAX = 9;
+const KCAL_DEFAULT_KG = 70;
 let artSet = [], artImg = {};
 function artURL(file){
   return 'https://commons.wikimedia.org/wiki/Special:FilePath/'
@@ -740,6 +807,13 @@ function pickArt(){
   for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
     const t=pool[i]; pool[i]=pool[j]; pool[j]=t; }
   artSet = pool.slice(0, ART_N);
+  /* One of the six is the one you are shown before the start and asked about
+     at the end. It is moved to STUDY_BOARD so it also appears on the road
+     about three-fifths of the way round - the reminder in the middle. */
+  const k = Math.min(STUDY_BOARD, artSet.length-1);
+  const j = Math.floor(Math.random()*artSet.length);
+  const t = artSet[k]; artSet[k] = artSet[j]; artSet[j] = t;
+  quizArt = artSet[k];
   for(const a of artSet) loadArt(a);
 }
 function buildProps(){
@@ -856,6 +930,8 @@ let legsSeen = false, legsGone = 0, legsWarned = false;
 let hipRef = null, shRef = null;
 let limbPrev = {}, jumpT = 0, jumped = false, jumpRun = 0;
 let quizOpen=false, quizArt=null, quizOpts=null, quizRight=0, quizHold=0, quizSide=0, quizDone=false;
+let studyT=0, studyFresh=true, studyTick=-1;
+let brakeArmed=false, kcal=0;
 const seenLatch = {kn:false, an:false};
 let rest={}, lastLift=null;
 const step=1/60;
@@ -865,6 +941,14 @@ function readLS(k,d){ try{ const v=localStorage.getItem(k); return v===null?d:v;
 function writeLS(k,v){ try{ localStorage.setItem(k,String(v)); }catch(e){} }
 // a fixed-distance race is scored by the clock, and each lap count keeps its own
 function bestKey(){ return 'vgTime'+LAPS; }
+/* Optional, and it stays optional: asking for a weight is friction and plenty
+   of people will not answer. Skipped, the count still runs on an average adult
+   and says plainly that it is rougher. */
+function bodyKg(){
+  const v = parseFloat(readLS('vgKg','0'));
+  return (isFinite(v) && v >= 25 && v <= 250) ? v : KCAL_DEFAULT_KG;
+}
+function haveKg(){ const v=parseFloat(readLS('vgKg','0')); return isFinite(v) && v>=25 && v<=250; }
 const BEST_FLOOR = 20;   // seconds: no real lap is quicker, so anything under is junk
 function readBestTime(){
   const v=parseFloat(readLS(bestKey(),'0'));
@@ -1194,8 +1278,11 @@ function showCall(word,sub,cls){
 function hideCall(){ ui.call.className='call'; }
 
 function startRace(fresh){
-  if(fresh){ pickArt(); buildTrack(); buildProps(); }
-  else { pickArt(); buildProps(); }   // new paintings every race, not just fresh ones
+  // the art is chosen when the study card opens, not here, so the painting you
+  // were shown is the one that ends up on the road
+  if(!artSet.length) pickArt();
+  if(fresh) buildTrack();
+  buildProps();
   LAPS = chosenLaps;
   // every per-race value resets on EVERY race. distance used to live in the
   // fresh branch, so "one more race" began already past the finish line.
@@ -1210,6 +1297,8 @@ function startRace(fresh){
   legsSeen=false; legsGone=0; legsWarned=false; hipRef=null; shRef=null;
   limbPrev={}; jumpT=0; jumped=false; jumpRun=0; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
   quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
+  brakeArmed=false; kcal=0;
+  showCall('MARCH', 'LEGS UP, KEEP THEM GOING', 'good'); callTimer = 1.8;
   state='race'; startTime=performance.now()/1000; acc=0;
   bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
   if(schedTimer) clearInterval(schedTimer);
@@ -1250,15 +1339,24 @@ function endRace(){
   /* You only really win if you finish AND remember. The painting is one you
      actually drove past this race, and the decoy is always a different
      artist, so the answer is never two guesses at the same name. */
+  const kc = Math.round(kcal);
+  ui.kcal.textContent = (kc > 0 ? '~'+kc+' kcal' : '--');
+  ui.kcalNote.textContent = haveKg()
+    ? 'estimated from how long and how hard you marched'
+    : 'rough - add your weight on the start screen for a closer number';
   const wrap=document.getElementById('quizWrap');
   quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
   QOPT().forEach(el=>{ el.className='quizOpt'; });
   /* Only ask about a painting that actually appeared. Asking over an empty
      frame - with nothing on screen but the title in text - is the question
      that made no sense. */
+  /* The question is about the painting you were shown before the start and
+     passed again mid-lap - not a fresh one. Only if that image never arrived
+     does it fall back to another board you actually saw. */
   const shown = artSet.filter(a => artImg[a[0]] && artImg[a[0]] !== 'failed');
-  if(finished && shown.length){
-    quizArt = shown[Math.floor(Math.random()*shown.length)];
+  const studiedOk = quizArt && artImg[quizArt[0]] && artImg[quizArt[0]] !== 'failed';
+  if(finished && (studiedOk || shown.length)){
+    if(!studiedOk) quizArt = shown[Math.floor(Math.random()*shown.length)];
     /* THE DECOYS COME FROM THIS RACE'S OWN BOARDS. They used to be drawn from
        the whole 23-work pool, which meant the right answer was a name you had
        just read on a board and the wrong one was a name you had never seen:
@@ -1318,7 +1416,10 @@ function update(dt, reading, now){
   const pct = speed/maxSpeed;
   const dx = dt*2.6*pct;
   position = wrap(position + dt*speed);
-  brakeAmt = reading ? reading.brakeAmt : 0;
+  /* The brake stays off until you are actually racing. Settling into position
+     at the line used to read as a squat and pin the car at zero. */
+  if(!brakeArmed && (speed > maxSpeed*BRAKE_ARM_SPEED || elapsed > BRAKE_ARM_MAX)) brakeArmed = true;
+  brakeAmt = (brakeArmed && reading) ? reading.brakeAmt : 0;
   braking = brakeAmt > 0;
   const inCorner = pSeg.corner && pSeg.cPhase==='in';
   playerX += steer*dx;
@@ -1344,6 +1445,8 @@ function update(dt, reading, now){
   }
 
   const drive = Math.max(0, Math.min(1, cadence/FULL_CADENCE));
+  const met = Math.min(KCAL_MET_MAX, KCAL_MET_BASE + KCAL_MET_PER_CAD*Math.max(0,cadence));
+  kcal += met * 3.5 * bodyKg() / 200 * (dt/60);
   // Only while we can actually see a limb to read. If the tracker loses you
   // entirely, your effort freezes where it was rather than reading as a stop:
   // standing still with your knees in view is you choosing to rest, but losing
@@ -2422,7 +2525,48 @@ function beginRaceFrom(r, fresh){
   base = makeBase(r);
   limbUp={}; rest={}; lastLift=null; resetGrip(); resetFit();
   try { blip(680,0.18,0.3); } catch(e){}
-  startRace(fresh !== false);
+  enterStudy(fresh !== false);
+}
+
+/* ---- the painting you are asked to remember ---- */
+function drawInto(cv, im){
+  const g = cv.getContext('2d');
+  g.clearRect(0,0,cv.width,cv.height);
+  if(im && im !== 'failed' && im.naturalWidth){
+    const r = Math.min(cv.width/im.naturalWidth, cv.height/im.naturalHeight);
+    const dw = im.naturalWidth*r, dh = im.naturalHeight*r;
+    try { g.drawImage(im,(cv.width-dw)/2,(cv.height-dh)/2,dw,dh); return true; } catch(e){}
+  }
+  g.fillStyle='#1B2238'; g.fillRect(0,0,cv.width,cv.height);
+  return false;
+}
+function enterStudy(fresh){
+  stopFlag();
+  pickArt();
+  studyFresh = fresh; studyT = STUDY_SECS; studyTick = -1;
+  ui.oCal.hidden = true; ui.oCal.classList.remove('counting');
+  ui.oEnd.hidden = true; ui.hud.hidden = true;
+  ui.studyName.textContent  = quizArt ? quizArt[2] : '';
+  ui.studyTitle.textContent = quizArt ? quizArt[1] : '';
+  ui.studyCount.textContent = String(STUDY_SECS);
+  drawInto(ui.studyArt, quizArt ? artImg[quizArt[0]] : null);
+  ui.oStudy.hidden = false;
+  state = 'study';
+  keepAwake();
+}
+function studyStep(dt){
+  studyT -= dt;
+  // the picture may still be arriving; keep trying, the name is up either way
+  if(quizArt && artImg[quizArt[0]] && artImg[quizArt[0]] !== 'failed'){
+    drawInto(ui.studyArt, artImg[quizArt[0]]);
+  }
+  const n = Math.min(STUDY_SECS, Math.max(1, Math.ceil(studyT - 1e-6)));
+  if(n !== studyTick){ studyTick = n; ui.studyCount.textContent = String(n);
+    try { blip(n===1?660:440, 0.10, 0.20); } catch(e){} }
+  if(studyT <= 0){
+    ui.oStudy.hidden = true;
+    startRace(studyFresh);
+  }
 }
 
 /* ---- getting back in for a second race ----
@@ -2443,8 +2587,8 @@ function enterReady(){
   stopFlag();
   quizOpen = false;
   ui.oEnd.hidden = true; ui.oCal.hidden = false;
-  ui.calTitle.textContent = 'Get back in';
-  ui.calHint.textContent  = 'Stand up, legs in the picture';
+  ui.calTitle.textContent = 'Step back';
+  ui.calHint.textContent  = 'Whole legs in the picture';
   ui.calSub.textContent   = 'The race starts on its own';
   ui.oCal.classList.remove('counting');
   state = 'ready'; readyT = 0; readyCap = 0; readyTick = -1;
@@ -2463,8 +2607,8 @@ function readyStep(r, dt){
   } else {
     readyTick = -1;
     ui.oCal.classList.remove('counting');
-    ui.calTitle.textContent = 'Get back in';
-    ui.calHint.textContent  = legsSeen ? 'Stand up straight' : 'Step back, legs in the picture';
+    ui.calTitle.textContent = 'Step back';
+    ui.calHint.textContent  = legsSeen ? 'Stand up straight' : 'Whole legs in the picture';
   }
   if(readyT >= READY_HOLD || readyCap > READY_CAP){
     ui.oCal.classList.remove('counting');
@@ -2639,6 +2783,7 @@ function frame(now){
 
   if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); return; }
   if(state==='ready'){ drawMirror(0.5); readyStep(r,dt); return; }
+  if(state==='study'){ studyStep(dt); return; }
 
   if(state==='race'){
     acc+=dt;
@@ -2673,6 +2818,28 @@ document.getElementById('bAgain').addEventListener('click', function(){
   ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; keepAwake();
 });
 QOPT().forEach((el,i)=> el.addEventListener('click',()=>quizAnswer(i)));
+/* The weight row remembers itself and gets out of the way once answered or
+   skipped; "change" brings it back. Nothing here blocks starting. */
+const wtRow=document.getElementById('wtRow'), wtIn=document.getElementById('wtIn');
+function wtDone(){
+  wtRow.innerHTML='';
+  const b=document.createElement('button'); b.className='ghost';
+  b.textContent = haveKg() ? (bodyKg()+' kg  -  change') : 'add your weight';
+  b.addEventListener('click', ()=>{ writeLS('vgKg','0'); wtShow(); });
+  wtRow.appendChild(b);
+}
+function wtShow(){
+  wtRow.innerHTML='';
+  const l=document.createElement('label'); l.textContent='Your weight, for the calorie count';
+  const i=document.createElement('input'); i.type='number'; i.inputMode='numeric';
+  i.min='25'; i.max='250'; i.placeholder='kg'; i.id='wtIn';
+  const sk=document.createElement('button'); sk.className='ghost'; sk.textContent='Skip';
+  i.addEventListener('change', ()=>{ const v=parseFloat(i.value);
+    if(isFinite(v)&&v>=25&&v<=250){ writeLS('vgKg', v); } wtDone(); });
+  sk.addEventListener('click', ()=>{ writeLS('vgKgSkip','1'); wtDone(); });
+  wtRow.appendChild(l); wtRow.appendChild(i); wtRow.appendChild(sk);
+}
+if(haveKg() || readLS('vgKgSkip','0')==='1') wtDone(); else wtShow();
 const bn=document.getElementById('buildNo'); if(bn) bn.textContent=BUILD;
 document.getElementById('eBest').textContent=fmtTime(readBestTime());
 showStreak();
