@@ -100,10 +100,13 @@ canvas{display:block;width:100%;height:100%}
 #quizWrap{margin:4px 0 10px}
 #quizArt{width:100%;max-width:520px;border-radius:10px;background:rgba(242,246,255,.06)}
 #quizWrap h3{margin:12px 0 8px;font-size:clamp(15px,2.6vw,21px);font-weight:700}
-.quizRow{display:flex;gap:10px}
-.quizOpt{flex:1 1 0;background:rgba(242,246,255,.07);border:2px solid transparent;border-radius:12px;
-  padding:11px 8px;font-size:clamp(12px,2vw,16px)}
-.quizOpt b{display:block;font-size:1.3em;opacity:.5;margin-bottom:3px}
+.quizRow{display:flex;gap:8px;align-items:stretch}
+.quizOpt{flex:1 1 0;min-width:0;background:rgba(242,246,255,.07);border:2px solid transparent;
+  border-radius:12px;padding:10px 5px;font-size:clamp(11px,2.6vw,15px);line-height:1.22;
+  display:flex;flex-direction:column;justify-content:flex-start;overflow-wrap:anywhere}
+.quizOpt b{display:block;font-size:1.25em;opacity:.55;margin-bottom:2px}
+.quizOpt i{display:block;font-style:normal;font-size:8.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-top:auto;padding-top:6px}
 .quizOpt.lit{border-color:var(--amber);background:rgba(255,176,31,.14)}
 .quizOpt.right{border-color:var(--lime);background:rgba(198,255,61,.16)}
 .quizOpt.wrong{border-color:var(--red);background:rgba(200,75,46,.16)}
@@ -202,10 +205,11 @@ button[disabled]{opacity:.5;cursor:default}
       <canvas id="quizArt" width="520" height="300"></canvas>
       <h3 id="quizQ">Who painted it?</h3>
       <div class="quizRow">
-        <div class="quizOpt" id="quizA"><b>&#9650;</b><span></span></div>
-        <div class="quizOpt" id="quizB"><b>&#9650;</b><span></span></div>
+        <div class="quizOpt" id="quizA"><b>&#9650;</b><span></span><i>left hand</i></div>
+        <div class="quizOpt" id="quizB"><b>&#9650;</b><span></span><i>both hands</i></div>
+        <div class="quizOpt" id="quizC"><b>&#9650;</b><span></span><i>right hand</i></div>
       </div>
-      <div id="quizHint">Raise the hand on that side to answer</div>
+      <div id="quizHint">Raise a hand and hold it</div>
     </div>
     <button id="bMore">One more race</button>
     <button id="bAgain" class="ghost">Back to start</button>
@@ -215,7 +219,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 24;          // bump on every deploy; shown on the start card
+const BUILD = 25;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -1248,19 +1252,40 @@ function endRace(){
      artist, so the answer is never two guesses at the same name. */
   const wrap=document.getElementById('quizWrap');
   quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
-  document.getElementById('quizA').className='quizOpt';
-  document.getElementById('quizB').className='quizOpt';
+  QOPT().forEach(el=>{ el.className='quizOpt'; });
   /* Only ask about a painting that actually appeared. Asking over an empty
      frame - with nothing on screen but the title in text - is the question
      that made no sense. */
   const shown = artSet.filter(a => artImg[a[0]] && artImg[a[0]] !== 'failed');
   if(finished && shown.length){
     quizArt = shown[Math.floor(Math.random()*shown.length)];
-    const others = ART.filter(a=>a[2]!==quizArt[2]);
-    const decoy = others[Math.floor(Math.random()*others.length)];
-    const flip = Math.random()<0.5;
-    quizOpts = flip ? [quizArt, decoy] : [decoy, quizArt];
-    quizRight = flip ? 0 : 1;
+    /* THE DECOYS COME FROM THIS RACE'S OWN BOARDS. They used to be drawn from
+       the whole 23-work pool, which meant the right answer was a name you had
+       just read on a board and the wrong one was a name you had never seen:
+       measured over 200,000 races, 61.7% of questions could be answered with
+       no knowledge at all, just by picking the name you recognised. With all
+       three names taken from boards you drove past, that strategy is worth
+       nothing and you have to remember WHICH painting carried WHICH name.
+       99.86% of races have two other artists on the boards; the rest top up
+       from the pool. */
+    const seen = [];
+    for(const a of artSet){
+      if(a[2] === quizArt[2]) continue;
+      if(!seen.some(x => x[2] === a[2])) seen.push(a);
+    }
+    for(let i=seen.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+      const t=seen[i]; seen[i]=seen[j]; seen[j]=t; }
+    const decoys = seen.slice(0, 2);
+    if(decoys.length < 2){
+      const pool = ART.filter(a => a[2]!==quizArt[2] && !decoys.some(d=>d[2]===a[2]));
+      while(decoys.length < 2 && pool.length){
+        decoys.push(pool.splice(Math.floor(Math.random()*pool.length),1)[0]);
+      }
+    }
+    quizOpts = [quizArt, ...decoys];
+    for(let i=quizOpts.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+      const t=quizOpts[i]; quizOpts[i]=quizOpts[j]; quizOpts[j]=t; }
+    quizRight = quizOpts.indexOf(quizArt);
     const cv=document.getElementById('quizArt'), g=cv.getContext('2d');
     g.clearRect(0,0,cv.width,cv.height);
     const im=artImg[quizArt[0]];
@@ -1273,11 +1298,10 @@ function endRace(){
       g.fillStyle='#F2E3B0'; g.font='600 20px Chakra Petch, sans-serif';
       g.textAlign='center'; g.fillText(quizArt[1], cv.width/2, cv.height/2);
     }
-    document.getElementById('quizA').querySelector('span').textContent=quizOpts[0][2];
-    document.getElementById('quizB').querySelector('span').textContent=quizOpts[1][2];
+    QOPT().forEach((el,i)=>{ el.querySelector('span').textContent = quizOpts[i] ? quizOpts[i][2] : ''; });
     document.getElementById('quizQ').textContent='Who painted it?';
     // the hint is overwritten by the answer, so put it back for the next race
-    document.getElementById('quizHint').textContent='Raise the hand on that side to answer';
+    document.getElementById('quizHint').textContent='Raise a hand and hold it';
     wrap.hidden=false; quizOpen=true;
   } else { wrap.hidden=true; }
   ui.hud.hidden=true; ui.oEnd.hidden=false;
@@ -2560,6 +2584,13 @@ let lastT=0, renderDt=1/60;
    side is taken from the wrist's own on-screen x, which keeps it consistent
    with the two hand marks on the setup screen. Buttons are still there to
    tap, because a hand read that fails should never trap you on this screen. */
+/* Three options now, so three gestures: the hand on the left picks the left
+   one, the hand on the right picks the right one, and both hands pick the
+   middle. Both-hands used to mean "nothing selected", so it is held a little
+   longer than a single hand - people do put both hands up while they think. */
+const QOPT = () => [document.getElementById('quizA'),
+                    document.getElementById('quizB'),
+                    document.getElementById('quizC')];
 function quizRead(dt){
   if(quizDone) return;
   const sh = mid(L.lsh, L.rsh);
@@ -2567,23 +2598,23 @@ function quizRead(dt){
   if(!sh || !base){ return; }
   const up = (w) => w && (sh.y - w.y) > base.torso*0.22;
   const raised = [lw, rw].filter(up);
-  let side = 0;
-  if(raised.length === 1) side = raised[0].x < 0.5 ? -1 : 1;
-  const A=document.getElementById('quizA'), B=document.getElementById('quizB');
-  if(side === 0 || side !== quizSide){ quizSide = side; quizHold = 0; }
+  let sel = -1;
+  if(raised.length === 2) sel = 1;
+  else if(raised.length === 1) sel = raised[0].x < 0.5 ? 0 : 2;
+  const need = (sel === 1) ? 0.80 : 0.55;
+  if(sel < 0 || sel !== quizSide){ quizSide = sel; quizHold = 0; }
   else quizHold += dt;
-  A.classList.toggle('lit', side===-1 && !quizDone);
-  B.classList.toggle('lit', side=== 1 && !quizDone);
-  if(side !== 0 && quizHold > 0.55) quizAnswer(side === -1 ? 0 : 1);
+  QOPT().forEach((el,i)=> el.classList.toggle('lit', sel===i && !quizDone));
+  if(sel >= 0 && quizHold > need) quizAnswer(sel);
 }
 function quizAnswer(i){
-  if(quizDone) return;
+  if(quizDone || !quizOpts || !quizOpts[i]) return;
   quizDone = true; quizOpen = false;
-  const A=document.getElementById('quizA'), B=document.getElementById('quizB');
-  A.className='quizOpt'; B.className='quizOpt';
+  const O = QOPT();
+  O.forEach(el=>{ el.className='quizOpt'; });
   const right = (i === quizRight);
-  (i===0?A:B).classList.add(right ? 'right' : 'wrong');
-  if(!right) (quizRight===0?A:B).classList.add('right');
+  O[i].classList.add(right ? 'right' : 'wrong');
+  if(!right) O[quizRight].classList.add('right');
   document.getElementById('quizQ').textContent = right
     ? 'Right - ' + quizArt[1] + ', by ' + quizArt[2]
     : 'It was ' + quizArt[2] + ' - ' + quizArt[1];
@@ -2641,8 +2672,7 @@ document.getElementById('bAgain').addEventListener('click', function(){
   ui.calSub.textContent='Hold the wheel with both hands to start';
   ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; keepAwake();
 });
-document.getElementById('quizA').addEventListener('click',()=>quizAnswer(0));
-document.getElementById('quizB').addEventListener('click',()=>quizAnswer(1));
+QOPT().forEach((el,i)=> el.addEventListener('click',()=>quizAnswer(i)));
 const bn=document.getElementById('buildNo'); if(bn) bn.textContent=BUILD;
 document.getElementById('eBest').textContent=fmtTime(readBestTime());
 showStreak();
