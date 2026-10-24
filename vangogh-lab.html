@@ -66,6 +66,11 @@ canvas{display:block;width:100%;height:100%}
 .setTop h2{margin:0 0 4px;font-size:clamp(20px,4.6vw,30px);font-weight:700;text-shadow:0 3px 18px rgba(0,0,0,.95)}
 .setTop p{margin:0;color:var(--fg);opacity:.92;font-size:clamp(14px,3vw,19px);letter-spacing:.04em;text-shadow:0 3px 18px rgba(0,0,0,.95)}
 .setBot{text-align:center;padding:4px 10px}
+/* the count has to be readable from two metres away, standing up */
+#oCal.counting .setTop{padding-top:12vh}
+#oCal.counting h2{font-size:clamp(110px,40vw,300px);line-height:.9;color:var(--amber);
+  text-shadow:0 6px 40px rgba(0,0,0,.95)}
+#oCal.counting p{font-size:clamp(16px,4vw,24px);letter-spacing:.3em;opacity:.8}
 .setNote{font-size:clamp(11px,2.2vw,14px);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.9)}
 .setDiag{font:500 clamp(10px,2vw,13px)/1.5 ui-monospace,Menlo,monospace;color:var(--cyan);opacity:.95;margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.95)}
 .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,14,34,.93);
@@ -150,13 +155,12 @@ button[disabled]{opacity:.5;cursor:default}
   <div class="card">
     <h1>Starry Night Circuit <span style="font-size:.55em;opacity:.65">v2 &middot; build <span id="buildNo">?</span></span></h1>
     <div class="streak" id="streakChip" hidden></div>
-    <p>You march to drive and steer with your hands. Four rivals race you over one lap, and the nearest one sits on your tail while you are working. The road and the numbers stay plain so you can read them; the sky and the fields carry the brushwork.</p>
+    <p>You march to drive and steer with your hands. Four rivals race you over one lap, and the nearest one sits on your tail while you are working. The road and the numbers stay plain so you can read them; the sky and the fields carry the brushwork. Paintings line the circuit, a different six every race, and at the finish you are asked who painted one of them.</p>
     <div class="moves">
       <div class="mv"><b>March</b><span>Step on the spot, or dance to the beat &mdash; any steady rhythm counts, however small. Faster steps mean a faster car. Ease off and you lose speed, and whoever is behind you will come past.</span></div>
       <div class="mv"><b>Steer</b><span>Hands at chest height, elbows bent, as if holding a wheel. Turn it to turn the car.</span></div>
-      <div class="mv"><b>Squat</b><span>Squat to brake. The deeper you go, the harder it brakes.</span></div>
-      <div class="mv"><b>Push</b><span>Both palms forward, controlled. Not a fast punch.</span></div>
-      <div class="mv"><b>Brake</b><span>Lift both hands clear of the wheel. It eases the car down rather than stopping it dead.</span></div>
+      <div class="mv"><b>Squat</b><span>Squat to brake. The deeper you go, the harder it brakes. Nothing else slows you &mdash; your hands only steer.</span></div>
+      <div class="mv"><b>Jump</b><span>Only if you run off the road: jump, with both feet, to haul yourself back onto it. On the track it does nothing.</span></div>
       <div class="mv"><b>Corners</b><span>Chevrons and a coloured road warn you well ahead, and an arrow on screen shows which way it goes. Brake early, lean through it, and you get a burst of speed out the other side.</span></div>
     </div>
     <div class="modes">
@@ -211,7 +215,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 23;          // bump on every deploy; shown on the start card
+const BUILD = 24;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -713,10 +717,16 @@ function artURL(file){
 /* Loaded off to one side and never waited on. A board whose painting has not
    arrived draws as an empty frame and fills itself in when it does, so a slow
    or failed download can never hold up a race. */
+/* No crossOrigin here, and that is deliberate. It used to say
+   im.crossOrigin='anonymous', which made every single board empty: the
+   Special:FilePath URL answers with a redirect that carries no CORS header,
+   so the CORS-mode request fails before it ever reaches the image. Measured
+   from the live page - with the attribute 4/4 loads failed in ~530ms, without
+   it 4/4 succeeded. Dropping it taints the canvas, which costs nothing here
+   because nothing in this game ever reads pixels back out of a canvas. */
 function loadArt(a){
   if(artImg[a[0]]) return;
   const im = new Image();
-  im.crossOrigin = 'anonymous';
   im.onload = ()=>{ artImg[a[0]] = im; };
   im.onerror = ()=>{ artImg[a[0]] = 'failed'; };
   im.src = artURL(a[0]);
@@ -1195,6 +1205,7 @@ function startRace(fresh){
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
   legsSeen=false; legsGone=0; legsWarned=false; hipRef=null; shRef=null;
   limbPrev={}; jumpT=0; jumped=false; jumpRun=0; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
+  quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
   state='race'; startTime=performance.now()/1000; acc=0;
   bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
   if(schedTimer) clearInterval(schedTimer);
@@ -1239,8 +1250,12 @@ function endRace(){
   quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
   document.getElementById('quizA').className='quizOpt';
   document.getElementById('quizB').className='quizOpt';
-  if(finished && artSet.length){
-    quizArt = artSet[Math.floor(Math.random()*artSet.length)];
+  /* Only ask about a painting that actually appeared. Asking over an empty
+     frame - with nothing on screen but the title in text - is the question
+     that made no sense. */
+  const shown = artSet.filter(a => artImg[a[0]] && artImg[a[0]] !== 'failed');
+  if(finished && shown.length){
+    quizArt = shown[Math.floor(Math.random()*shown.length)];
     const others = ART.filter(a=>a[2]!==quizArt[2]);
     const decoy = others[Math.floor(Math.random()*others.length)];
     const flip = Math.random()<0.5;
@@ -1261,6 +1276,8 @@ function endRace(){
     document.getElementById('quizA').querySelector('span').textContent=quizOpts[0][2];
     document.getElementById('quizB').querySelector('span').textContent=quizOpts[1][2];
     document.getElementById('quizQ').textContent='Who painted it?';
+    // the hint is overwritten by the answer, so put it back for the next race
+    document.getElementById('quizHint').textContent='Raise the hand on that side to answer';
     wrap.hidden=false; quizOpen=true;
   } else { wrap.hidden=true; }
   ui.hud.hidden=true; ui.oEnd.hidden=false;
@@ -2377,11 +2394,58 @@ function makeBase(r){
     spread: Math.max(0.05, (r && r.spread) ? r.spread : 0.20)
   };
 }
-function beginRaceFrom(r){
+function beginRaceFrom(r, fresh){
   base = makeBase(r);
   limbUp={}; rest={}; lastLift=null; resetGrip(); resetFit();
   try { blip(680,0.18,0.3); } catch(e){}
-  startRace(true);
+  startRace(fresh !== false);
+}
+
+/* ---- getting back in for a second race ----
+   "One more race" used to start the race on the tap, while you were still
+   bent over the phone. Measured against a first race from the calibration
+   pose: for the first 2.5 s the legs were out of frame, leaning in read as a
+   full squat so the brake sat at 1.00, speed stayed at 0, and ten seconds in
+   you had covered 81 m against 165 m. That is the whole of "the second race
+   is buggy" - nothing in the driving model differs between the two races,
+   which I checked by diffing every value frame by frame.
+   So the second race now waits for you the same way the first one does: it
+   starts when you are standing with your legs in the picture, and it re-reads
+   your body at that moment instead of trusting a pose from before race one. */
+const READY_HOLD = 1.2;     // seconds standing properly before the lights go out
+const READY_CAP  = 12;      // never trap anyone on this screen
+let readyT = 0, readyCap = 0, readyTick = -1;
+function enterReady(){
+  stopFlag();
+  quizOpen = false;
+  ui.oEnd.hidden = true; ui.oCal.hidden = false;
+  ui.calTitle.textContent = 'Get back in';
+  ui.calHint.textContent  = 'Stand up, legs in the picture';
+  ui.calSub.textContent   = 'The race starts on its own';
+  ui.oCal.classList.remove('counting');
+  state = 'ready'; readyT = 0; readyCap = 0; readyTick = -1;
+  keepAwake();
+}
+function readyStep(r, dt){
+  readyCap += dt;
+  const standing = !!r && legsSeen && squatDepth < 0.35;
+  readyT = standing ? readyT + dt : 0;
+  if(standing){
+    const n = Math.max(1, Math.ceil((READY_HOLD - readyT)/(READY_HOLD/3)));
+    if(n !== readyTick){ readyTick = n; try { blip(520, 0.10, 0.22); } catch(e){} }
+    ui.oCal.classList.add('counting');
+    ui.calTitle.textContent = String(n);
+    ui.calHint.textContent  = 'Ready';
+  } else {
+    readyTick = -1;
+    ui.oCal.classList.remove('counting');
+    ui.calTitle.textContent = 'Get back in';
+    ui.calHint.textContent  = legsSeen ? 'Stand up straight' : 'Step back, legs in the picture';
+  }
+  if(readyT >= READY_HOLD || readyCap > READY_CAP){
+    ui.oCal.classList.remove('counting');
+    beginRaceFrom(r, false);
+  }
 }
 function calibrate(r,dt){
   const F = videoFit();
@@ -2543,6 +2607,7 @@ function frame(now){
   const r=readPose(dt, now);
 
   if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); return; }
+  if(state==='ready'){ drawMirror(0.5); readyStep(r,dt); return; }
 
   if(state==='race'){
     acc+=dt;
@@ -2565,11 +2630,15 @@ document.querySelectorAll('.mode').forEach(function(m){
 });
 document.getElementById('bStart').addEventListener('click', begin);
 document.getElementById('bGo').addEventListener('click', function(){
-  beginRaceFrom(readPose(0, performance.now()));
+  beginRaceFrom(readPose(0, performance.now()), state !== 'ready');
 });
-document.getElementById('bMore').addEventListener('click', function(){ stopFlag(); startRace(false); });
+document.getElementById('bMore').addEventListener('click', enterReady);
 document.getElementById('bAgain').addEventListener('click', function(){
-  stopFlag();
+  stopFlag(); quizOpen=false;
+  ui.oCal.classList.remove('counting');
+  ui.calTitle.textContent='Finding you';
+  ui.calHint.textContent='Step into the picture';
+  ui.calSub.textContent='Hold the wheel with both hands to start';
   ui.oEnd.hidden=true; ui.oCal.hidden=false; state='calibrate'; keepAwake();
 });
 document.getElementById('quizA').addEventListener('click',()=>quizAnswer(0));
