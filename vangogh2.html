@@ -190,7 +190,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 22;          // bump on every deploy; shown on the start card
+const BUILD = 23;          // bump on every deploy; shown on the start card
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -204,8 +204,9 @@ const maxSpeed = segmentLength*27;   // slower again; the track is shortened to 
 const accel = maxSpeed/11, coast = -maxSpeed/4.5, offRoadDecel = -maxSpeed/4;
 const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
-const FULL_CADENCE = 70;    // a 1Hz march reads ~120, so full speed now comes at a
-                            // slow 0.6Hz shuffle - deliberately easy for now
+const FULL_CADENCE = 48;    // a 1Hz march reads ~120, so full speed now comes at a
+                            // 0.4Hz shuffle. Deliberately minimal for now; the
+                            // plan is to raise it again once the rest settles.
 /* How effort turns into speed. Below 1 this bends in the player's favour: a
    gentle march already gets most of the speed, while the gradient and the
    quick response to stopping both survive, which a lower FULL_CADENCE alone
@@ -252,12 +253,28 @@ const CORNER_BOOST  = 5.5;   // seconds of push for getting one right
    the brake is a real decision or decoration. */
 const CURVE_SCALE   = 1.15;
 const BRAKE_REWARD  = 1.6;   // exit boost for a corner you actually braked for
+/* Set to the cars' real combined half-widths, measured rather than guessed: a
+   doubled rival is 0.52 lane units wide, so contact starts at 0.52. Measured
+   consequence: contacts go from 2 to 5 a lap, with lap time and finishing
+   position unchanged - you now have to move aside to pass an inner-lane car
+   instead of driving through it. Lanes sit 0.40-0.44 apart and the road is
+   2.0 wide, so there is still room to go round. */
+const RIVAL_BOX     = 0.52;  // how close in lane terms counts as contact
 const CORNER_OFF    = 0.38;  // speed you are cut to for running wide inside a corner
 /* Steering. A wide dead band so bouncing and dancing do nothing, a gentle
    curve near the centre, and full lock only at a big, deliberate turn. Not
    more smoothing: that would add delay on top of the camera's. */
-const STEER_FULL    = 0.80;  // radians of wrist angle for full lock
-const STEER_DEAD    = 0.34;  // dead band, as a fraction of full
+/* Less sensitive again, by a third. Not slower - the response time is
+   deliberately untouched, because lag is the one thing this game cannot
+   spend. You simply have to turn your hands further for the same amount of
+   lock, and small movements count for even less than before. */
+const STEER_FULL    = 0.95;  // radians of wrist angle for full lock
+/* The dead band is a FRACTION of full lock, so raising STEER_FULL widened it
+   in absolute terms too. At 0.34 of 1.06 the dead zone reached 0.36rad and a
+   gentle 0.30rad turn of the hands did literally nothing. Pulled back so the
+   dead zone stays near where it was while full lock still needs a bigger
+   movement than before. */
+const STEER_DEAD    = 0.28;  // dead band, as a fraction of full
 /* Hand jitter and a real turn look the same to a plain low-pass, so making the
    car steadier by smoothing harder buys stability with lag - and lag is the one
    thing this game cannot spend, the camera already costs 150-250ms. These three
@@ -266,7 +283,7 @@ const STEER_DEAD    = 0.34;  // dead band, as a fraction of full
 const STEER_MINCUT  = 0.7;   // Hz of low-pass when the hands are still
 const STEER_BETA    = 1.6;   // how fast the filter opens up as they move
 const STEER_DCUT    = 0.80;  // smoothing on the speed estimate itself
-const STEER_CURVE   = 1.30;   // >1 keeps small movements small
+const STEER_CURVE   = 1.45;   // >1 keeps small movements small
 /* The brake is a squat now. Lifting your hands made you let go of the wheel
    exactly when a corner arrived, which is when you need to steer; a squat
    keeps both hands on it. Measured: a squat registers in 0.28-0.48s from the
@@ -1203,7 +1220,7 @@ function update(dt, reading, now){
     }
     c.dz = (c.dist - distance) * 125;
     c.z = wrap(position + c.dz);
-    if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < 0.20
+    if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < RIVAL_BOX
        && c.bumped<=0 && hitTimer<=0){
       speed *= 0.85; shake=20; c.bumped=1.3; hitTimer=1.6; blip(110,0.25,0.3,'sawtooth');
     }
@@ -1784,7 +1801,11 @@ function drawMondrian(w,h){
 }
 
 function drawCar(x,y,scale,car){
-  const w=roadWidth*0.00013*scale*W, h=w*0.60;
+  /* Doubled. At the old size a rival was a few pixels at distance, and with
+     150-250ms of camera lag the rivals are meant to be the thing you LOOK at
+     rather than react to - which only works if you can see them. The
+     collision width is widened to match (RIVAL_BOX) so passing stays honest. */
+  const w=roadWidth*0.00026*scale*W, h=w*0.56;
   if(w<2) return;
   ctx.save(); ctx.translate(x,y);
   ctx.fillStyle='rgba(0,0,0,0.42)';
