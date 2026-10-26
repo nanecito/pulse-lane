@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b0d1a">
+<title>Gap</title>
+<style>
+  :root{
+    --ink:#0b0d1a; --field:#111428; --plaster:#e8ddc8; --plaster-d:#c9b998;
+    --gold:#d8a43c; --gold-l:#f2cf7c; --warm:#f4ede0; --dim:#8d93b0;
+    --good:#7fc08a; --part:#d8a43c; --bad:#c76a62;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;padding:24px 22px;text-align:center;gap:14px;
+    background:radial-gradient(120% 90% at 50% 20%,#1a1f3d 0%,var(--ink) 70%);z-index:5}
+  .ov[hidden]{display:none}
+  h1{font-size:clamp(34px,13vw,64px);margin:0;letter-spacing:.14em;font-weight:400}
+  h1 .g{color:var(--gold)}
+  .sub{color:var(--dim);font-size:15px;line-height:1.55;max-width:30ch;margin:0}
+  .how{text-align:left;max-width:32ch;color:var(--warm);font-size:15px;line-height:1.6;
+    margin:0;padding:0;list-style:none}
+  .how li{margin:7px 0;padding-left:20px;position:relative}
+  .how li:before{content:'';position:absolute;left:0;top:.62em;width:8px;height:8px;
+    border-radius:50%;background:var(--gold)}
+  button{font:inherit;font-size:18px;letter-spacing:.06em;padding:15px 34px;border-radius:999px;
+    border:1px solid var(--gold);background:var(--gold);color:#241a07;cursor:pointer}
+  button.ghost{background:transparent;color:var(--gold)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:13px;max-width:32ch;line-height:1.5;margin:0}
+  .err{color:var(--bad);font-size:14px;max-width:32ch;line-height:1.5}
+  /* the wall fills the screen at arrival, so anything drawn over it has to
+     survive going from a near-black field to pale plaster in one second */
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 16px;display:flex;
+    justify-content:space-between;align-items:flex-start;font-size:14px;
+    letter-spacing:.08em;color:var(--warm);z-index:3;pointer-events:none;
+    background:linear-gradient(rgba(11,13,26,.72),rgba(11,13,26,0));
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  #hud .r{text-align:right}
+  #hud b{font-weight:400;color:var(--gold);font-size:22px;display:block}
+  #cue{position:fixed;left:0;right:0;bottom:env(safe-area-inset-bottom,0);padding:26px 18px 22px;
+    text-align:center;z-index:3;pointer-events:none;
+    background:linear-gradient(rgba(11,13,26,0),rgba(11,13,26,.78))}
+  #cueName{font-size:clamp(19px,6vw,27px);letter-spacing:.1em;
+    text-shadow:0 2px 10px rgba(0,0,0,.9)}
+  #cueArt{font-size:13px;color:var(--gold-l);letter-spacing:.05em;margin-top:4px;
+    text-shadow:0 2px 10px rgba(0,0,0,.9)}
+  .tag{display:inline-block;border:1px solid var(--gold);color:var(--gold);
+    border-radius:999px;padding:3px 12px;font-size:11px;letter-spacing:.16em;margin-bottom:8px}
+  .lead{color:var(--gold);font-size:13px;letter-spacing:.2em}
+  table{border-collapse:collapse;font-size:14px;color:var(--warm)}
+  td{padding:4px 10px}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--gold)}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<div id="hud" hidden>
+  <div><span style="color:var(--dim)">WALL</span><b id="hWall">1/8</b></div>
+  <div class="r"><span style="color:var(--dim)">SCORE</span><b id="hScore">0</b></div>
+</div>
+<div id="cue" hidden><div id="cueName"></div><div id="cueArt"></div></div>
+
+<div class="ov" id="oStart">
+  <h1>G<span class="g">A</span>P</h1>
+  <p class="sub">A wall is coming with a hole in it shaped like a person. Become that shape before it arrives.</p>
+  <ul class="how">
+    <li>Stand back so your whole body, feet included, is in the picture.</li>
+    <li>Hold the shape still. A ring fills when the wall can see you holding it.</li>
+    <li>Every round ends with a shape borrowed from a famous painting or statue.</li>
+  </ul>
+  <div class="row"><button id="bStart">Start</button></div>
+  <p class="note" id="loadMsg" hidden>Waking the camera…</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Portrait, phone propped up, a couple of steps back. Nothing leaves your device.</p>
+</div>
+
+<div class="ov" id="oFit" hidden style="background:transparent;justify-content:flex-end;padding-bottom:40px">
+  <p class="sub" id="fitMsg">Step back until your feet are inside the frame.</p>
+  <div class="row"><button id="bGo" class="ghost">Start anyway</button></div>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <div class="tag" id="endTag">ROUND COMPLETE</div>
+  <h1 id="endScore" style="font-size:clamp(40px,16vw,74px)">0</h1>
+  <table><tbody id="endRows"></tbody></table>
+  <div class="row">
+    <button id="bAgain">One more round</button>
+    <button id="bRec" class="ghost">Save recording</button>
+  </div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/*==SCORER_START==*/
+/* ------------------------------------------------------------------
+   The shapes and the matcher. The offline harness extracts this exact
+   block out of this file and measures it, so what is measured is what
+   ships. Do not duplicate any of it anywhere else.
+
+   Everything here is in TWO DIMENSIONS and scale free. Depth is weighted
+   to zero, because a single camera cannot see it, so no feature is a raw
+   pixel distance and no feature is an absolute height. Every angle is an
+   angle between two of the player's own limbs or between a limb and the
+   vertical, and every ratio is divided by that player's own torso. A tall
+   player and a short player holding the same shape produce the same
+   numbers.
+   ------------------------------------------------------------------ */
+
+const TUNE = {
+  TOL_ANG_IN:   24,    // degrees of angular error still worth full credit
+  TOL_ANG_OUT:  52,    // beyond this an angle earns nothing
+  TOL_RAT_IN:   0.14,  // same, for the scale-free ratios
+  TOL_RAT_OUT:  0.34,
+  PASS_FULL:    0.78,  // pose quality that passes the wall cleanly
+  PASS_PART:    0.52,  // below this the wall breaks
+  REP_QUALITY:  0.70,  // quality needed to count as a real repetition
+  SETTLE_Q:     0.52,  // quality that counts as "holding something"
+  SETTLE_MS:    300,   // how long it must be held before the wall arrives
+  JUDGE_PRE:    120,   // judgment interval opens this far before arrival
+  JUDGE_POST:   80,    // and closes this far after it
+  JUDGE_MIN:    3,     // valid observations required inside that interval
+  VIS_GET:      0.15,  // confidence to acquire a landmark
+  VIS_KEEP:     0.04,  // confidence to keep one already acquired
+  VIS_FRACTION: 0.60,  // fraction of a shape's defining joints that must be seen
+  LOWER_MOVE:   0.34,  // lower-body movement a leg shape must actually show
+  TRANS_FLOOR:  0.10,  // a feature must be asked to change by this much to count
+};
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+// A is the player's left, which a mirrored picture puts on the left of the
+// screen, so the player's left really does look like their left.
+
+const DEG = 180 / Math.PI;
+function ang(a, b){ return Math.atan2(b.y - a.y, b.x - a.x) * DEG; }
+function dist(a, b){ return Math.hypot(b.x - a.x, b.y - a.y); }
+function wrap(d){ d = ((d + 180) % 360 + 360) % 360 - 180; return d; }
+function interior(a, b, c){            // angle at b, 180 = straight
+  const u = ang(b, a), v = ang(b, c);
+  return Math.abs(wrap(u - v));
+}
+function midp(a, b){ return { x:(a.x + b.x)/2, y:(a.y + b.y)/2 }; }
+
+// Which landmarks each feature needs. A feature whose landmarks are not
+// visible produces nothing at all rather than a zero, because a zero is a
+// claim about the body and silence is not.
+const NEEDS = {
+  torsoLean:[J.shA,J.shB,J.hipA,J.hipB],
+  armA:[J.shA,J.wrA], armB:[J.shB,J.wrB],
+  elbowA:[J.shA,J.elA,J.wrA], elbowB:[J.shB,J.elB,J.wrB],
+  stance:[J.ankA,J.ankB,J.shA,J.shB,J.hipA,J.hipB],
+  legExt:[J.hipA,J.knA,J.ankA,J.hipB,J.knB,J.ankB],
+  hipShift:[J.hipA,J.hipB,J.ankA,J.ankB,J.shA,J.shB],
+  kneeA:[J.hipA,J.knA,J.ankA], kneeB:[J.hipB,J.knB,J.ankB],
+};
+const ANGULAR = { torsoLean:1, armA:1, armB:1, elbowA:1, elbowB:1, kneeA:1, kneeB:1 };
+const LEG_FEATS = ['stance','legExt','hipShift','kneeA','kneeB'];
+
+// A landmark reader with hysteresis: a joint already being tracked is kept
+// on a much lower bar than one being picked up fresh. One threshold for both
+// made tracking strobe between seen and not seen, which reads as a broken
+// game rather than a dim room.
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]) { latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v: v };    // mirrored, normalised to the frame
+  };
+}
+
+// Turn one pose into the feature vector. Returns the features it could read
+// and the set of landmarks it actually saw. Never guesses a missing one.
+function features(pose, read){
+  const g = {}, seen = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p){ g[k] = p; seen[J[k]] = 1; } }
+  const f = {};
+  const has = (...ks) => ks.every(k => g[k]);
+
+  let torso = null;
+  if(has('shA','shB','hipA','hipB')){
+    const sh = midp(g.shA, g.shB), hp = midp(g.hipA, g.hipB);
+    torso = dist(sh, hp);
+    f.torsoLean = wrap(ang(hp, sh) - (-90));      // 0 when upright
+  }
+  if(has('shA','wrA')) f.armA = ang(g.shA, g.wrA);
+  if(has('shB','wrB')) f.armB = ang(g.shB, g.wrB);
+  if(has('shA','elA','wrA')) f.elbowA = interior(g.shA, g.elA, g.wrA);
+  if(has('shB','elB','wrB')) f.elbowB = interior(g.shB, g.elB, g.wrB);
+  if(has('hipA','knA','ankA')) f.kneeA = interior(g.hipA, g.knA, g.ankA);
+  if(has('hipB','knB','ankB')) f.kneeB = interior(g.hipB, g.knB, g.ankB);
+
+  if(torso > 0.02){
+    if(has('ankA','ankB')) f.stance = Math.abs(g.ankA.x - g.ankB.x) / torso;
+    if(has('hipA','hipB','ankA','ankB'))
+      f.hipShift = (midp(g.hipA,g.hipB).x - midp(g.ankA,g.ankB).x) / torso;
+  }
+  // Squat depth without a pixel height and without a standing reference:
+  // how much shorter the straight line hip-to-ankle is than the leg itself.
+  // Standing is near 1. It shrinks as the knee bends, whichever way the
+  // camera is tilted and wherever in the frame the player happens to be.
+  const ext = [];
+  if(has('hipA','knA','ankA')){
+    const seg = dist(g.hipA,g.knA) + dist(g.knA,g.ankA);
+    if(seg > 0.02) ext.push(dist(g.hipA, g.ankA) / seg);
+  }
+  if(has('hipB','knB','ankB')){
+    const seg = dist(g.hipB,g.knB) + dist(g.knB,g.ankB);
+    if(seg > 0.02) ext.push(dist(g.hipB, g.ankB) / seg);
+  }
+  if(ext.length) f.legExt = ext.reduce((a,b)=>a+b,0) / ext.length;
+
+  return { f, seen, torso };
+}
+
+// Credit for one feature: full inside the inner zone, sliding to nothing at
+// the outer bound, nothing past it. A tolerance zone, not a threshold — the
+// implementation's tolerance is not the player's accuracy.
+function credit(key, got, want){
+  const angular = ANGULAR[key];
+  const e = angular ? Math.abs(wrap(got - want)) : Math.abs(got - want);
+  const i = angular ? TUNE.TOL_ANG_IN  : TUNE.TOL_RAT_IN;
+  const o = angular ? TUNE.TOL_ANG_OUT : TUNE.TOL_RAT_OUT;
+  if(e <= i) return 1;
+  if(e >= o) return 0;
+  return (o - e) / (o - i);
+}
+
+// Pose quality against one shape. Also reports the leg-only quality, and
+// whether enough of the defining skeleton was visible to judge at all.
+function match(shape, fv){
+  let num = 0, den = 0, legNum = 0, legDen = 0, needSeen = 0, needTotal = 0;
+  const per = {};
+  for(const key in shape.feats){
+    const w = shape.w[key] === undefined ? 1 : shape.w[key];
+    if(w <= 0) continue;
+    const need = NEEDS[key] || [];
+    needTotal += need.length;
+    for(const i of need) if(fv.seen[i]) needSeen++;
+    if(fv.f[key] === undefined) continue;        // unseen: contributes nothing
+    const c = credit(key, fv.f[key], shape.feats[key]);
+    per[key] = c;
+    num += w * c; den += w;
+    if(LEG_FEATS.indexOf(key) >= 0){ legNum += w * c; legDen += w; }
+  }
+  // An average over ten features barely notices one of them being completely
+  // wrong, so VITRUVIAN scored 89% as plain ARMS OUT: the two differ only in
+  // where the feet are. The worst important feature therefore caps the score.
+  // A shape whose defining difference is absent is not that shape, however
+  // well everything else lines up.
+  let worst = 1;
+  for(const key in per) if((shape.w[key] === undefined ? 1 : shape.w[key]) >= 1 && per[key] < worst) worst = per[key];
+  const mean = den > 0 ? num / den : 0;
+  return {
+    quality: mean * (0.55 + 0.45*worst),
+    mean: mean, worst: worst,
+    legQuality: legDen > 0 ? legNum / legDen : 1,
+    coverage: den > 0 ? den : 0,
+    visible: needTotal > 0 ? needSeen / needTotal : 0,
+    readable: den > 0 && (needTotal === 0 || needSeen / needTotal >= TUNE.VIS_FRACTION),
+    per: per,
+  };
+}
+
+// How much of the intended movement the player actually travelled, measured
+// against where their body was when the wall appeared. Credit is signed: a
+// player who moves energetically in the wrong direction earns nothing, which
+// is the hole in crediting raw distance travelled.
+function transition(shape, fromF, toF){
+  let num = 0, den = 0;
+  for(const key in shape.feats){
+    const w = shape.w[key] === undefined ? 1 : shape.w[key];
+    if(w <= 0) continue;
+    if(fromF[key] === undefined || toF[key] === undefined) continue;
+    const want = shape.feats[key];
+    const needed = ANGULAR[key] ? wrap(want - fromF[key]) : (want - fromF[key]);
+    const scale = ANGULAR[key] ? TUNE.TOL_ANG_IN : TUNE.TOL_RAT_IN;
+    if(Math.abs(needed) < Math.max(scale, TUNE.TRANS_FLOOR * (ANGULAR[key] ? 180 : 1))) continue;
+    const moved = ANGULAR[key] ? wrap(toF[key] - fromF[key]) : (toF[key] - fromF[key]);
+    const prog = Math.max(0, Math.min(1, moved / needed));
+    num += w * prog; den += w;
+  }
+  return den > 0 ? num / den : null;      // null: this shape asked for no travel
+}
+
+// Lower-body movement actually performed, whatever the pose ended up looking
+// like. A low shape the player reached by bending at the waist does not pass
+// this, and nor does a session spent waving.
+function lowerMovement(fromF, toF){
+  let total = 0, n = 0;
+  for(const key of LEG_FEATS){
+    if(fromF[key] === undefined || toF[key] === undefined) continue;
+    const d = ANGULAR[key] ? Math.abs(wrap(toF[key] - fromF[key])) / 90
+                           : Math.abs(toF[key] - fromF[key]);
+    total += d; n++;
+  }
+  return n ? total : 0;
+}
+
+// Judge one wall. `samples` are pose observations stamped with the time the
+// CAMERA captured them, already shifted into the game's own clock. The wall's
+// arrival time is in that same clock. Nothing here looks at render order.
+function judgeWall(shape, samples, arriveAt, openedF){
+  const lo = arriveAt - TUNE.JUDGE_PRE, hi = arriveAt + TUNE.JUDGE_POST;
+  const win = samples.filter(s => s.t >= lo && s.t <= hi && s.m.readable);
+  if(win.length < TUNE.JUDGE_MIN){
+    // The game did not observe the player across the moment of judgment.
+    // That is the game's failure, and it is never charged to the player.
+    return { verdict:'UNSCORED', reason:'not enough clear views of you',
+             quality:0, transition:null, rep:false, points:0, samples:win.length };
+  }
+  // The best view inside the interval, not the last one to arrive.
+  let best = win[0];
+  for(const s of win) if(s.m.quality > best.m.quality) best = s;
+
+  // Settle: quality held above the bar for the whole settle window ending at
+  // arrival. Defined on capture times, so a burst of late-arriving frames
+  // cannot fake a hold that never happened.
+  const sLo = arriveAt - TUNE.SETTLE_MS;
+  const held = samples.filter(s => s.t >= sLo && s.t <= arriveAt);
+  const settled = held.length >= 2 && held.every(s => s.m.readable && s.m.quality >= TUNE.SETTLE_Q);
+
+  const q = best.m.quality;
+  const tr = openedF ? transition(shape, openedF, best.fv.f) : null;
+  const move = openedF ? lowerMovement(openedF, best.fv.f) : 0;
+  const legsOk = !shape.legsRequired || (move >= TUNE.LOWER_MOVE && best.m.legQuality >= TUNE.REP_QUALITY);
+
+  let verdict;
+  if(q >= TUNE.PASS_FULL && settled) verdict = 'CLEAN';
+  else if(q >= TUNE.PASS_PART) verdict = 'CLIPPED';
+  else verdict = 'BREAK';
+
+  // A repetition is a stricter thing than a score. Near misses may earn
+  // points; they must not be counted as work the player did.
+  const rep = (q >= TUNE.REP_QUALITY) && legsOk && verdict !== 'BREAK';
+
+  let points = 0;
+  if(verdict === 'CLEAN') points = 100;
+  else if(verdict === 'CLIPPED') points = Math.round(100 * (q - TUNE.PASS_PART) / (TUNE.PASS_FULL - TUNE.PASS_PART) * 0.5);
+  if(tr !== null && verdict !== 'BREAK') points += Math.round(30 * tr);
+  if(rep) points += 20;
+
+  return { verdict, quality:q, legQuality:best.m.legQuality, transition:tr,
+           lowerMovement:move, rep, settled, points, samples:win.length };
+}
+
+/* ---- the shapes ---------------------------------------------------
+   Each shape is described by what a body can be TOLD to do: where the
+   feet are, how low the hips sit, where the hands point and how bent
+   the elbows are. The matcher's targets in `feats` are not typed by
+   hand; they are generated from the figure those instructions draw, so
+   the hole on screen and the numbers being scored are the same object.
+   The harness re-derives them on every run and fails if they drift.
+
+   stance   feet apart, in torso lengths
+   hipDrop  hips above the floor, as a fraction of leg length (1 = standing)
+   hipShift hips sideways from the midpoint of the feet, in torso lengths
+   armA/B   direction from shoulder to wrist, degrees, 0 = screen right,
+            90 = straight down, -90 = straight up
+   elbowA/B angle at the elbow, 180 = straight
+
+   Ten plain shapes, hand chosen, no shape grammar. Several pairs are
+   deliberately confusable so the matcher is tested rather than
+   flattered: ARMS OUT and HALF SQUAT differ only below the waist,
+   OVERHEAD and DEEP likewise, the two lunges are mirror images, STAR
+   and FEET WIDE differ only above the waist, and HALF and DEEP differ
+   only in how far down.
+   ------------------------------------------------------------------ */
+const SHAPES = [
+  { id:'STAND', name:'Stand tall', legsRequired:false,
+    pose:{ torsoLean:0, armA:103, armB:77, elbowA:172, elbowB:172, stance:0.45, hipDrop:0.997, hipShift:0 },
+    w:{ torsoLean:1, armA:1.2, armB:1.2, elbowA:.6, elbowB:.6, stance:1.2, legExt:1.4, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'WIDE', name:'Feet wide', legsRequired:true,
+    pose:{ torsoLean:0, armA:100, armB:80, elbowA:170, elbowB:170, stance:1.75, hipDrop:0.925, hipShift:0 },
+    w:{ torsoLean:.8, armA:1.2, armB:1.2, elbowA:.5, elbowB:.5, stance:2.2, legExt:1.2, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'OVERHEAD', name:'Arms overhead', legsRequired:false,
+    pose:{ torsoLean:0, armA:-97, armB:-83, elbowA:172, elbowB:172, stance:0.45, hipDrop:0.997, hipShift:0 },
+    w:{ torsoLean:1, armA:1.6, armB:1.6, elbowA:.8, elbowB:.8, stance:1.2, legExt:1.4, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'T', name:'Arms out', legsRequired:false,
+    pose:{ torsoLean:0, armA:179, armB:1, elbowA:174, elbowB:174, stance:0.45, hipDrop:0.997, hipShift:0 },
+    w:{ torsoLean:1, armA:1.6, armB:1.6, elbowA:.8, elbowB:.8, stance:1.2, legExt:1.4, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'STAR', name:'Star', legsRequired:true,
+    pose:{ torsoLean:0, armA:-138, armB:-42, elbowA:174, elbowB:174, stance:1.75, hipDrop:0.925, hipShift:0 },
+    w:{ torsoLean:.8, armA:1.5, armB:1.5, elbowA:.6, elbowB:.6, stance:2.2, legExt:1.2, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'HALF', name:'Half squat, arms out', legsRequired:true,
+    pose:{ torsoLean:5, armA:179, armB:1, elbowA:172, elbowB:172, stance:1.0, hipDrop:0.86, hipShift:0 },
+    w:{ torsoLean:.6, armA:1.2, armB:1.2, elbowA:.5, elbowB:.5, stance:1.4, legExt:2.4, hipShift:1, kneeA:1.0, kneeB:1.0 } },
+
+  { id:'DEEP', name:'Deep squat, arms up', legsRequired:true,
+    pose:{ torsoLean:8, armA:-97, armB:-83, elbowA:172, elbowB:172, stance:1.3, hipDrop:0.55, hipShift:0 },
+    w:{ torsoLean:.5, armA:1.2, armB:1.2, elbowA:.5, elbowB:.5, stance:1.4, legExt:2.6, hipShift:1, kneeA:1.2, kneeB:1.2 } },
+
+  { id:'LUNGE_A', name:'Lunge left', legsRequired:true,
+    pose:{ torsoLean:-5, armA:179, armB:1, elbowA:172, elbowB:172, stance:1.6, hipDrop:0.75, hipShift:-0.55 },
+    w:{ torsoLean:.5, armA:1, armB:1, elbowA:.5, elbowB:.5, stance:1.5, legExt:1.2, hipShift:2.4, kneeA:1.4, kneeB:1.4 } },
+
+  { id:'LUNGE_B', name:'Lunge right', legsRequired:true,
+    pose:{ torsoLean:5, armA:179, armB:1, elbowA:172, elbowB:172, stance:1.6, hipDrop:0.75, hipShift:0.55 },
+    w:{ torsoLean:.5, armA:1, armB:1, elbowA:.5, elbowB:.5, stance:1.5, legExt:1.2, hipShift:2.4, kneeA:1.4, kneeB:1.4 } },
+
+  { id:'ONE_UP', name:'One up, one out', legsRequired:false,
+    pose:{ torsoLean:0, armA:-97, armB:1, elbowA:172, elbowB:172, stance:0.45, hipDrop:0.997, hipShift:0 },
+    w:{ torsoLean:1, armA:1.6, armB:1.6, elbowA:.8, elbowB:.8, stance:1.2, legExt:1.4, hipShift:1, kneeA:.4, kneeB:.4 } },
+];
+
+/* ---- the artwork finales ------------------------------------------
+   One of these ends every round. They are POSES BORROWED from works in
+   the public domain, drawn as this game's own plain stick figure. No
+   artwork is reproduced anywhere in this file, and none is shown: what
+   is shared with the original is the arrangement of a body, and the
+   title is credited on screen.
+
+   Only poses that read clearly head-on and are safe to hold still are
+   here. Anything that depends on a twist, or on one limb being nearer
+   the camera than another, is left out: a single camera cannot see
+   depth, so the shape would be judged on something invisible. That rule
+   excluded the obvious candidates — the discus thrower, a dancer's
+   arabesque, the seated thinker — and it is the right rule.
+   ------------------------------------------------------------------ */
+const ART = [
+  { id:'VITRUVIAN', name:'Arms wide, feet wide',
+    art:{ title:'Vitruvian Man', who:'Leonardo da Vinci', year:'c. 1490' }, legsRequired:true,
+    pose:{ torsoLean:0, armA:175, armB:5, elbowA:174, elbowB:174, stance:1.8, hipDrop:0.915, hipShift:0 },
+    w:{ torsoLean:1, armA:1.5, armB:1.5, elbowA:.7, elbowB:.7, stance:2.4, legExt:1.2, hipShift:1, kneeA:.5, kneeB:.5 } },
+
+  { id:'LIBERTY', name:'One arm to the sky',
+    art:{ title:'Statue of Liberty', who:'Frédéric Auguste Bartholdi', year:'1886' }, legsRequired:false,
+    pose:{ torsoLean:-3, armA:135, armB:-85, elbowA:118, elbowB:175, stance:0.6, hipDrop:0.99, hipShift:0 },
+    w:{ torsoLean:.8, armA:1.4, armB:1.8, elbowA:1.6, elbowB:.9, stance:1.2, legExt:1.2, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'SCREAM', name:'Hands to the face',
+    art:{ title:'The Scream', who:'Edvard Munch', year:'1893' }, legsRequired:false,
+    pose:{ torsoLean:0, armA:-62, armB:-118, elbowA:55, elbowB:55, stance:0.5, hipDrop:0.96, hipShift:0 },
+    w:{ torsoLean:.7, armA:1.4, armB:1.4, elbowA:1.8, elbowB:1.8, stance:1.2, legExt:1.2, hipShift:1, kneeA:.4, kneeB:.4 } },
+
+  { id:'ADAM', name:'The reaching hand',
+    art:{ title:'The Creation of Adam', who:'Michelangelo', year:'c. 1512' }, legsRequired:true,
+    pose:{ torsoLean:-14, armA:155, armB:55, elbowA:168, elbowB:110, stance:0.95, hipDrop:0.90, hipShift:0.18 },
+    w:{ torsoLean:1.4, armA:1.6, armB:1.2, elbowA:.9, elbowB:1.4, stance:1.2, legExt:1.4, hipShift:1.2, kneeA:.6, kneeB:.6 } },
+
+  { id:'DELACROIX', name:'The raised banner',
+    art:{ title:'Liberty Leading the People', who:'Eugène Delacroix', year:'1830' }, legsRequired:true,
+    pose:{ torsoLean:-6, armA:-100, armB:40, elbowA:170, elbowB:160, stance:1.25, hipDrop:0.90, hipShift:-0.2 },
+    w:{ torsoLean:.9, armA:1.8, armB:1.4, elbowA:.9, elbowB:.9, stance:1.5, legExt:1.4, hipShift:1.4, kneeA:.7, kneeB:.7 } },
+
+  { id:'ORANT', name:'Both arms raised',
+    art:{ title:'Orant figure', who:'Early Christian catacomb painting', year:'c. 250' }, legsRequired:false,
+    pose:{ torsoLean:0, armA:-124, armB:-56, elbowA:77, elbowB:77, stance:0.8, hipDrop:0.97, hipShift:0 },
+    w:{ torsoLean:1, armA:1.5, armB:1.5, elbowA:1.8, elbowB:1.8, stance:1.2, legExt:1.2, hipShift:1, kneeA:.5, kneeB:.5 } },
+];
+
+// A figure in the pose a shape describes, built from real limb geometry.
+//
+// The hole the player sees and the numbers the matcher wants are produced by
+// this one function, so they cannot drift apart. The shape is defined by what
+// a body can actually be told to do — where the feet are, how low the hips
+// are, where the hands are and how bent the elbows are — and every matcher
+// target is then DERIVED from the figure that produces. Specifying a knee
+// angle and a leg extension separately is specifying the same thing twice,
+// and the two disagreed.
+// Segment lengths as multiples of the torso (hip to shoulder), from ordinary
+// adult proportions: a leg is about three and a half times longer than the
+// distance from hip to shoulder is... it is not, it is about 1.7 times, and
+// getting this wrong once already made two shapes unreachable by a real body.
+const SEG = { torso:1.0, upper:0.66, fore:0.78, thigh:0.88, shin:0.86, hipHalf:0.26, shHalf:0.40, head:0.44 };
+
+// Where a joint sits when the two bones either side of it are fixed lengths
+// and the ends are pinned. `side` picks which of the two mirror solutions.
+function hinge(p, r1, q, r2, away){
+  const dx = q.x - p.x, dy = q.y - p.y;
+  const d = Math.hypot(dx, dy);
+  if(d < 1e-6) return { x:p.x + r1*Math.sign(away||1), y:p.y };
+  if(d >= r1 + r2 || d <= Math.abs(r1 - r2))
+    return { x:p.x + dx/d*r1, y:p.y + dy/d*r1 };                  // stretched straight
+  const a = (r1*r1 - r2*r2 + d*d) / (2*d);
+  const h = Math.sqrt(Math.max(0, r1*r1 - a*a));
+  const bx = p.x + dx*a/d, by = p.y + dy*a/d;
+  const ux = -dy/d*h, uy = dx/d*h;
+  const s1 = { x:bx+ux, y:by+uy }, s2 = { x:bx-ux, y:by-uy };
+  // Of the two ways a joint can fold, take the one that puts it further out
+  // to the side `away` points. An elbow folds outward, not into the ribs;
+  // picking by a fixed sign buried both of The Scream's arms inside the torso
+  // and the figure came out with no arms at all.
+  const d1 = s1.x*away, d2 = s2.x*away;
+  if(Math.abs(d1 - d2) > 0.06) return d1 > d2 ? s1 : s2;
+  return s1.y > s2.y ? s1 : s2;      // level with each other: a joint hangs down
+}
+
+function shapeSkeleton(shape){
+  const p = shape.pose;
+  const legLen = SEG.thigh + SEG.shin;
+  // the floor is y = 0 and both feet are on it; the hips hang above it
+  const ankA = { x: -p.stance/2, y: 0 };
+  const ankB = { x:  p.stance/2, y: 0 };
+  const hipMid = { x: p.hipShift, y: -p.hipDrop * legLen };
+  const hipA = { x: hipMid.x - SEG.hipHalf, y: hipMid.y };
+  const hipB = { x: hipMid.x + SEG.hipHalf, y: hipMid.y };
+  // knees swing outward, which is where a knee goes over a foot
+  const knA = hinge(hipA, SEG.thigh, ankA, SEG.shin, -1);
+  const knB = hinge(hipB, SEG.thigh, ankB, SEG.shin, +1);
+
+  const lean = (p.torsoLean || 0) * Math.PI/180;
+  const shMid = { x: hipMid.x + Math.sin(lean)*SEG.torso, y: hipMid.y - Math.cos(lean)*SEG.torso };
+  const shA = { x: shMid.x - SEG.shHalf, y: shMid.y };
+  const shB = { x: shMid.x + SEG.shHalf, y: shMid.y };
+  const head = { x: shMid.x + Math.sin(lean)*SEG.head, y: shMid.y - Math.cos(lean)*SEG.head };
+
+  // the arm is given as the direction from shoulder to wrist plus how bent the
+  // elbow is; the reach follows from the bend by the cosine rule, so the drawn
+  // arm really does have that elbow angle
+  function arm(sh, dirDeg, elbowDeg, side){
+    const th = elbowDeg * Math.PI/180;
+    const reach = Math.sqrt(SEG.upper*SEG.upper + SEG.fore*SEG.fore
+                            - 2*SEG.upper*SEG.fore*Math.cos(th));
+    const a = dirDeg * Math.PI/180;
+    const wr = { x: sh.x + Math.cos(a)*reach, y: sh.y + Math.sin(a)*reach };
+    const el = hinge(sh, SEG.upper, wr, SEG.fore, side);
+    return { el, wr };
+  }
+  const A = arm(shA, p.armA, p.elbowA, -1);   // player's left: outward is screen left
+  const B = arm(shB, p.armB, p.elbowB, +1);
+
+  return { shA, shB, hipA, hipB, elA:A.el, wrA:A.wr, elB:B.el, wrB:B.wr,
+           knA, knB, ankA, ankB, head, sh:shMid, hip:hipMid };
+}
+
+// Turn a drawn figure into landmarks the real feature reader can consume.
+// This is how the matcher's targets are generated from the drawing, and how
+// the harness checks the two still agree.
+function skeletonLandmarks(g, scale, cx, cy){
+  const out = [];
+  for(let i=0;i<33;i++) out.push({ x:0.5, y:0.5, z:0, visibility:0 });
+  const put = (i, q) => { out[i] = { x: 1 - (cx + q.x*scale), y: cy + q.y*scale, z:0, visibility:0.99 }; };
+  put(J.shA,g.shA); put(J.shB,g.shB); put(J.elA,g.elA); put(J.elB,g.elB);
+  put(J.wrA,g.wrA); put(J.wrB,g.wrB); put(J.hipA,g.hipA); put(J.hipB,g.hipB);
+  put(J.knA,g.knA); put(J.knB,g.knB); put(J.ankA,g.ankA); put(J.ankB,g.ankB);
+  put(J.nose,g.head);
+  return out;
+}
+function featsFromPose(shape){
+  const g = shapeSkeleton(shape);
+  return features(skeletonLandmarks(g, 0.16, 0.5, 0.78), makeReader()).f;
+}
+
+// Every matcher target in the game is produced here, from the figure the
+// player is shown. Nothing below is a typed number.
+for(const sh of SHAPES.concat(ART)) sh.feats = featsFromPose(sh);
+
+// The figure's own extent, so it can be centred in whatever it is drawn into.
+// Drawing from the hip put the head through the top of the wall on every
+// shape with the arms up, which no amount of checking the numbers would have
+// found.
+function shapeBounds(g){
+  const pts = [g.shA,g.shB,g.hipA,g.hipB,g.elA,g.elB,g.wrA,g.wrB,
+               g.knA,g.knB,g.ankA,g.ankB,g.head];
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const p of pts){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
+  y0 -= SEG.head*0.75;            // room for the head's own width
+  return { x0, y0, x1, y1, w:x1-x0, h:y1-y0, cx:(x0+x1)/2, cy:(y0+y1)/2 };
+}
+
+// How close any limb is to being stretched perfectly straight. The hinge
+// solver quietly returns a straight line when the two bones cannot reach,
+// which draws a figure nobody can copy, so this is checked rather than hoped.
+function reachReport(shape){
+  const g = shapeSkeleton(shape);
+  const d = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
+  return {
+    legA: d(g.hipA,g.ankA) / (SEG.thigh+SEG.shin),
+    legB: d(g.hipB,g.ankB) / (SEG.thigh+SEG.shin),
+    armA: d(g.shA,g.wrA)  / (SEG.upper+SEG.fore),
+    armB: d(g.shB,g.wrB)  / (SEG.upper+SEG.fore),
+  };
+}
+
+/*==SCORER_END==*/
+
+/* ================= camera, pose, and the recording ================= */
+
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+/* ---- the recording ------------------------------------------------
+   Every session is also a measurement. This is layer one of the gate,
+   running underneath the game rather than beside it, so the data comes
+   from a phone being played on rather than a phone being tested.
+
+   Each frame keeps the time the CAMERA captured it and the separate
+   time the estimate came back, every landmark with its own confidence,
+   and the gaps where frames never arrived. Coordinates are recorded raw,
+   with the conventions in the header, so a replay can reproduce exactly
+   what the game saw.                                                   */
+const REC_CAP = 40000;
+const rec = [];
+let recDropped = 0, lostSince = null;
+
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'gap', build:BUILD,
+    orientation: (window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    mem:navigator.deviceMemory||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'capture = video.currentTime in seconds on the video clock; ready = performance.now() in ms when the estimate returned; clock = capture mapped into the performance clock by the running offset',
+    tune: TUNE });
+}
+
+/* The single clock. video.currentTime is the only timestamp that belongs to
+   the camera rather than to the renderer, so it is what every judgment is
+   aligned to. It is mapped once per frame into the millisecond clock the
+   game's own events live on, and the residual constant delay between a body
+   moving and a landmark existing is held in POSE_LATENCY_MS below.
+
+   That constant is ASSUMED, not measured. Measuring it needs the loopback in
+   the gate, where the screen shows a counter and the camera reads it back,
+   with no human in the middle. Until that runs, 200 ms is a placeholder sat
+   in the middle of the published 150-250 ms band, and it is recorded in every
+   file so any session can be re-judged once the real figure exists. */
+let POSE_LATENCY_MS = 200;
+let clockOffset = null;          // performance-ms minus capture-ms
+
+/* ================= the game ================= */
+const BUILD = 'gap-1';
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+const wallCan = document.createElement('canvas'), wctx = wallCan.getContext('2d');
+
+function resize(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  wallCan.width = Math.round(W * DPR); wallCan.height = Math.round(H * DPR);
+  wctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+function videoFit(){
+  const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);           // contain: the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+// a landmark in canvas pixels. Landmarks are normalised to the CAMERA frame,
+// not the canvas, so anything drawn next to the body goes through this.
+function px(p){ const f = videoFit(); return { x: f.dx + p.x*f.dw, y: f.dy + p.y*f.dh }; }
+
+const ui = {
+  oStart:document.getElementById('oStart'), oFit:document.getElementById('oFit'),
+  oEnd:document.getElementById('oEnd'), hud:document.getElementById('hud'),
+  cue:document.getElementById('cue'), cueName:document.getElementById('cueName'),
+  cueArt:document.getElementById('cueArt'), hWall:document.getElementById('hWall'),
+  hScore:document.getElementById('hScore'), loadMsg:document.getElementById('loadMsg'),
+  errMsg:document.getElementById('errMsg'), fitMsg:document.getElementById('fitMsg'),
+  endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
+  endTag:document.getElementById('endTag'), endNote:document.getElementById('endNote'),
+};
+
+let state = 'idle';
+let round = 0, score = 0, wallNo = 0, walls = [], wall = null, results = [];
+let samples = [];                     // recent judged observations, capture-stamped
+let artCursor = Math.floor(Math.random()*ART.length);
+let wake = null;
+
+const WALLS_PER_ROUND = 8;
+const PREVIEW_START = 2400, PREVIEW_MIN = 1400, PREVIEW_STEP = 120;
+// The floor is not a taste. Reading the shape takes about 230 ms, getting
+// there 300-500 ms, and it has to be settled for 300 ms before arrival:
+// 830-1030 ms. 1400 ms leaves real margin. Going below 1200 needs measuring
+// on a phone, not nerve.
+
+function buildRound(){
+  const plain = SHAPES.slice();
+  for(let i=plain.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [plain[i],plain[j]]=[plain[j],plain[i]]; }
+  const picked = plain.slice(0, WALLS_PER_ROUND-1);
+  const art = ART[artCursor % ART.length]; artCursor++;
+  return picked.concat([art]);
+}
+
+function spawnWall(){
+  if(wallNo >= walls.length){ endRound(); return; }
+  const shape = walls[wallNo];
+  const preview = Math.max(PREVIEW_MIN, PREVIEW_START - wallNo*PREVIEW_STEP);
+  const fv = pose ? features(pose, read) : null;
+  wall = { shape, preview, opened: nowClock(), arriveAt: nowClock() + preview,
+           openedF: fv ? fv.f : null, judged:null, flash:0 };
+  recPush({ k:'wall_open', t:wall.opened, wall:wallNo+1, shape:shape.id,
+            preview, art: shape.art ? shape.art.title : null });
+  ui.cue.hidden = false;
+  ui.cueName.textContent = shape.name;
+  ui.cueArt.textContent = shape.art ? (shape.art.title + ' · ' + shape.art.who + ' · ' + shape.art.year) : '';
+}
+
+function nowClock(){ return performance.now(); }
+
+// Map a camera capture time into the game's clock, then subtract the constant
+// the pipeline takes to turn a body into landmarks.
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset * 0.9 + off * 0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+
+function judgeNow(){
+  const r = judgeWall(wall.shape, samples, wall.arriveAt, wall.openedF);
+  wall.judged = r;
+  results.push({ shape:wall.shape.id, art:!!wall.shape.art, ...r });
+  score += r.points;
+  ui.hScore.textContent = score;
+  recPush({ k:'wall_judge', t:nowClock(), wall:wallNo+1, shape:wall.shape.id,
+            verdict:r.verdict, quality:+r.quality.toFixed(4),
+            transition:r.transition===null?null:+r.transition.toFixed(4),
+            lowerMovement:+(r.lowerMovement||0).toFixed(4), rep:r.rep,
+            settled:!!r.settled, samples:r.samples, points:r.points,
+            arriveAt:wall.arriveAt, latencyAssumed:POSE_LATENCY_MS });
+  wall.flash = 1;
+  if(r.verdict === 'CLEAN') blip(880, 0.18, 0.25);
+  else if(r.verdict === 'CLIPPED') blip(520, 0.16, 0.22);
+  else if(r.verdict === 'BREAK') blip(180, 0.26, 0.3);
+  else blip(330, 0.1, 0.18);
+}
+
+function endRound(){
+  state = 'over'; wall = null;
+  ui.cue.hidden = true; ui.hud.hidden = true;
+  const clean = results.filter(r=>r.verdict==='CLEAN').length;
+  const reps  = results.filter(r=>r.rep).length;
+  const uns   = results.filter(r=>r.verdict==='UNSCORED').length;
+  ui.endScore.textContent = score;
+  ui.endTag.textContent = 'ROUND ' + round + ' COMPLETE';
+  const rows = [
+    ['Clean passes', clean + ' of ' + results.length],
+    ['Real repetitions', String(reps)],
+  ];
+  if(uns) rows.push(['Not observed', uns + (uns===1?' wall':' walls')]);
+  const art = results.find(r=>r.art);
+  if(art) rows.push(['Finale', art.verdict==='BREAK' ? 'missed' : 'held']);
+  ui.endRows.innerHTML = rows.map(r=>'<tr><td class="k">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('');
+  ui.endNote.textContent = uns
+    ? 'Walls the camera could not see you through are not counted against you.'
+    : 'A repetition counts only when the shape was reached and held with the legs doing the work.';
+  ui.oEnd.hidden = false;
+  recPush({ k:'round_end', t:nowClock(), round, score, clean, reps, unscored:uns });
+}
+
+/* ---- drawing ---- */
+function drawMirror(dim){
+  const f = videoFit();
+  ctx.save();
+  ctx.translate(W,0); ctx.scale(-1,1);
+  try { ctx.drawImage(video, W-f.dx-f.dw, f.dy, f.dw, f.dh); } catch(e){}
+  ctx.restore();
+  ctx.fillStyle = 'rgba(11,13,26,'+dim+')'; ctx.fillRect(0,0,W,H);
+}
+
+const BONES = [[J.shA,J.elA],[J.elA,J.wrA],[J.shB,J.elB],[J.elB,J.wrB],
+               [J.shA,J.shB],[J.shA,J.hipA],[J.shB,J.hipB],[J.hipA,J.hipB],
+               [J.hipA,J.knA],[J.knA,J.ankA],[J.hipB,J.knB],[J.knB,J.ankB]];
+
+function drawPlayer(alpha){
+  if(!pose) return;
+  const P = {}; let any=false;
+  for(const k in J){ const p = read(pose, J[k]); if(p){ P[J[k]] = px(p); any=true; } }
+  if(!any) return;
+  ctx.save();
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='rgba(244,237,224,'+alpha+')';
+  ctx.lineWidth = Math.max(5, Math.min(W,H)*0.016);
+  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  const n = P[J.nose];
+  if(n){ ctx.fillStyle='rgba(244,237,224,'+alpha+')'; ctx.beginPath();
+    ctx.arc(n.x, n.y, Math.max(8, Math.min(W,H)*0.024), 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
+function cutFigure(g, box, clearance){
+  // Fit the whole figure inside the opening, centred on the figure rather
+  // than on its hips, with room left for the stroke that makes the hole
+  // bigger than the body.
+  const bb = shapeBounds(g);
+  const pad = 1 + clearance*1.6;
+  const s = Math.min(box.w / (bb.w*pad + 0.001), box.h / (bb.h*pad + 0.001));
+  const cx = box.x + box.w/2, cy = box.y + box.h/2;
+  const X = p => cx + (p.x - bb.cx)*s, Y = p => cy + (p.y - bb.cy)*s;
+
+  wctx.save();
+  wctx.globalCompositeOperation = 'destination-out';
+  wctx.lineCap = 'round'; wctx.lineJoin = 'round';
+  wctx.strokeStyle = '#000'; wctx.fillStyle = '#000';
+  wctx.lineWidth = s * clearance;
+
+  // the trunk is a filled shape, not two lines with a gap down the middle
+  wctx.beginPath();
+  wctx.moveTo(X(g.shA), Y(g.shA)); wctx.lineTo(X(g.shB), Y(g.shB));
+  wctx.lineTo(X(g.hipB), Y(g.hipB)); wctx.lineTo(X(g.hipA), Y(g.hipA));
+  wctx.closePath(); wctx.fill(); wctx.stroke();
+
+  const link = (p,q) => { wctx.beginPath(); wctx.moveTo(X(p),Y(p)); wctx.lineTo(X(q),Y(q)); wctx.stroke(); };
+  link(g.shA,g.elA); link(g.elA,g.wrA); link(g.shB,g.elB); link(g.elB,g.wrB);
+  link(g.hipA,g.knA); link(g.knA,g.ankA); link(g.hipB,g.knB); link(g.knB,g.ankB);
+  link(g.sh, g.head);
+  wctx.beginPath(); wctx.arc(X(g.head), Y(g.head), s*SEG.head*0.52 + wctx.lineWidth*0.45, 0, 7); wctx.fill();
+  wctx.restore();
+  return s;
+}
+
+function drawWall(w, now){
+  // depth: 0 when it appears, 1 at arrival, continuing past as it goes by
+  const u = Math.max(0, (now - w.opened) / w.preview);
+  const z = Math.max(0, 1 - u);                        // 1 = far off, 0 = here
+  // Sized by where the opening ends up rather than by an invented camera: a
+  // quarter of the screen when it appears, and about body-sized at arrival,
+  // with the near growth accelerating the way a real approach does.
+  const wallH = H * 0.26 / (0.8*z + 0.2);
+  const wallW = wallH * 0.82;
+  const cx = W/2, cy = H*0.52;
+  const art = !!w.shape.art;
+  wctx.clearRect(0,0,W,H);
+  const x0 = cx - wallW/2, y0 = cy - wallH/2;
+  const grad = wctx.createLinearGradient(x0, y0, x0, y0+wallH);
+  grad.addColorStop(0, art ? '#efe3c6' : '#e8ddc8');
+  grad.addColorStop(1, art ? '#c7ab75' : '#bfae8d');
+  wctx.fillStyle = grad;
+  wctx.fillRect(x0, y0, wallW, wallH);
+
+  // the hole is generous: it is a hole a person fits through, not a stencil
+  cutFigure(shapeSkeleton(w.shape),
+            { x: x0 + wallW*0.14, y: cy - wallH*0.30, w: wallW*0.72, h: wallH*0.56 },
+            0.26);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
+  ctx.drawImage(wallCan, 0, 0, wallCan.width, wallCan.height, 0, 0, W, H);
+  ctx.restore();
+
+  // rim around the opening, gold for an artwork wall
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = art ? '#d8a43c' : 'rgba(120,104,74,.8)';
+  ctx.lineWidth = Math.max(1.5, wallH/H*2.5);
+  ctx.strokeRect(x0, y0, wallW, wallH);
+  ctx.restore();
+
+  if(art){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, u*2);
+    ctx.strokeStyle = '#d8a43c'; ctx.lineWidth = Math.max(2, wallH/H*7);
+    ctx.strokeRect(x0+wallW*0.02, y0+wallH*0.02, wallW*0.96, wallH*0.96);
+    ctx.restore();
+  }
+}
+
+function drawLockRing(q, settledFor, readable){
+  const r = Math.min(W,H) * 0.085;
+  const cx = W - r - 22, cy = H - r - 96;
+  ctx.save();
+  ctx.fillStyle = 'rgba(11,13,26,.72)';
+  ctx.beginPath(); ctx.arc(cx, cy, r*1.34, 0, 7); ctx.fill();
+  ctx.lineWidth = Math.max(5, r*0.2); ctx.lineCap='round';
+  ctx.strokeStyle = 'rgba(255,255,255,.14)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  if(!readable){
+    ctx.strokeStyle = '#c76a62';
+    ctx.setLineDash([r*0.3, r*0.3]);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#f4ede0'; ctx.font='12px Georgia'; ctx.textAlign='center';
+    ctx.fillText('step back', cx, cy+4);
+    ctx.restore(); return;
+  }
+  const frac = Math.max(0, Math.min(1, settledFor / TUNE.SETTLE_MS));
+  ctx.strokeStyle = frac >= 1 ? '#7fc08a' : '#d8a43c';
+  ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + frac*Math.PI*2); ctx.stroke();
+  ctx.fillStyle = frac>=1 ? '#7fc08a' : 'rgba(244,237,224,.75)';
+  ctx.font = '13px Georgia'; ctx.textAlign='center';
+  ctx.fillText(frac>=1 ? 'HELD' : Math.round(q*100)+'%', cx, cy+5);
+  ctx.restore();
+}
+
+function drawVerdict(w){
+  const r = w.judged; if(!r) return;
+  const a = Math.min(1, w.flash*1.6);
+  const txt = r.verdict === 'CLEAN' ? 'THROUGH'
+            : r.verdict === 'CLIPPED' ? 'CLIPPED'
+            : r.verdict === 'BREAK' ? 'BROKE'
+            : 'NOT SEEN';
+  const col = r.verdict === 'CLEAN' ? '#7fc08a'
+            : r.verdict === 'CLIPPED' ? '#d8a43c'
+            : r.verdict === 'BREAK' ? '#c76a62' : '#8d93b0';
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(11,13,26,'+(0.45*a)+')'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = col; ctx.textAlign='center';
+  ctx.font = Math.round(Math.min(W,H)*0.11)+'px Georgia';
+  ctx.fillText(txt, W/2, H*0.46);
+  if(r.verdict === 'UNSCORED'){
+    ctx.font = Math.round(Math.min(W,H)*0.035)+'px Georgia';
+    ctx.fillStyle = '#8d93b0';
+    ctx.fillText('not your fault — this one does not count', W/2, H*0.53);
+  } else if(r.rep){
+    ctx.font = Math.round(Math.min(W,H)*0.035)+'px Georgia';
+    ctx.fillStyle = '#7fc08a';
+    ctx.fillText('counted', W/2, H*0.53);
+  }
+  ctx.restore();
+}
+
+/* ---- the fit gate: are the legs in the picture at all? ---- */
+let fitOk = false, fitSince = 0;
+function checkFit(now){
+  const kn = read(pose, J.knA) || read(pose, J.knB);
+  const an = read(pose, J.ankA) || read(pose, J.ankB);
+  const ok = !!(kn && an);
+  if(ok !== fitOk){ fitOk = ok; fitSince = now; }
+  return ok && (now - fitSince) > 600;
+}
+
+/* ---- audio: small, synthesised, no files ---- */
+let actx = null;
+function initAudio(){ try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} }
+function blip(f, g, d){
+  if(!actx) return;
+  const o = actx.createOscillator(), v = actx.createGain();
+  o.type='triangle'; o.frequency.value=f;
+  v.gain.setValueAtTime(0, actx.currentTime);
+  v.gain.linearRampToValueAtTime(g, actx.currentTime+0.012);
+  v.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+d);
+  o.connect(v); v.connect(actx.destination); o.start(); o.stop(actx.currentTime+d+0.05);
+}
+
+async function keepAwake(){
+  try { if('wakeLock' in navigator){ wake = await navigator.wakeLock.request('screen'); } } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state !== 'idle') keepAwake();
+});
+
+/* ---- the loop ---- */
+let settledFor = 0, lastQ = 0, lastReadable = false, lastFrameAt = 0;
+
+function frame(now){
+  requestAnimationFrame(frame);
+  if(video.readyState < 2 || !landmarker){ return; }
+
+  let fresh = false, clockT = now;
+  if(video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    if(lastFrameAt && now - lastFrameAt > 120){
+      recPush({ k:'gap', t:now, ms:Math.round(now-lastFrameAt) });
+    }
+    lastFrameAt = now;
+    lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true;
+      clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+
+    if(fresh){
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+                                        +(p.z||0).toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+(vt).toFixed(4), ready:+performance.now().toFixed(1),
+                clock:+clockT.toFixed(1), lm });
+      if(!pose && lostSince === null){ lostSince = now; recPush({ k:'lost', t:now }); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:now, out:Math.round(now-lostSince) }); lostSince = null; }
+    }
+  }
+
+  if(state === 'fit'){
+    drawMirror(0.45); drawPlayer(0.9);
+    const ok = checkFit(now);
+    ui.fitMsg.textContent = ok ? 'Good. Starting…' : 'Step back until your knees and feet are in the picture.';
+    if(ok){ ui.oFit.hidden = true; startRound(); }
+    return;
+  }
+
+  if(state !== 'play'){ if(state==='over'){ drawMirror(0.75); } return; }
+
+  // one observation per fresh frame, carrying its own capture time
+  if(fresh && pose){
+    const fv = features(pose, read);
+    const m = wall ? match(wall.shape, fv) : null;
+    if(m){
+      // On the first wall of a round there may be no pose yet when the wall
+      // opens, which left nothing to measure the player's movement against and
+      // silently denied them the repetition. Take the first clear view instead.
+      if(wall && !wall.openedF && m.readable) wall.openedF = fv.f;
+      samples.push({ t: clockT, fv, m });
+      if(samples.length > 400) samples.shift();
+      lastQ = m.quality; lastReadable = m.readable;
+      if(m.readable && m.quality >= TUNE.SETTLE_Q) settledFor += 33; else settledFor = 0;
+    }
+  }
+
+  drawMirror(0.52);
+  drawPlayer(0.55);
+
+  if(wall){
+    if(!wall.judged){
+      drawWall(wall, now);
+      drawLockRing(lastQ, settledFor, lastReadable);
+      // The wall ARRIVES at arriveAt, but the landmarks describing the body at
+      // that instant do not exist until the pipeline has run. Judging at
+      // arrival + JUDGE_POST reads an interval the estimates have not reached
+      // yet, and every wall in a round came back UNSCORED. Wait for the
+      // evidence, then judge. This is the whole reason the moment of judgment
+      // is masked rather than animated.
+      if(now >= wall.arriveAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40) judgeNow();
+    } else {
+      // The moment of judgment is masked rather than animated. The body on
+      // screen is a fifth of a second behind the body that was judged, so
+      // showing a silhouette slide through the hole would show a result that
+      // visibly disagrees with the one scored. A flash and a verdict cannot
+      // disagree with anything.
+      drawVerdict(wall);
+      wall.flash -= 0.045;
+      if(wall.flash <= 0){
+        wallNo++; wall = null; settledFor = 0; samples.length = 0;
+        ui.hWall.textContent = Math.min(wallNo+1, WALLS_PER_ROUND) + '/' + WALLS_PER_ROUND;
+        setTimeout(spawnWall, 260);
+      }
+    }
+  }
+}
+
+function startRound(){
+  round++; score = 0; wallNo = 0; results = []; samples = []; settledFor = 0;
+  walls = buildRound();
+  state = 'play';
+  ui.hud.hidden = false; ui.hScore.textContent = '0';
+  ui.hWall.textContent = '1/' + WALLS_PER_ROUND;
+  recPush({ k:'round_start', t:nowClock(), round, walls: walls.map(s=>s.id) });
+  spawnWall();
+}
+
+/* ---- starting up ---- */
+function dropStream(){
+  const s = video.srcObject;
+  if(s){ try { s.getTracks().forEach(t => t.stop()); } catch(e){} }
+  video.srcObject = null;
+}
+function waitForFrames(ms){
+  return new Promise((res, rej) => {
+    if(video.readyState >= 2) return res();
+    let done = false;
+    const ok = () => { if(done) return; done = true; clean(); res(); };
+    const giveUp = () => { if(done) return; done = true; clean();
+      rej(new Error('The camera turned on but sent no picture. Close any other app using it, then try again.')); };
+    const t = setTimeout(giveUp, ms || 10000);
+    function clean(){ clearTimeout(t);
+      video.removeEventListener('loadeddata', ok); video.removeEventListener('playing', ok); }
+    video.addEventListener('loadeddata', ok); video.addEventListener('playing', ok);
+  });
+}
+
+let starting = false;
+async function begin(){
+  if(starting || state !== 'idle') return;
+  starting = true;
+  const btn = document.getElementById('bStart'); if(btn) btn.disabled = true;
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx && actx.state === 'suspended') await actx.resume();
+    // a tall screen wants a tall frame: a landscape request crops the legs
+    // before the tracker ever sees them
+    const tall = window.innerHeight > window.innerWidth;
+    const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
+    const s = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:vW}, height:{ideal:vH}, facingMode:'user' }, audio:false });
+    dropStream();
+    video.srcObject = s;
+    const playing = video.play();
+    if(playing && playing.catch) playing.catch(()=>{});
+    await Promise.race([ playing ? playing.catch(()=>{}) : Promise.resolve(),
+                         new Promise(r => setTimeout(r, 3000)) ]);
+    await waitForFrames(8000);
+    if(!landmarker) await loadTracker();
+    recHeader();
+    ui.loadMsg.hidden = true; ui.oStart.hidden = true; ui.oFit.hidden = false;
+    state = 'fit'; keepAwake();
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream();
+    ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    if(err && err.name === 'NotAllowedError') m = 'Camera permission denied. Allow it in the address bar and reload.';
+    if(err && err.name === 'NotFoundError') m = 'No camera found on this device.';
+    if(err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    if(err && err.name === 'AbortError') m = 'The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  } finally {
+    starting = false;
+    const b2 = document.getElementById('bStart'); if(b2) b2.disabled = false;
+  }
+}
+
+document.getElementById('bStart').addEventListener('click', begin);
+// The override is always enabled. A player the camera cannot frame must still
+// be able to start; the gate is advice, not a lock.
+document.getElementById('bGo').addEventListener('click', () => { ui.oFit.hidden = true; startRound(); });
+document.getElementById('bAgain').addEventListener('click', () => { ui.oEnd.hidden = true; startRound(); });
+document.getElementById('bRec').addEventListener('click', () => {
+  const lines = rec.map(o => JSON.stringify(o)).join('\n');
+  const blob = new Blob([lines], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'gap-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+});
+
+window.__GAP__ = { SHAPES, ART, TUNE, features, match, judgeWall, transition,
+                   lowerMovement, makeReader, shapeSkeleton, rec };
+</script>
+</body>
+</html>
