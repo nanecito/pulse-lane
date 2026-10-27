@@ -1057,20 +1057,25 @@ let shake = 0, parts = [], fading = [];
    condition, not a difficulty knob: 1.3 s is condition one and the other
    conditions get measured on a real body before anything moves. Difficulty
    comes from how often sparks arrive and how many want the legs.          */
-const BPM = 100;
+const BPM = 124;
 const BEAT = 60 / BPM;                       // seconds
 const BAR = BEAT * 4;
 
+/* Cadences are in BEATS, so the tempo and the spark spacing are locked to
+   each other — and at 124 BPM a beat is 484 ms, which puts a three beat gap
+   at 1.45 s against a 1.3 s lifetime. Sparks would land while the previous
+   one was still alive. Nothing shorter than four beats is allowed to exist
+   in this table; the tempo went up and the cadences went up with it. */
 const SECTIONS = [
-  // bars, beats between sparks, share of sparks that want the legs, label
-  { bars: 4,  cadence: 0,   legs: 0,    name:'' },          // count-in, no sparks
-  { bars: 16, cadence: 4,   legs: 0.20, name:'WARM' },
-  { bars: 16, cadence: 4,   legs: 0.35, name:'BUILD' },
-  { bars: 16, cadence: 3,   legs: 0.45, name:'PUSH' },
-  { bars: 12, cadence: 3,   legs: 0.55, name:'PEAK' },
-  { bars: 6,  cadence: 4,   legs: 0.30, name:'BREATHE' },
-  { bars: 2,  cadence: 0,   legs: 0,    name:'' },          // swell, no sparks
-  { bars: 3,  cadence: 0,   legs: 0,    name:'FINALE' },    // the finale spark
+  // bars, beats between sparks, share wanting the legs, energy, label
+  { bars: 4,  cadence: 0, legs: 0,    energy: 0.15, name:'' },        // count-in
+  { bars: 16, cadence: 6, legs: 0.20, energy: 0.35, name:'WARM' },
+  { bars: 20, cadence: 5, legs: 0.35, energy: 0.55, name:'BUILD' },
+  { bars: 20, cadence: 4, legs: 0.45, energy: 0.80, name:'PUSH' },
+  { bars: 16, cadence: 4, legs: 0.55, energy: 1.00, name:'PEAK' },
+  { bars: 8,  cadence: 6, legs: 0.30, energy: 0.45, name:'BREATHE' },
+  { bars: 5,  cadence: 0, legs: 0,    energy: 0.70, name:'LIFT' },    // the riser
+  { bars: 4,  cadence: 0, legs: 0,    energy: 1.00, name:'FINALE' },
 ];
 const TOTAL_BARS = SECTIONS.reduce((a, s) => a + s.bars, 0);
 const RUN_SECONDS = TOTAL_BARS * BAR;
@@ -1482,44 +1487,117 @@ function fitMessage(){
 
 /* ---- audio: synthesised, no files, no licences ----
 
-   The track is built out of oscillators at runtime. Five layers, and which
-   of them are playing is decided by the streak: a pad underneath always, then
-   drums, bass, a melody and a shimmer on top as the player keeps landing
-   sparks. Break the streak and the layers come off in the same order they
-   went on. Nothing is said about how well they are doing; they hear it.
+   Dance music, built out of oscillators at runtime. The parts that make it
+   move rather than merely play:
 
-   Scheduled against actx.currentTime with a lookahead, never against
+   FOUR ON THE FLOOR. A kick on every beat. It is the thing the player's
+   weight follows, so it is never taken away — layers build on top of it
+   rather than including it.
+
+   SIDECHAIN. Everything melodic goes through a gain node that is ducked on
+   every kick and recovers over about two thirds of a beat. That pumping is
+   most of what makes dance music feel like dance music, and it costs one
+   node and one ramp per beat.
+
+   A FILTER THAT OPENS. The melodic bus runs through a lowpass whose cutoff
+   is driven by the section's energy and by the streak. Quiet and closed at
+   the start, wide open at the peak and on a long streak. This is where
+   "dynamic" actually lives: the track changes because of where you are in it
+   AND because of how you are playing.
+
+   A REAL LIFT. The bars before the finale have no sparks and a riser — noise
+   through a bandpass climbing two octaves, with the filter opening and the
+   kick dropping out for the last bar. Then the finale lands.
+
+   Everything is scheduled against actx.currentTime with a lookahead, never
    setTimeout or rAF, because the audio clock is the only one that does not
    drift when the page is busy. The same clock carries the song position that
    decides when sparks appear.                                            */
-let actx = null, master = null, layerGain = {}, schedTimer = null, schedAt = 0;
+let actx = null, master = null, pump = null, tone = null;
+let layerGain = {}, schedTimer = null, schedAt = 0;
 const LOOKAHEAD = 0.12, TICK = 25;
 
 function initAudio(){
   try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
   master = actx.createGain();
-  master.gain.value = 0.9;
+  /* 1.3, not the 0.85 it was. The mix came down off the kick so the round
+     could build, which cost about 6 dB of level, and this puts it back.
+     Set against a measured worst case — loudest section, streak 12, a chime
+     landing on a kick — rendered six times because hit() uses a fresh random
+     noise buffer each call and one render is not a headroom measurement.
+     At 1.3 that worst case peaks 0.74-0.84 and never clips. */
+  master.gain.value = 1.3;
   master.connect(actx.destination);
-  for(const k of ['pad','drum','bass','arp','shine']){
+
+  // the melodic bus: ducked by the kick, then filtered
+  tone = actx.createBiquadFilter();
+  tone.type = 'lowpass';
+  tone.frequency.value = 700;
+  tone.Q.value = 7;
+  pump = actx.createGain();
+  pump.gain.value = 1;
+  tone.connect(pump); pump.connect(master);
+
+  for(const k of ['pad','bass','stab','lead','shine']){
     const g = actx.createGain();
     g.gain.value = (k === 'pad') ? 1 : 0;
-    g.connect(master);
+    g.connect(tone);                      // melodic: pumped and filtered
+    layerGain[k] = g;
+  }
+  for(const k of ['kick','hat','clap']){
+    const g = actx.createGain();
+    g.gain.value = (k === 'kick') ? 1 : 0;
+    g.connect(master);                    // drums: never ducked by themselves
     layerGain[k] = g;
   }
 }
 
-// how many layers the current streak has earned
-const LAYER_AT = { pad:0, drum:1, bass:3, arp:6, shine:10 };
-let layerStreak = -1;
+/* Two things decide whether a layer plays, and both have to allow it.
+
+   The SECTION sets the ceiling: the track itself thins out for the breather
+   and fills up at the peak, whatever the player is doing. The STREAK decides
+   how much of that ceiling has been earned. The kick and the pad are the
+   floor and are always there, because a track that starts silent gives the
+   player nothing to move to before they have hit anything.
+
+   On/off gating alone was NOT enough, and the measurement said so: with
+   layers switching between 0 and 1 the track read at a flat 0.081 → 0.083
+   RMS from the count-in to the finale. It got brighter and never got bigger,
+   because the kick at 0.78 was most of the level and four extra layers at
+   0.03 each could not be heard against it. So two further things changed:
+   the kick came down to make room, and a layer's gain is now GRADED by the
+   section energy rather than switched. Measured again below. */
+const LAYER_AT = { kick:0,  pad:0,  hat:1,   bass:2,  clap:3,   stab:4,  lead:6,   shine:9 };
+const LAYER_E  = { kick:0,  pad:0,  hat:0.3, bass:0.4, clap:0.5,  stab:0.6, lead:0.75, shine:0.95 };
+/* Once a layer is allowed in, how loud it is follows the section. FLOOR_E is
+   the kick and the pad, which swell but never disappear; the rest come in at
+   a third and reach full only at the peak. This is where the round's level
+   dynamics actually live. */
+const layerLevel = (k, e) => (k === 'kick' || k === 'pad') ? 0.62 + 0.38*e : 0.34 + 0.66*e;
+let layerKey = '';
 function updateLayers(){
-  if(!actx || streak === layerStreak) return;
-  layerStreak = streak;
+  if(!actx) return;
+  const sec = sectionAt(songTime());
+  const e = sec ? sec.energy : 0.3;
+  const key = streak + '|' + e;
+  if(key === layerKey) return;
+  layerKey = key;
   for(const k in LAYER_AT){
-    const want = streak >= LAYER_AT[k] ? 1 : 0;
+    const want = (streak >= LAYER_AT[k] && e >= LAYER_E[k]) ? layerLevel(k, e) : 0;
     const g = layerGain[k].gain;
     g.cancelScheduledValues(actx.currentTime);
-    g.setTargetAtTime(want, actx.currentTime, 0.18);
+    g.setTargetAtTime(want, actx.currentTime, 0.15);
   }
+}
+
+/* The filter follows the section AND the player. */
+function updateTone(){
+  if(!actx || !tone) return;
+  const sec = sectionAt(songTime());
+  const e = sec ? sec.energy : 0.3;
+  const s = Math.min(1, streak / 12);
+  const hz = 420 * Math.pow(2, e * 3.4 + s * 1.6);   // 420 Hz up to ~11 kHz
+  tone.frequency.setTargetAtTime(Math.min(13000, hz), actx.currentTime, 0.3);
 }
 
 function voice(dest, type, freq, t, dur, peak, detune){
@@ -1532,64 +1610,136 @@ function voice(dest, type, freq, t, dur, peak, detune){
   o.connect(g); g.connect(dest);
   o.start(t); o.stop(t + dur + 0.04);
 }
-function noise(dest, t, dur, peak, hp){
-  const n = Math.floor(actx.sampleRate * dur);
+function noiseBuf(dur){
+  const n = Math.max(1, Math.floor(actx.sampleRate * dur));
   const buf = actx.createBuffer(1, n, actx.sampleRate);
   const d = buf.getChannelData(0);
-  for(let i = 0; i < n; i++) d[i] = (Math.random()*2 - 1) * (1 - i/n);
-  const s = actx.createBufferSource(); s.buffer = buf;
-  const f = actx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp || 6000;
-  const g = actx.createGain(); g.gain.value = peak;
+  for(let i = 0; i < n; i++) d[i] = (Math.random()*2 - 1);
+  return buf;
+}
+function hit(dest, t, dur, peak, hz, type){
+  const s = actx.createBufferSource(); s.buffer = noiseBuf(dur);
+  const f = actx.createBiquadFilter(); f.type = type || 'highpass'; f.frequency.value = hz;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(peak, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   s.connect(f); f.connect(g); g.connect(dest);
-  s.start(t);
+  s.start(t); s.stop(t + dur + 0.02);
 }
 
-// A minor, four bars. Roots and the pentatonic the melody walks.
+/* The duck. Called at every kick, on the melodic bus only. */
+function sidechain(t){
+  if(!pump) return;
+  const g = pump.gain;
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(0.28, t);
+  g.linearRampToValueAtTime(1, t + BEAT * 0.66);
+}
+
+// A minor, four bars. Roots, the chord above each, and the scale the lead walks.
 const ROOTS = [110.00, 87.31, 130.81, 98.00];          // Am F C G
-const CHORD = [[0,3,7],[0,4,7],[0,4,7],[0,4,7]];
-const PENT  = [0, 3, 5, 7, 10];
+const CHORD = [[0,3,7,12],[0,4,7,12],[0,4,7,12],[0,4,7,12]];
+const PENT  = [0, 3, 5, 7, 10, 12];
 const semi = n => Math.pow(2, n/12);
 
 function scheduleBeat(bIndex, t){
   if(!actx) return;
   const bar = Math.floor(bIndex / 4), beat = bIndex % 4;
   const root = ROOTS[bar % 4];
-  const sec = sectionAt(bIndex * BEAT);
-  const peak = sec.name === 'PEAK' || sec.name === 'FINALE';
+  const sec = sectionAtBeat(bIndex);
+  const e = sec ? sec.energy : 0.3;
+  const lift = sec && sec.name === 'LIFT';
+  const fin  = sec && sec.name === 'FINALE';
 
-  if(beat === 0){
-    for(const iv of CHORD[bar % 4]){
-      voice(layerGain.pad, 'triangle', root * 2 * semi(iv), t, BAR * 1.05, 0.055, -4);
-      voice(layerGain.pad, 'sine',     root * semi(iv),     t, BAR * 1.05, 0.045, +5);
-    }
-  }
-  // drums
-  if(beat === 0 || beat === 2){
+  /* KICK, every beat. It drops out for the last bar of the lift so the
+     finale has something to land against. */
+  const barsIntoLift = lift ? (bIndex/4 - liftStartBar) : 0;
+  const kickOn = !(lift && barsIntoLift >= 4);
+  if(kickOn){
     const k = actx.createOscillator(), g = actx.createGain();
     k.type = 'sine';
-    k.frequency.setValueAtTime(130, t); k.frequency.exponentialRampToValueAtTime(46, t + 0.11);
+    k.frequency.setValueAtTime(165, t);
+    k.frequency.exponentialRampToValueAtTime(44, t + 0.085);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.5, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.46, t + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.21);
-    k.connect(g); g.connect(layerGain.drum); k.start(t); k.stop(t + 0.26);
+    k.connect(g); g.connect(layerGain.kick); k.start(t); k.stop(t + 0.26);
+    hit(layerGain.kick, t, 0.02, 0.20, 1200);       // the click that carries on a phone
+    sidechain(t);
   }
-  if(beat === 1 || beat === 3) noise(layerGain.drum, t, 0.09, 0.10, 2200);
-  noise(layerGain.drum, t + BEAT/2, 0.035, 0.045, 8000);
-  if(peak) noise(layerGain.drum, t + BEAT/4, 0.03, 0.03, 9000);
 
-  // bass
-  if(beat === 0) voice(layerGain.bass, 'sawtooth', root/2, t, BEAT*1.6, 0.11);
-  if(beat === 2) voice(layerGain.bass, 'sawtooth', root/2, t, BEAT*0.7, 0.08);
+  // CLAP on 2 and 4, three taps a few ms apart so it smears like a real one
+  if(beat === 1 || beat === 3){
+    for(let i = 0; i < 3; i++)
+      hit(layerGain.clap, t + i*0.012, 0.055 + i*0.02, 0.30 - i*0.07, 1400, 'bandpass');
+  }
 
-  // melody: pentatonic sixteenths, denser at the peak
-  const steps = peak ? 4 : 2;
+  // HATS: closed on every eighth, open on the offbeat, which is the sound
+  for(let i = 0; i < 2; i++)
+    hit(layerGain.hat, t + i*(BEAT/2), 0.028, 0.15, 9000);
+  if(beat === 1 || beat === 3 || e > 0.7)
+    hit(layerGain.hat, t + BEAT*0.5, 0.13, 0.13, 7000);
+  if(e > 0.75) for(let i = 0; i < 4; i++)
+    hit(layerGain.hat, t + i*(BEAT/4), 0.016, 0.07, 11000);
+
+  /* BASS: a moving eighth-note line, root and octave, not a held note. */
+  const BPAT = [0, 0, 12, 0, 7, 0, 12, 0];
+  for(let i = 0; i < 2; i++){
+    const n = BPAT[(beat*2 + i) % BPAT.length];
+    voice(layerGain.bass, 'sawtooth', root/2 * semi(n), t + i*(BEAT/2),
+          BEAT*0.42, 0.20, i ? 6 : -6);
+  }
+
+  // PAD: one long chord a bar, and short STABS on the offbeats
+  if(beat === 0){
+    for(const iv of CHORD[bar % 4]){
+      voice(layerGain.pad, 'sawtooth', root * semi(iv), t, BAR*1.02, 0.038, -7);
+      voice(layerGain.pad, 'sawtooth', root * semi(iv), t, BAR*1.02, 0.038, +7);
+    }
+  }
+  if(beat === 1 || beat === 3)
+    for(const iv of CHORD[bar % 4])
+      voice(layerGain.stab, 'square', root*2 * semi(iv), t + BEAT*0.5, BEAT*0.26, 0.055);
+
+  // LEAD: pentatonic sixteenths, busier the higher the energy
+  const steps = e > 0.7 ? 4 : 2;
   for(let i = 0; i < steps; i++){
-    const n = PENT[(bIndex * steps + i * 3) % PENT.length];
-    voice(layerGain.arp, 'square', root * 2 * semi(n), t + i * (BEAT/steps),
-          BEAT/steps * 0.8, 0.035);
+    const n = PENT[(bIndex*steps + i*2 + bar) % PENT.length];
+    voice(layerGain.lead, 'square', root*4 * semi(n), t + i*(BEAT/steps),
+          BEAT/steps*0.7, 0.048);
   }
-  if(beat === 0) voice(layerGain.shine, 'sine', root * 6 * semi(PENT[bar % PENT.length]),
-                       t, BAR * 0.8, 0.028);
+  if(beat === 0) voice(layerGain.shine, 'sine', root*8 * semi(PENT[bar % PENT.length]),
+                       t, BAR*0.7, 0.042);
+  if(fin && beat === 0)
+    for(const iv of CHORD[bar % 4])
+      voice(master, 'sawtooth', root*2 * semi(iv), t, BAR*1.5, 0.045, 9);
+}
+
+/* The riser: noise through a bandpass climbing two octaves across the lift,
+   plus a sine doing the same. Scheduled once, when the lift begins. */
+let liftStartBar = 1e9, liftDone = false;
+function scheduleLift(t, bars){
+  if(!actx || liftDone) return;
+  liftDone = true;
+  const dur = bars * BAR;
+  const s = actx.createBufferSource(); s.buffer = noiseBuf(dur);
+  const f = actx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2.2;
+  f.frequency.setValueAtTime(380, t);
+  f.frequency.exponentialRampToValueAtTime(5200, t + dur);
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.16, t + dur*0.92);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f); f.connect(g); g.connect(master);
+  s.start(t); s.stop(t + dur + 0.05);
+  const o = actx.createOscillator(), og = actx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(110, t);
+  o.frequency.exponentialRampToValueAtTime(880, t + dur);
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.05, t + dur*0.9);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(og); og.connect(master); o.start(t); o.stop(t + dur + 0.05);
 }
 
 /* The spark schedule rides the same clock. The scheduler marks a spark as due
@@ -1603,6 +1753,11 @@ function scheduler(){
   if(!actx || state !== 'play') return;
   while(schedAt < actx.currentTime - songStart + LOOKAHEAD){
     const bIndex = Math.round(schedAt / BEAT);
+    const sec = sectionAtBeat(bIndex);
+    if(sec && sec.name === 'LIFT' && !liftDone){
+      liftStartBar = Math.floor(bIndex / 4);
+      scheduleLift(songStart + schedAt, sec.bars);
+    }
     scheduleBeat(bIndex, songStart + schedAt);
     schedAt += BEAT;
   }
@@ -1617,8 +1772,11 @@ function startMusic(){
   if(!actx) return;
   songStart = actx.currentTime + 0.12;
   schedAt = 0;
-  for(const k in layerGain) layerGain[k].gain.value = (k === 'pad') ? 1 : 0;
-  layerStreak = -1;
+  liftDone = false; liftStartBar = 1e9;
+  for(const k in layerGain) layerGain[k].gain.value = (k === 'pad' || k === 'kick') ? 1 : 0;
+  layerKey = '';
+  if(tone) tone.frequency.value = 500;
+  if(pump) pump.gain.value = 1;
   if(schedTimer) clearInterval(schedTimer);
   schedTimer = setInterval(scheduler, TICK);
 }
@@ -1633,16 +1791,21 @@ function stopMusic(){
 }
 
 /* The hit: a chime that climbs the pentatonic as the streak grows, so a long
-   run of sparks walks up the scale. */
+   run of sparks walks up the scale. It goes straight to the master, above
+   the duck and the filter, so the reward always cuts through whatever the
+   track is doing. */
 function chime(st, quality, finale){
   if(!actx) return;
-  const step = PENT[Math.min(st - 1, 20) % PENT.length];
-  const oct = Math.min(3, Math.floor((st - 1) / PENT.length));
-  const f = 440 * semi(step) * Math.pow(2, oct) * (finale ? 2 : 1);
+  const step = PENT[Math.min(st - 1, 30) % PENT.length];
+  const oct = Math.min(2, Math.floor((st - 1) / PENT.length));
+  const f = 523.25 * semi(step) * Math.pow(2, oct) * (finale ? 2 : 1);
   const now = actx.currentTime;
-  voice(master, 'sine', f, now, finale ? 1.1 : 0.42, 0.16 + 0.1 * (quality || 0));
-  voice(master, 'triangle', f * 2, now + 0.015, finale ? 0.7 : 0.26, 0.05);
-  if(finale) voice(master, 'sine', f * 1.5, now + 0.05, 1.0, 0.09);
+  voice(master, 'triangle', f, now, finale ? 1.1 : 0.34, 0.17 + 0.1*(quality||0));
+  voice(master, 'sine', f*2, now + 0.012, finale ? 0.8 : 0.2, 0.06);
+  if(finale){
+    voice(master, 'sine', f*1.5, now + 0.05, 1.0, 0.1);
+    hit(master, now, 0.5, 0.2, 2000, 'bandpass');
+  }
 }
 
 function blip(f, g, d){
@@ -1787,6 +1950,7 @@ function frame(now){
   const sec = sectionAt(songTime());
   if(sec.name && ui.hSec.textContent !== sec.name) ui.hSec.textContent = sec.name;
   updateLayers();
+  updateTone();
 }
 
 function startRun(){
