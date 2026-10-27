@@ -1150,8 +1150,21 @@ const ARM = { shX: 0.40, shY: 1.00, reach: 1.44 };
    This does not weaken the anti-cheat on a leg spark: amplitude was never
    what separated a lunge from a plant. The hip gate is, and it is
    untouched. */
-const CHORD_FRAC_IN = 0.55;
-const CHORD_FRAC_OUT = 0.22;
+/* Hugo, after playing: "maybe just touch the centre, and not really like
+   doing the slamming movement — that's the purpose of the game."
+
+   He is right about the feel and I am keeping one thing he did not ask to
+   keep. Sparks DRIFT now, and if travel stopped mattering entirely a spark
+   could float onto a hand that is already parked and pay for it. Amplitude
+   is what stops that, so it does not go away — it stops being a grade and
+   becomes a floor. 0.32 of the honest travel earns FULL credit, so a
+   comfortable reach to the middle of a spark scores exactly like a lunge
+   at it. Below 0.14 it collapses, which is where a poke lives.
+
+   Measured, not asserted: the poke archetype — hand already beside the
+   spark, nudges it in, dead on centre — still has to fail. */
+const CHORD_FRAC_IN = 0.32;
+const CHORD_FRAC_OUT = 0.14;
 function chordNeed(bx, by){
   const rx = bx < 0 ? -REST_HAND.x : REST_HAND.x;
   const full = Math.hypot(bx - rx, by - REST_HAND.y);
@@ -1999,6 +2012,48 @@ function drawVerdict(t){
    checking they all land on screen. Still advice, not a lock — the override
    below is always enabled. */
 let fitOk = false, fitSince = 0, fitWhy = 'nobody';
+/* IS THE BODY STILL USABLE, MID-RUN?
+
+   checkFit only ever ran on the setup screen. Once the round started
+   nothing looked again — so a player who drifted toward the phone kept
+   playing, and the game kept scoring, against a body whose hips were off
+   the bottom of the frame and were therefore being GUESSED by the tracker.
+   A screenshot from a real phone showed exactly that: a head filling the
+   picture, a torso measuring about eight times what the fit gate allows,
+   and a score still ticking up. Everything downstream of that number is
+   arithmetic on an invented body.
+
+   So the check runs the whole time now. It does not end the run and it
+   does not take points away — it says so on screen, and it stops NEW
+   sparks being placed from a body that cannot support them, because a
+   spark placed off a guessed hip is a spark in the wrong place. */
+let playFitOk = true, playFitWhy = 'ok', playFitSince = 0;
+function checkPlayFit(now){
+  const o = pose ? observe(pose, read, frameAR(), scaleTrack, nowClock()) : null;
+  let why = 'nobody';
+  if(o && o.readable){
+    const kn = read(pose, J.knA) || read(pose, J.knB);
+    const st = stanceOk(o);
+    why = st.ok ? (kn ? 'ok' : 'legs') : st.why;
+  }
+  const ok = (why === 'ok');
+  if(ok !== playFitOk){ playFitOk = ok; playFitSince = now; }
+  playFitWhy = why;
+  // a brief wobble is not a problem; a sustained one is
+  return playFitOk || (now - playFitSince) < 700;
+}
+function playFitMessage(){
+  switch(playFitWhy){
+    case 'close': return 'TOO CLOSE \u2014 STEP BACK';
+    case 'room':  return 'TOO CLOSE \u2014 STEP BACK';
+    case 'low':   return 'STEP BACK OR RAISE THE PHONE';
+    case 'high':  return 'STEP BACK OR LOWER THE PHONE';
+    case 'legs':  return 'YOUR LEGS ARE OUT OF FRAME';
+    case 'nobody':return 'CANNOT SEE YOU';
+    default:      return 'STEP BACK INTO FRAME';
+  }
+}
+
 function checkFit(now){
   const kn = read(pose, J.knA) || read(pose, J.knB);
   const an = read(pose, J.ankA) || read(pose, J.ankB);
@@ -2441,8 +2496,12 @@ function frame(now){
      backlog would hand the player a burst of sparks at once through no fault
      of theirs, and would put the track out of step with its own music. It is
      recorded, so a thin run can be explained rather than guessed at. */
+  const bodyOk = checkPlayFit(now);
   if(dueSpark){
-    if(live.filter(t => !t.judged).length >= MAX_ALIVE){
+    if(!bodyOk){
+      recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'body not usable: ' + playFitWhy });
+      dueSpark = null;
+    } else if(live.filter(t => !t.judged).length >= MAX_ALIVE){
       recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'screen full' });
       dueSpark = null;
     } else if(spawnTarget(dueSpark)) dueSpark = null;
@@ -2489,7 +2548,34 @@ function frame(now){
     if(f.flash <= 0) fading.splice(i, 1);
   }
   drawParts(dt);
+
+  /* And say it, loudly, while it is true. A game that quietly scores
+     nonsense is worse than one that stops: the player has no way of
+     knowing which of their runs meant anything. */
+  if(!bodyOk) drawFitBanner();
   ctx.restore();
+}
+
+function drawFitBanner(){
+  {
+    const msg = playFitMessage();
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = Math.round(Math.min(W,H) * 0.030) + 'px Georgia';
+    const w = ctx.measureText(msg).width, padX = Math.min(W,H)*0.035;
+    const bw = w + padX*2, bh = Math.min(W,H)*0.082;
+    const bx = (W - bw)/2, by = H * 0.30;
+    ctx.fillStyle = 'rgba(212,99,90,0.92)';
+    if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, bh/2); ctx.fill(); }
+    else ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#fff6ec';
+    ctx.fillText(msg, W/2, by + bh*0.66);
+    ctx.font = Math.round(Math.min(W,H) * 0.021) + 'px Georgia';
+    ctx.fillStyle = '#8a90ad';
+    ctx.fillText('sparks are paused until the camera can see your body',
+                 W/2, by + bh + Math.min(W,H)*0.034);
+    ctx.restore();
+  }
 
   // the clock across the top, outside the shake
   const left = Math.max(0, RUN_SECONDS - songTime());
@@ -2549,10 +2635,33 @@ async function begin(){
     if(actx && actx.state === 'suspended') await actx.resume();
     // a tall screen wants a tall frame: a landscape request crops the legs
     // before the tracker ever sees them
+    /* A tall screen wants a TALL FRAME, and asking nicely does not work.
+       width/height as `ideal` is a soft request, and a phone will hand back
+       its sensor's native landscape anyway — which is what happened: a 4:3
+       landscape stream letterboxed into a portrait canvas, so the play area
+       became a short band across the middle of the screen and the player
+       moved closer to fill it. So: ask with `exact` first, which makes the
+       browser crop the sensor rather than ignore the request, and walk down
+       to softer constraints only if that is refused. */
     const tall = window.innerHeight > window.innerWidth;
-    const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
-    const s = await navigator.mediaDevices.getUserMedia({
-      video:{ width:{ideal:vW}, height:{ideal:vH}, facingMode:'user' }, audio:false });
+    const want = tall
+      ? [ { width:{exact:720},  height:{exact:1280} },
+          { width:{exact:720},  height:{exact:960}  },
+          { width:{exact:480},  height:{exact:640}  },
+          { aspectRatio:{exact:0.5625} },
+          { aspectRatio:{exact:0.75} },
+          { width:{ideal:720},  height:{ideal:1280} } ]
+      : [ { width:{exact:1280}, height:{exact:720}  },
+          { width:{ideal:960},  height:{ideal:720}  } ];
+    let s = null, lastErr = null;
+    for(const c of want){
+      try { s = await navigator.mediaDevices.getUserMedia({
+              video: Object.assign({ facingMode:'user' }, c), audio:false });
+            break; }
+      catch(e){ lastErr = e; }
+    }
+    if(!s) s = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'user' }, audio:false });
     dropStream();
     video.srcObject = s;
     const playing = video.play();
