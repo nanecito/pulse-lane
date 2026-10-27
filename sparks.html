@@ -2602,6 +2602,22 @@ let starting = false;
 async function begin(){
   if(starting || state !== 'idle') return;
   if(!landscapeOK()){ checkRotation(); return; }   // sideways only
+
+  /* FULLSCREEN, so the browser bar goes away.
+
+     Chrome on Android has no setting for this; the page has to ask, and it
+     may only ask inside a user gesture. This runs at the top of begin(),
+     which is called straight from the Start tap and before any await, so
+     the gesture is still live. It is wrapped and ignored on failure: a
+     browser that refuses fullscreen must still start the game. */
+  try {
+    const el = document.documentElement;
+    const go = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(go && !document.fullscreenElement) {
+      const p = go.call(el, { navigationUI:'hide' });
+      if(p && p.catch) p.catch(()=>{});
+    }
+  } catch(e){}
   starting = true;
   const btn = document.getElementById('bStart'); if(btn) btn.disabled = true;
   ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
