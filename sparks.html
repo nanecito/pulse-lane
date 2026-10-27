@@ -1,0 +1,1311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#07080f">
+<title>Sparks</title>
+<style>
+  :root{
+    --ink:#07080f; --field:#0e1020; --warm:#f6f1e6; --dim:#8a90ad;
+    --spark:#ffb02e; --spark-l:#ffd98a; --cyan:#4fd6e0;
+    --good:#7fc08a; --part:#ffb02e; --bad:#d4635a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;padding:24px 22px;text-align:center;gap:14px;
+    background:radial-gradient(120% 90% at 50% 18%,#171a33 0%,var(--ink) 72%);z-index:5}
+  .ov[hidden]{display:none}
+  h1{font-size:clamp(34px,13vw,64px);margin:0;letter-spacing:.16em;font-weight:400}
+  h1 .g{color:var(--spark)}
+  .sub{color:var(--dim);font-size:15px;line-height:1.55;max-width:30ch;margin:0}
+  .how{text-align:left;max-width:32ch;color:var(--warm);font-size:15px;line-height:1.6;
+    margin:0;padding:0;list-style:none}
+  .how li{margin:7px 0;padding-left:20px;position:relative}
+  .how li:before{content:'';position:absolute;left:0;top:.62em;width:8px;height:8px;
+    border-radius:50%;background:var(--spark)}
+  button{font:inherit;font-size:18px;letter-spacing:.06em;padding:15px 34px;border-radius:999px;
+    border:1px solid var(--spark);background:var(--spark);color:#2a1a00;cursor:pointer}
+  button.ghost{background:transparent;color:var(--spark)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:13px;max-width:32ch;line-height:1.5;margin:0}
+  .err{color:var(--bad);font-size:14px;max-width:32ch;line-height:1.5}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 16px;display:flex;
+    justify-content:space-between;align-items:flex-start;font-size:14px;
+    letter-spacing:.08em;color:var(--warm);z-index:3;pointer-events:none;
+    background:linear-gradient(rgba(7,8,15,.74),rgba(7,8,15,0));
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  /* an id selector beats the [hidden] attribute, so without this the score
+     and the legwork bar sit on top of the start and setup screens */
+  #hud[hidden],#legs[hidden]{display:none}
+  #hud .r{text-align:right}
+  #hud b{font-weight:400;color:var(--spark);font-size:22px;display:block}
+  /* the legs meter is the whole point of the game, so it is on screen the
+     whole time rather than revealed at the end */
+  #legs{position:fixed;left:16px;right:16px;bottom:env(safe-area-inset-bottom,0);
+    margin-bottom:14px;z-index:3;pointer-events:none}
+  #legsBar{height:7px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
+  #legsFill{height:100%;width:0%;background:var(--cyan);transition:width .25s linear}
+  #legsTxt{font-size:11px;letter-spacing:.18em;color:var(--dim);margin-top:6px;text-align:center;
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  .tag{display:inline-block;border:1px solid var(--spark);color:var(--spark);
+    border-radius:999px;padding:3px 12px;font-size:11px;letter-spacing:.16em;margin-bottom:8px}
+  table{border-collapse:collapse;font-size:14px;color:var(--warm)}
+  td{padding:4px 10px}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--spark)}
+  td.v.bad{color:var(--bad)}
+  td.v.good{color:var(--good)}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<div id="hud" hidden>
+  <div><span style="color:var(--dim)">SPARK</span><b id="hNo">1/8</b></div>
+  <div class="r"><span style="color:var(--dim)">SCORE</span><b id="hScore">0</b></div>
+</div>
+<div id="legs" hidden>
+  <div id="legsBar"><div id="legsFill"></div></div>
+  <div id="legsTxt">LEGWORK</div>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>SP<span class="g">A</span>RKS</h1>
+  <p class="sub">Sparks light up around you. Go and get them.</p>
+  <ul class="how">
+    <li>Stand back so your whole body, feet included, is in the picture.</li>
+    <li>Sweep a hand through the spark. A poke does not count &mdash; the swing is what scores.</li>
+    <li>The low ones want a lunge, not a bend at the waist. The bar at the bottom is watching your legs.</li>
+  </ul>
+  <div class="row"><button id="bStart">Start</button></div>
+  <p class="note" id="loadMsg" hidden>Waking the camera&hellip;</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Portrait, phone propped up, a couple of steps back. Nothing leaves your device.</p>
+</div>
+
+<div class="ov" id="oFit" hidden style="background:transparent;justify-content:flex-end;padding-bottom:40px">
+  <p class="sub" id="fitMsg">Step back until your feet are inside the frame.</p>
+  <div class="row"><button id="bGo" class="ghost">Start anyway</button></div>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <div class="tag" id="endTag">RUN COMPLETE</div>
+  <h1 id="endScore" style="font-size:clamp(40px,16vw,74px)">0</h1>
+  <table><tbody id="endRows"></tbody></table>
+  <div class="row">
+    <button id="bAgain">Again</button>
+    <button id="bRec" class="ghost">Save recording</button>
+  </div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/*==SCORER_START==*/
+/* ------------------------------------------------------------------
+   Sparks: targets, the strike scorer, and the legwork gate. The offline
+   harness cuts this exact block out of this file on every run and
+   measures it, so what is measured is what ships. Do not duplicate any
+   of it anywhere else.
+
+   Everything here is SCALE FREE and POSITION FREE. No feature is a raw
+   pixel distance and no feature is an absolute height. Lengths are
+   divided by the player's own torso; sweeps are angles at the player's
+   own shoulder. A tall player and a short player doing the same thing
+   produce the same numbers.
+
+   Normalised landmark coordinates run 0..1 over a frame that is NOT
+   square, so a unit of x is not the same physical length as a unit of y.
+   Every distance in here is taken in ASPECT CORRECTED space (iso), using
+   the aspect ratio carried in each sample. Gap does not do this; its
+   features are angles and same-direction ratios where the distortion
+   largely cancels. Here it would not, because a sweep crosses directions.
+   ------------------------------------------------------------------ */
+
+const TUNE = {
+  /* --- the strike --------------------------------------------------- */
+  HIT_R:        0.42,  // torso units: how near the limb must pass the spark
+  CENTRE_R:     0.17,  // inside this, full credit for where it passed
+  SWEEP_IN:     52,    // degrees of angular sweep at the shoulder for full credit
+  SWEEP_OUT:    20,    // below this, a poke: no amplitude credit at all
+  CHORD_IN:     0.80,  // torso units of net hand displacement for full credit
+  CHORD_OUT:    0.32,
+
+  /* --- velocity: differenced over a window, NEVER frame to frame -----
+     At 30 fps a 130 ms window is three or four frames, so one dropped
+     frame collapses it toward the noise floor. Defining the window in
+     time does not rescue it: a span containing no new spatial updates
+     computes a velocity of zero, which is indistinguishable from a limb
+     that genuinely was not moving. So the window carries a minimum valid
+     sample count, and a window that fails it yields NO VELOCITY AND NO
+     SCORE — not a zero.                                                */
+  VEL_WIN_MS:   150,
+  VEL_WIN_MAX:  220,  // the window may widen this far to find its samples
+  VEL_MIN_N:    3,
+
+  /* --- onset ------------------------------------------------------- */
+  ONSET_V:      0.90, // torso/sec under which the hand counts as not moving
+  ONSET_MAX_MS: 1400, // how far back the onset search will look
+
+  /* --- is the arc actually observed -------------------------------
+     The arc is reconstructed from the samples between the onset and the
+     strike, so that interval has to have been watched. A gap in it is not a
+     small error, it is the difference between measuring a swing and
+     measuring the two ends of a hole. At 10% dropped frames an earlier
+     version of this file turned honest swings into MISSED, because the onset
+     search, finding no still sample to walk back to, returned the earliest
+     MOVING sample instead — an onset invented at the edge of the data, a
+     short chord, and a player blamed for it. An arc that was not watched is
+     UNSCORED. */
+  ARC_MIN_N:    4,    // samples required between onset and strike
+  ARC_MAX_GAP:  150,  // ms: the largest hole allowed inside that interval
+  /* A hole in the middle of the pass through the zone does not end the pass.
+     Breaking on the first missing wrist frame made the nearest approach come
+     out at the EDGE of the radius instead of at the centre, because the pass
+     was one sample long, and honest full-length swings were scored as misses
+     with full amplitude and almost no centrality. */
+  PASS_MAX_GAP: 150,  // ms of invisibility the pass can bridge
+
+  /* Before a MISS may be declared, the window has to have been watched well
+     enough that a strike could not have hidden in it. A miss is a claim about
+     the player; UNSCORED is a claim about the camera, and when half the
+     frames never arrive the second is the true one. At 50% dropped frames
+     honest swings were being called misses on four to nine observations of a
+     window that holds about fifty. */
+  MISS_MIN_N:   14,   // observations of a hand required to declare a miss
+  MISS_MAX_GAP: 250,  // ms: a bigger hole than this could have hidden a strike
+
+  /* --- verdicts ---------------------------------------------------- */
+  PASS_FULL:    0.74,
+  PASS_PART:    0.48,
+  REP_QUALITY:  0.68,
+
+  /* --- the legwork gate, part one: per spark -----------------------
+     ONE quantity, and a directional one: how far the hips travelled TOWARD
+     the spark, in torso units. Two separate thresholds on lateral travel and
+     on hip height were wrong, because which of the two an honest movement
+     uses is decided by where the spark happens to be — a spark near the
+     floor is answered mostly by dropping and one out to the side mostly by
+     shifting, so demanding both fails honest play on almost every spark.
+     Projecting the hip displacement onto the direction of the spark asks the
+     question that actually matters, did you take your body there, and it
+     cannot be answered by bobbing or by swaying on the spot.
+
+     A graded zone rather than a threshold, because a weak but real lunge is
+     coasting and should be paid partly rather than refused. Both bounds come
+     from the sweep, not from taste: no credit at or below where a planting
+     player's hips land (their 95th percentile across five effort levels,
+     nine ways of folding, three swing durations and four noise levels), full
+     credit at the median of a player who takes their body there. */
+  LEG_NONE:     0.08, // hip travel toward the spark earning no credit
+  LEG_FULL:     0.28, // and the travel earning full credit
+
+  /* What counts as a repetition is DERIVED from that zone rather than typed
+     as a third number about the same quantity: the credit a strike has to
+     earn for the legs to have done the work. 0.28 of the zone puts the gate
+     at 0.136 torso. Across 424 cheating strikes and 239 honest ones, spanning
+     five effort levels, nine ways of folding, three swing durations and four
+     noise levels: no planting player passed it, and about 1% of honest
+     movement failed it. */
+  LEG_REP_CREDIT: 0.28,
+
+  /* On a spark marked legs the task IS taking your body there, so this is
+     the share of the points the strike alone is worth. The rest is in the
+     hips. */
+  LEG_STRIKE_SHARE: 0.25,
+
+  /* --- the legwork gate, part two: the session floor ---------------
+     A per-spark gate alone is not enough. Half these sparks are high or wide
+     and are honestly reachable with an arm, so a player can hold a real
+     score while barely using their legs: measured at 66% of an honest
+     player's score with the per-spark gate working perfectly. The run itself
+     has to clear a floor regardless of which sparks were hit.
+
+     Both numbers come from the floor sweep: 15% under the 5th percentile of
+     what a player who takes their body to every spark actually travels. At
+     this floor, across sixty honest runs and a hundred and twenty cheating
+     ones spanning four noise levels, three swing speeds and fourteen ways of
+     moving, no honest run failed and no cheating run passed. */
+  SESSION_HIP:  2.70, // total hip path over the run, in torso units
+  SESSION_LAT:  0.75, // total lateral hip travel over the run
+
+  /* The floor is not a label, it is a multiplier. This is the share of the
+     score that survives doing no legwork at all; the rest is earned by the
+     run clearing the floor, and it slides rather than switching, so a partial
+     effort is paid partly. Coasting is forgiving. Standing still is not. */
+  FLOOR_KEEP:   0.40,
+  /* And what it takes to call a run cleared, as a fraction of its sparks. */
+  CLEAR_REPS:   0.75,
+
+  /* --- judging ----------------------------------------------------- */
+  JUDGE_PRE:    140,  // the interval opens this far before the spark lights
+  JUDGE_POST:   140,  // and closes this far after it dies
+  JUDGE_MIN:    4,    // readable observations required inside that interval
+  /* The session odometer advances only when the hips are this far from where
+     it last recorded them. Accumulating frame to frame does not work: hip
+     centre jitter is about 0.015 torso per frame, and over a 22 second run
+     that integrates to 7.6 torso of travel for a player standing perfectly
+     still — measured, not supposed. An anchor with a step larger than the
+     noise cannot be walked anywhere by noise, while real travel crosses it
+     repeatedly.
+
+     The hip is fed to it SMOOTHED, over HIP_SMOOTH samples. Smoothing a
+     swinging wrist is refused elsewhere in this file, because the endpoints
+     of the swing are the measurement and a filter moves them. The hip
+     odometer is the opposite case: it is an integral over twenty seconds, so
+     averaging a sixth of a second of it costs nothing and divides the jitter
+     by the root of the count. Without it, at 0.035 torso of landmark noise a
+     player standing perfectly still banked 11 torso of travel — measured. */
+  HIP_STEP:     0.08,
+  HIP_SMOOTH:   5,
+
+  /* --- the reader -------------------------------------------------- */
+  VIS_GET:      0.15, // confidence to acquire a landmark
+  VIS_KEEP:     0.04, // confidence to keep one already acquired
+};
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+// A is the player's left, which a mirrored picture puts on the left of the
+// screen, so the player's left really does look like their left.
+
+const DEG = 180 / Math.PI;
+function wrap(d){ return ((d + 180) % 360 + 360) % 360 - 180; }
+function midp(a, b){ return { x:(a.x + b.x)/2, y:(a.y + b.y)/2 }; }
+
+// Aspect corrected. x is stretched by the frame's aspect ratio so that a
+// distance means the same thing in every direction.
+function iso(p, ar){ return { x: p.x * ar, y: p.y }; }
+function idist(a, b, ar){ return Math.hypot((b.x-a.x)*ar, b.y-a.y); }
+function iang(a, b, ar){ return Math.atan2(b.y - a.y, (b.x - a.x)*ar) * DEG; }
+
+// The landmark reader, lifted from Gap unchanged. Hysteresis: a joint
+// already tracked is kept on a much lower bar than one picked up fresh.
+// One threshold for both makes tracking strobe between seen and not seen,
+// which reads as a broken game rather than a dim room.
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]) { latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v: v };    // mirrored, normalised to the frame
+  };
+}
+
+/* One pose becomes one observation. Carries the limb endpoints, the body
+   frame they are measured against, and the aspect ratio, so the scorer
+   never has to reach outside a sample. Nothing is guessed: a limb whose
+   landmarks are not visible is simply absent. */
+function observe(pose, read, ar){
+  const g = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p) g[k] = p; }
+  const o = { ar, limbs:{}, anchors:{}, hip:null, sh:null, torso:0, readable:false };
+  if(g.shA && g.shB && g.hipA && g.hipB){
+    o.sh  = midp(g.shA, g.shB);
+    o.hip = midp(g.hipA, g.hipB);
+    o.torso = idist(o.sh, o.hip, ar);
+  }
+  if(!o.torso || o.torso < 0.02) return o;   // no usable body frame, no claims
+  if(g.wrA) o.limbs.wrA = g.wrA;
+  if(g.wrB) o.limbs.wrB = g.wrB;
+  if(g.shA) o.anchors.wrA = g.shA;           // a hand sweeps about its shoulder
+  if(g.shB) o.anchors.wrB = g.shB;
+  o.readable = !!(o.hip && o.sh && (o.limbs.wrA || o.limbs.wrB));
+  return o;
+}
+
+/* Place a spark. The position is given in BODY FRAME — torso units from
+   the player's own hip centre, gravity aligned, +x to screen right, +y up
+   — so the reach is the same physical task for every body. It is then
+   FROZEN in the camera frame at the moment it lights, so the player has to
+   travel to it. Placed scale free, held still in the world.            */
+function placeTarget(def, o){
+  if(!o || !o.torso) return null;
+  return { x: o.hip.x + def.bx * o.torso / o.ar, y: o.hip.y - def.by * o.torso };
+}
+
+/* Velocity of one limb at time t, differenced across a window, with the
+   minimum sample count enforced. Returns null — not zero — when the window
+   is too thin to make a claim. */
+function velocityAt(samples, t, key){
+  /* The window is defined in TIME and widens only as far as VEL_WIN_MAX to
+     find its minimum samples. At 30 fps a 150 ms window holds about five
+     frames, so a single dropped frame should not starve it; with the window
+     fixed at 130 ms and no widening, 10% dropped frames left half of all
+     honest strikes unscored, because a missing velocity at the strike takes
+     the whole judgment with it. Widening costs a little smoothing and is
+     reported; past the cap it still declines rather than inventing a zero. */
+  for(const span of [TUNE.VEL_WIN_MS, TUNE.VEL_WIN_MAX]){
+    const half = span / 2;
+    const win = samples.filter(s => s.t >= t - half && s.t <= t + half && s.o.limbs[key]);
+    if(win.length < TUNE.VEL_MIN_N) continue;
+    const a = win[0], b = win[win.length - 1];
+    const dt = (b.t - a.t) / 1000;
+    if(dt <= 0.001) continue;
+    const d = idist(a.o.limbs[key], b.o.limbs[key], a.o.ar) / a.o.torso;
+    return d / dt;
+  }
+  return null;
+}
+
+/* Where the movement started: walk back from contact to the last moment the
+   limb was not moving. The onset is an index into the sample list, not a
+   smoothed estimate, because filtering moves the apparent start and end of
+   a swing and that is exactly the quantity being measured. */
+function findOnset(samples, ci, key){
+  const ct = samples[ci].t;
+  for(let i = ci - 1; i >= 0; i--){
+    if(ct - samples[i].t > TUNE.ONSET_MAX_MS) break;
+    if(!samples[i].o.limbs[key]) continue;
+    const v = velocityAt(samples, samples[i].t, key);
+    if(v === null) continue;
+    if(v < TUNE.ONSET_V) return i;
+  }
+  // No still sample to walk back to. There is NO fallback here on purpose:
+  // returning the earliest moving sample would invent an onset at the edge of
+  // whatever happened to be visible, and the short arc that follows gets
+  // charged to the player as a miss.
+  return null;
+}
+
+/* Was the interval between the onset and the strike actually watched, closely
+   enough to call the path between them a swing? */
+function arcObserved(samples, oi, ci, key){
+  let n = 0, last = null, maxGap = 0;
+  for(let i = oi; i <= ci; i++){
+    const s = samples[i];
+    if(!s || !s.o.limbs[key]) continue;
+    if(last !== null) maxGap = Math.max(maxGap, s.t - last);
+    last = s.t; n++;
+  }
+  return { ok: n >= TUNE.ARC_MIN_N && maxGap <= TUNE.ARC_MAX_GAP, n, maxGap };
+}
+
+/* Credit inside a tolerance zone: full inside the inner bound, sliding to
+   nothing at the outer, nothing past it. The implementation's tolerance is
+   not the player's accuracy. */
+function zone(v, inB, outB){
+  if(inB > outB){ if(v >= inB) return 1; if(v <= outB) return 0; return (v - outB) / (inB - outB); }
+  if(v <= inB) return 1; if(v >= outB) return 0; return (outB - v) / (outB - inB);
+}
+
+/* The arc, measured between two observations rather than accumulated along
+   the path. Accumulated path length grows with landmark jitter in
+   proportion to the number of samples, so a noisy stationary hand would
+   report a long path. A net sweep and a net chord are differences between
+   two positions: noise adds spread but does not accumulate. */
+function arcBetween(samples, oi, ci, key){
+  const a = samples[oi].o, b = samples[ci].o;
+  if(!a.limbs[key] || !b.limbs[key]) return null;
+  const chord = idist(a.limbs[key], b.limbs[key], a.ar) / a.torso;
+  let sweep = null;
+  if(a.anchors[key] && b.anchors[key]){
+    const u = iang(a.anchors[key], a.limbs[key], a.ar);
+    const v = iang(b.anchors[key], b.limbs[key], b.ar);
+    sweep = Math.abs(wrap(v - u));
+  }
+  return { chord, sweep };
+}
+
+/* Hip travel between two observations, in torso units. A bend at the waist
+   moves the hands a long way while the hips barely shift, and it is the hips
+   that say whether the legs did the work.
+
+   `toward` is the one that gates: the hip displacement projected onto the
+   direction from the hips to the spark. Lateral and vertical are kept too,
+   but only for the recording — they are not what passes or fails. */
+function hipAround(samples, i){
+  // the hip averaged over a few samples either side. Same reason the odometer
+  // smooths: the hips are slow, so a sixth of a second of averaging costs
+  // nothing and takes the root of the count out of the jitter. The wrist is
+  // never treated this way, because the swing's endpoints ARE the measurement.
+  const k = (TUNE.HIP_SMOOTH - 1) / 2;
+  let sx = 0, sy = 0, n = 0;
+  for(let j = Math.round(i - k); j <= Math.round(i + k); j++){
+    const s = samples[j];
+    if(!s || !s.o.readable || !s.o.hip) continue;
+    sx += s.o.hip.x; sy += s.o.hip.y; n++;
+  }
+  return n ? { x:sx/n, y:sy/n } : null;
+}
+
+function hipTravel(samples, oi, ci, at){
+  const a = samples[oi].o, b = samples[ci].o;
+  if(!a.hip || !b.hip) return null;
+  const h0 = hipAround(samples, oi), h1 = hipAround(samples, ci);
+  if(!h0 || !h1) return null;
+  const dx = (h1.x - h0.x) * a.ar / a.torso;
+  const dy = (h1.y - h0.y) / a.torso;
+  let toward = null;
+  if(at){
+    const ux = (at.x - h0.x) * a.ar, uy = (at.y - h0.y);
+    const ud = Math.hypot(ux, uy);
+    if(ud > 1e-6) toward = dx*(ux/ud) + dy*(uy/ud);
+  }
+  return { lat:Math.abs(dx), drop:Math.abs(dy), toward };
+}
+
+/* ---------------------------------------------------------------- *
+ * Judge one spark.                                                  *
+ *                                                                   *
+ * Scored against the spark's own TIMESTAMPED WINDOW, not against its *
+ * expiry. The window lives in the corrected capture clock, the same  *
+ * domain the game's events live in, and the caller must not call this*
+ * until the estimates covering the window have actually arrived. Gap *
+ * returned UNSCORED on every wall of a round because it judged       *
+ * before the evidence existed; this is the same trap, worse, because *
+ * a spark's death is a deadline in display time while the strike is  *
+ * reconstructed from delayed samples.                                *
+ * ---------------------------------------------------------------- */
+function judgeTarget(t, samples){
+  const lo = t.lightAt - TUNE.JUDGE_PRE, hi = t.dieAt + TUNE.JUDGE_POST;
+  const win = [];
+  for(let i = 0; i < samples.length; i++){
+    const s = samples[i];
+    if(s.t >= lo && s.t <= hi && s.o.readable) win.push(i);
+  }
+  const blank = { verdict:'UNSCORED', quality:0, amplitude:null, centrality:null,
+                  execMs:null, anticipationMs:null, velocity:null, sweep:null,
+                  chord:null, hip:null, legCredit:null, legsOk:null, rep:false, points:0,
+                  samples:win.length, limb:null, nearest:null };
+  if(win.length < TUNE.JUDGE_MIN) return blank;
+
+  /* The strike is the PASS through the zone, not the rest that follows it.
+     Taking the nearest approach across the whole window scores the wrong
+     moment: a hand that arrives at the spark and stays there sits at its
+     nearest point long after the swing is over, so the onset search finds a
+     stationary hand one sample away and the arc comes back as nothing. In
+     simulation that made the same movement score 1.00 on one side and 0.00
+     on the other, decided by where the noise happened to put the minimum.
+
+     So: the FIRST contiguous pass through the hit radius. Its entry is when
+     the hand got there, and that is what the timing and the arc are measured
+     to. Its nearest point is how centrally it passed. Two quantities, each
+     from the sample that actually carries it.
+
+     Both hands are eligible. The player decides which hand to use, not the
+     game; the earlier pass wins. */
+  const distAt = (i, key) => {
+    const s = samples[i], p = s.o.limbs[key];
+    return p ? idist(p, t.at, s.o.ar) / s.o.torso : null;
+  };
+
+  let hit = null, nearest = Infinity, everVisible = false;
+  for(const key of ['wrA','wrB']){
+    let k0 = -1, k1 = -1, lastIn = null;
+    for(let k = 0; k < win.length; k++){
+      const d = distAt(win[k], key);
+      if(d === null){
+        // invisible. The pass bridges a hole, up to a bound; past that it is
+        // over, because the hand could have left and come back.
+        if(k0 >= 0 && samples[win[k]].t - lastIn > TUNE.PASS_MAX_GAP) break;
+        continue;
+      }
+      everVisible = true;
+      if(d < nearest) nearest = d;
+      if(d <= TUNE.HIT_R){
+        if(k0 < 0) k0 = k;
+        k1 = k; lastIn = samples[win[k]].t;
+      }
+      else if(k0 >= 0) break;          // seen, and outside: the pass is over
+    }
+    if(k0 < 0) continue;
+    let bd = Infinity, bi = win[k0];
+    for(let k = k0; k <= k1; k++){
+      const d = distAt(win[k], key);
+      if(d !== null && d < bd){ bd = d; bi = win[k]; }
+    }
+    if(!hit || k0 < hit.k0) hit = { key, k0, entryI: win[k0], bestI: bi, d: bd };
+  }
+
+  // A hand that was never visible is no claim about the player. A hand that
+  // was plainly and continuously visible and was not there is a miss, and it
+  // is theirs. Anything in between is the camera's, not the player's.
+  if(!everVisible) return blank;
+  if(!hit){
+    let n = 0, last = null, maxGap = 0;
+    for(const i of win){
+      const s = samples[i];
+      if(!s.o.limbs.wrA && !s.o.limbs.wrB) continue;
+      if(last !== null) maxGap = Math.max(maxGap, s.t - last);
+      last = s.t; n++;
+    }
+    if(n < TUNE.MISS_MIN_N || maxGap > TUNE.MISS_MAX_GAP)
+      return Object.assign({}, blank, { nearest:+nearest.toFixed(4) });
+    return Object.assign({}, blank, { verdict:'MISSED',
+      nearest:+nearest.toFixed(4), samples:win.length });
+  }
+
+  /* Two samples out of the pass, each carrying a different quantity. The
+     ENTRY is when the hand arrived, and it is what the timing is measured to.
+     The DEEPEST point is the end of the swing, and it is what the arc is
+     measured to.
+
+     Measuring the arc to the entry instead undercounts every swing by exactly
+     the hit radius, because entry happens the moment the hand comes within
+     HIT_R of the centre. On a spark 0.85 torso from the resting hand that
+     left 0.43 of travel to show for a full honest lunge, and honest lunges
+     were scored at a quarter amplitude. It stayed hidden while the simulated
+     body stood with its hands on its hips, which made every swing longer than
+     it should have been. */
+  const key = hit.key, entryI = hit.entryI, deepI = hit.bestI;
+
+  /* The onset is found by walking back from the ENTRY, which is inside the
+     moving part of the swing. Walking back from the deepest point instead
+     lands in the stillness after the hand has arrived and parked, so the
+     search stops one sample away and the arc collapses to nothing — the same
+     trap as taking the nearest approach across the whole window, in a
+     different place. */
+  const oi = findOnset(samples, entryI, key);
+  if(oi === null) return blank;                 // no start to measure from
+
+  const vel = velocityAt(samples, samples[entryI].t, key);
+  if(vel === null) return blank;                // no velocity, no score
+
+  // the SWING is onset to entry, and that is the interval that must have been
+  // watched. Whatever the hand does after arriving is not part of the swing.
+  const cover = arcObserved(samples, oi, entryI, key);
+  if(!cover.ok) return blank;                   // the swing was not watched
+
+  // the arc runs to the deepest point, so a hand that keeps going after it
+  // crosses into the zone is credited for the whole of it
+  const arc = arcBetween(samples, oi, deepI, key);
+  if(!arc) return blank;
+
+  const best = { i: entryI, key, d: hit.d };
+
+  const centrality = zone(best.d, TUNE.CENTRE_R, TUNE.HIT_R);
+  const cAmp = zone(arc.chord, TUNE.CHORD_IN, TUNE.CHORD_OUT);
+  const sAmp = arc.sweep === null ? null : zone(arc.sweep, TUNE.SWEEP_IN, TUNE.SWEEP_OUT);
+  // Amplitude takes the better of sweep and chord: a sweep straight along the
+  // line of the arm has little angular change but real displacement, and a
+  // sweep across the body has the reverse. Requiring both would fail honest
+  // swings; requiring the mean would too.
+  const amplitude = sAmp === null ? cAmp : Math.max(cAmp, sAmp);
+
+  // The worst of the two caps the score. An average barely notices one of
+  // them being completely wrong, which is how a poke dead on centre would
+  // otherwise pass.
+  const quality = Math.min(amplitude, centrality) * 0.45
+                + ((amplitude + centrality) / 2) * 0.55;
+
+  /* Named hip, not legs: it is hip travel. Called legs, it collided with the
+     spark's own legs flag wherever the two were spread into one record, and
+     the end screen counted every spark as a leg spark. */
+  const hip = hipTravel(samples, oi, entryI, t.at);
+  const legCredit = (hip && hip.toward !== null)
+    ? zone(hip.toward, TUNE.LEG_FULL, TUNE.LEG_NONE) : null;
+  const legsOk = !t.legs ? null
+    : (legCredit !== null && legCredit >= TUNE.LEG_REP_CREDIT);
+
+  /* ---------------------------------------------------------------- *
+   * Two numbers that are MEASURED AND RECORDED BUT NOT SCORED.         *
+   *                                                                    *
+   * Doc 11 set the condition: before an execution-speed score ships,   *
+   * measure median error, tail error, and the probability of reversing *
+   * the ranking of two movements with known durations — and if the     *
+   * ranking flips, it does not ship. It flips. Against movements whose *
+   * true duration is known, under expected conditions, the ranking     *
+   * reverses for 11.7% of pairs 25-50 ms apart and 7.9% of pairs       *
+   * 50-75 ms apart, and is only clean past about 125 ms. On a phone    *
+   * dropping a tenth of its frames it reverses 17.9% of pairs even at  *
+   * a 125 ms gap. So execution speed is not shown to the player and    *
+   * earns no points. The constant delay does cancel out of it, exactly *
+   * as predicted: being wrong about the 200 ms by 50 ms moved the      *
+   * median error by 0.2 ms.                                            *
+   *                                                                    *
+   * Anticipation is worse off, for the opposite reason. It compares a  *
+   * corrected body time against an uncorrected display event, so the   *
+   * latency assumption does not cancel: its error moves one-for-one    *
+   * with how wrong POSE_LATENCY_MS is. Measured at -63 ms when the     *
+   * real delay is 150 and +37 ms when it is 250. Since nobody has ever *
+   * measured the real figure, an anticipation score would be a number  *
+   * with an unknown offset. It waits for the gate.                     *
+   *                                                                    *
+   * Both are kept in the recording, where they are diagnostics rather  *
+   * than claims, and where a session can be re-judged once the gate    *
+   * gives the real latency.                                            *
+   * ---------------------------------------------------------------- */
+  const execMs = samples[entryI].t - samples[oi].t;
+  const anticipationMs = samples[oi].t - t.lightAt;
+
+  let verdict;
+  if(quality >= TUNE.PASS_FULL) verdict = 'CLEAN';
+  else if(quality >= TUNE.PASS_PART) verdict = 'CLIPPED';
+  else verdict = 'MISSED';
+
+  // Score and repetition stay separate, as in Gap. A near miss can earn
+  // points. A repetition is work the player actually did, and on a leg spark
+  // that means the hips moved — an arms-only reach scores and is never
+  // counted.
+  const rep = quality >= TUNE.REP_QUALITY && verdict !== 'MISSED'
+              && (t.legs ? legsOk === true : true);
+
+  let points = 0;
+  if(verdict === 'CLEAN') points = 100;
+  else if(verdict === 'CLIPPED') points = 45;
+  /* On a spark marked legs, most of what it pays is in the hips. A flat bonus
+     for clearing a threshold was wrong twice over: it paid a planting player
+     the whole strike anyway, which in simulation let a player who never moved
+     their hips hold 83% of the score of one who did, and it paid nothing
+     extra for a deep lunge over a bare one. Graded, and the strike alone is
+     worth a quarter. */
+  if(points && t.legs) points = Math.round(points * (TUNE.LEG_STRIKE_SHARE
+                               + (1 - TUNE.LEG_STRIKE_SHARE) * (legCredit || 0)));
+
+  return { verdict, quality:+quality.toFixed(4),
+           amplitude:+amplitude.toFixed(4), centrality:+centrality.toFixed(4),
+           execMs:+execMs.toFixed(1), anticipationMs:+anticipationMs.toFixed(1),
+           velocity:+vel.toFixed(4),
+           sweep: arc.sweep === null ? null : +arc.sweep.toFixed(2),
+           chord:+arc.chord.toFixed(4),
+           hip: hip ? { lat:+hip.lat.toFixed(4), drop:+hip.drop.toFixed(4),
+                        toward: hip.toward === null ? null : +hip.toward.toFixed(4) } : null,
+           nearest:+hit.d.toFixed(4),
+           legCredit: legCredit === null ? null : +legCredit.toFixed(4),
+           legsOk, rep, points, samples:win.length, limb:best.key };
+}
+
+/* The session floor: how far the hips actually travelled over a whole run.
+   An odometer with an anchor, not a sum of frame-to-frame steps. Noise cannot
+   walk an anchor anywhere, because it never gets HIP_STEP away from it; real
+   travel crosses that distance again and again. */
+function makeHipMeter(){
+  let anchor = null, hip = 0, lat = 0, buf = [];
+  return {
+    push(o){
+      if(!o.readable || !o.hip || !o.torso) return;
+      buf.push({ x:o.hip.x, y:o.hip.y, ar:o.ar, torso:o.torso });
+      if(buf.length > TUNE.HIP_SMOOTH) buf.shift();
+      if(buf.length < TUNE.HIP_SMOOTH) return;
+      let sx = 0, sy = 0;
+      for(const b of buf){ sx += b.x; sy += b.y; }
+      const p = { x: sx/buf.length, y: sy/buf.length };
+      if(!anchor){ anchor = p; return; }
+      const dx = (p.x - anchor.x) * o.ar / o.torso;
+      const dy = (p.y - anchor.y) / o.torso;
+      const d = Math.hypot(dx, dy);
+      if(d >= TUNE.HIP_STEP){ hip += d; lat += Math.abs(dx); anchor = p; }
+    },
+    get(){
+      const frac = Math.min(1, Math.min(hip / TUNE.SESSION_HIP, lat / TUNE.SESSION_LAT));
+      return { hip, lat, frac,
+        mult: TUNE.FLOOR_KEEP + (1 - TUNE.FLOOR_KEEP) * frac,
+        ok: hip >= TUNE.SESSION_HIP && lat >= TUNE.SESSION_LAT };
+    },
+    reset(){ anchor = null; hip = 0; lat = 0; buf = []; }
+  };
+}
+
+/* The milestone sequence. Fixed, eight sparks, no progression — the first
+   questions are about the scorer, not about whether a sequence is exciting.
+   Positions are body frame: torso units from the hip centre, +y up.
+   An arm reaches about 1.44 torso units from the shoulder, which sits at
+   y = 1, so a spark past that is not reachable standing still.
+   Hands only in this milestone. Foot sparks add a whole separate tracking
+   question and would not help answer the three questions.
+
+   These eight positions were CHOSEN BY SCREENING, not picked by eye. Each
+   one was run through the simulation against four kinds of player, and a
+   position only survived if an honest swing scores CLEAN, a spark marked
+   legs cannot be reached by the arm alone, and the hip travel of a player
+   who takes their body there separates from one who plants and folds. Three
+   earlier candidates were dropped for sitting close enough to the resting
+   hand that nobody had to move at all. */
+const TARGETS = [
+  { id:'high-L', name:'HIGH LEFT',  bx:-0.95, by: 2.05, legs:false },
+  { id:'side-R', name:'SIDE RIGHT', bx: 1.35, by:-0.65, legs:true  },
+  { id:'wide-R', name:'WIDE RIGHT', bx: 1.35, by: 1.15, legs:false },
+  { id:'deep-L', name:'DEEP LEFT',  bx:-0.65, by:-1.15, legs:true  },
+  { id:'high-R', name:'HIGH RIGHT', bx: 0.95, by: 2.05, legs:false },
+  { id:'side-L', name:'SIDE LEFT',  bx:-1.35, by:-0.65, legs:true  },
+  { id:'wide-L', name:'WIDE LEFT',  bx:-1.35, by: 1.15, legs:false },
+  { id:'deep-R', name:'DEEP RIGHT', bx: 0.65, by:-1.15, legs:true  },
+];
+
+/* How far back the player has to stand, COMPUTED from the sparks above rather
+   than asked for in words. The sparks reach past the body on every side, so
+   Sparks needs more room in frame than a game that only looks at the body
+   does. A spark cannot be pulled inward to fit, because that would hand a
+   player who stands close an easier reach and the whole vocabulary stops
+   being scale free.
+
+   So the stance is part of the setup instead. For a torso of t frame-heights
+   there has to be SOME hip height that keeps the feet in the picture and
+   every spark on screen; past a certain t there is none. These bounds fall
+   out of the target list and change with it. */
+const SPARK_MARGIN = 0.02;
+function stanceLimits(){
+  let byHi = -Infinity, byLo = Infinity, bxMax = 0;
+  for(const t of TARGETS){
+    byHi = Math.max(byHi, t.by); byLo = Math.min(byLo, t.by);
+    bxMax = Math.max(bxMax, Math.abs(t.bx));
+  }
+  // vertical: the highest spark pushes the hip down, the feet pull it up
+  const need = (byHi + TUNE.HIT_R) + 1.74;          // torso units of total room
+  const tMaxV = (1 - 2*SPARK_MARGIN) / need;
+  // lateral, independent of where the hip sits
+  const tMaxH = (0.5 - SPARK_MARGIN) / (bxMax / (3/4) + TUNE.HIT_R);
+  return { tMax: Math.min(tMaxV, tMaxH), byHi, byLo, bxMax };
+}
+function hipWindow(torso){
+  const L = stanceLimits();
+  return { lo: SPARK_MARGIN + (L.byHi + TUNE.HIT_R) * torso,
+           hi: 1 - SPARK_MARGIN - 1.74 * torso };
+}
+/* Does this body, where it is standing, leave room for every spark? */
+function stanceOk(o){
+  if(!o || !o.readable || !o.torso) return { ok:false, why:'nobody' };
+  const L = stanceLimits();
+  if(o.torso > L.tMax) return { ok:false, why:'close', torso:o.torso, tMax:L.tMax };
+  const w = hipWindow(o.torso);
+  if(o.hip.y < w.lo) return { ok:false, why:'low', torso:o.torso };
+  if(o.hip.y > w.hi) return { ok:false, why:'high', torso:o.torso };
+  for(const t of TARGETS){
+    const p = placeTarget(t, o);
+    const m = TUNE.HIT_R * o.torso;
+    if(p.x - m/o.ar < SPARK_MARGIN || p.x + m/o.ar > 1 - SPARK_MARGIN ||
+       p.y - m < SPARK_MARGIN || p.y + m > 1 - SPARK_MARGIN)
+      return { ok:false, why:'room', torso:o.torso, id:t.id };
+  }
+  return { ok:true, torso:o.torso, tMax:L.tMax };
+}
+
+/* 1.3 s to start, flat. The earlier design put lifetimes at 700 ms while in
+   the same breath putting the loop at 200 ms display + 230 ms reading it +
+   300-500 ms getting there = 730-930 ms, which makes 700 ms unreachable by
+   its own arithmetic. Lifetimes are an experimental condition, not a
+   setting: 1.3 s is the first condition, and 1 s and 700 ms get measured
+   against it rather than assumed. */
+const LIFETIME_MS = 1300;
+const GAP_MS = 700;
+/*==SCORER_END==*/
+
+/* ================= camera, pose, and the recording ================= */
+
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+/* ---- the recording ------------------------------------------------
+   Hugo's call on 25 Oct was to ship Sparks without this. It is in the
+   MILESTONE build for one reason: the first question the milestone has
+   to answer is whether the same movement scores the same twice, and
+   that cannot be answered without a stored movement to score twice.
+   Taking it out of a later build is a ten line change.
+
+   Each frame keeps the time the CAMERA captured it and the separate
+   time the estimate came back, every landmark with its own confidence,
+   and the gaps where frames never arrived. It lives in memory only and
+   disappears when the page closes. It becomes a file only if the player
+   taps Save recording. Nothing is sent anywhere.            */
+const REC_CAP = 40000;
+const rec = [];
+let recDropped = 0, lostSince = null;
+
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'sparks', build:BUILD,
+    orientation: (window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'capture = video.currentTime in seconds on the video clock; ready = performance.now() in ms when the estimate returned; clock = capture mapped into the performance clock by the running offset, minus POSE_LATENCY_MS',
+    lifetimeMs: LIFETIME_MS, tune: TUNE });
+}
+
+/* The single clock. video.currentTime is the only timestamp that belongs to
+   the camera rather than to the renderer, so it is what every judgment is
+   aligned to. It is mapped once per frame into the millisecond clock the
+   game's own events live on, and the residual constant delay between a body
+   moving and a landmark existing is held in POSE_LATENCY_MS.
+
+   That constant is ASSUMED, not measured. Measuring it needs the loopback in
+   the gate, where the screen shows a counter and the camera reads it back,
+   with no human in the middle. Until that runs, 200 ms is a placeholder sat
+   in the middle of the published 150-250 ms band, and it is recorded in every
+   file so any session can be re-judged once the real figure exists.
+
+   It matters more here than in Gap. The execution speed score is a
+   difference between two corrected times, so this constant cancels out of
+   it. The anticipation score is not: it compares a corrected body time
+   against an uncorrected display event, so it carries the whole of this
+   error as a bias. That is why they are reported as separate numbers. */
+let POSE_LATENCY_MS = 200;
+let clockOffset = null;          // performance-ms minus capture-ms
+
+/* ================= the game ================= */
+const BUILD = 'sparks-m1';
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+
+function resize(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+function videoFit(){
+  const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);           // contain: the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+// a landmark in canvas pixels. Landmarks are normalised to the CAMERA frame,
+// not the canvas, so anything drawn next to the body goes through this.
+function px(p){ const f = videoFit(); return { x: f.dx + p.x*f.dw, y: f.dy + p.y*f.dh }; }
+function frameAR(){ const vw = video.videoWidth||3, vh = video.videoHeight||4; return vw/vh; }
+
+const ui = {
+  oStart:document.getElementById('oStart'), oFit:document.getElementById('oFit'),
+  oEnd:document.getElementById('oEnd'), hud:document.getElementById('hud'),
+  legs:document.getElementById('legs'), legsFill:document.getElementById('legsFill'),
+  legsTxt:document.getElementById('legsTxt'),
+  hNo:document.getElementById('hNo'), hScore:document.getElementById('hScore'),
+  loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
+  fitMsg:document.getElementById('fitMsg'),
+  endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
+  endTag:document.getElementById('endTag'), endNote:document.getElementById('endNote'),
+};
+
+let state = 'idle';
+let run = 0, score = 0, tNo = 0, target = null, results = [];
+let samples = [];                     // recent observations, capture-stamped
+let hipMeter = makeHipMeter();
+let wake = null;
+let pendingSpawn = 0;
+
+function nowClock(){ return performance.now(); }
+
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset * 0.9 + off * 0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+
+function lastReadable(){
+  for(let i = samples.length - 1; i >= 0; i--) if(samples[i].o.readable) return samples[i].o;
+  return null;
+}
+
+function spawnTarget(){
+  if(tNo >= TARGETS.length){ endRun(); return; }
+  const def = TARGETS[tNo];
+  const o = lastReadable();
+  if(!o){ pendingSpawn = nowClock() + 120; return; }   // no body yet: wait, do not guess
+  const at = placeTarget(def, o);
+  if(!at){ pendingSpawn = nowClock() + 120; return; }
+  const lightAt = nowClock();
+  target = { def, at, lightAt, dieAt: lightAt + LIFETIME_MS,
+             legs: def.legs, judged:null, flash:0 };
+  pendingSpawn = 0;
+  recPush({ k:'spark_light', t:lightAt, no:tNo+1, id:def.id, legs:def.legs,
+            body:{ bx:def.bx, by:def.by }, at:{ x:+at.x.toFixed(4), y:+at.y.toFixed(4) },
+            torso:+o.torso.toFixed(4), lifetime:LIFETIME_MS });
+}
+
+function judgeNow(){
+  const r = judgeTarget(target, samples);
+  target.judged = r;
+  results.push({ id:target.def.id, isLeg:target.def.legs, ...r });
+  score += r.points;
+  ui.hScore.textContent = score;
+  recPush({ k:'spark_judge', t:nowClock(), no:tNo+1, id:target.def.id,
+            latencyAssumed:POSE_LATENCY_MS, lightAt:target.lightAt, dieAt:target.dieAt, ...r });
+  target.flash = 1;
+  if(r.verdict === 'CLEAN') blip(920, 0.2, 0.22);
+  else if(r.verdict === 'CLIPPED') blip(560, 0.17, 0.2);
+  else if(r.verdict === 'MISSED') blip(190, 0.22, 0.26);
+  else blip(340, 0.1, 0.18);
+}
+
+function endRun(){
+  state = 'over'; target = null;
+  ui.hud.hidden = true; ui.legs.hidden = true;
+  const clean = results.filter(r=>r.verdict==='CLEAN').length;
+  const reps  = results.filter(r=>r.rep).length;
+  const uns   = results.filter(r=>r.verdict==='UNSCORED').length;
+  const legRes = results.filter(r=>r.isLeg);
+  const legHit = legRes.filter(r=>r.legsOk === true).length;
+  const hm = hipMeter.get();
+  const final = Math.round(score * hm.mult);
+  const cleared = hm.ok && reps >= Math.ceil(TARGETS.length * TUNE.CLEAR_REPS);
+  ui.endScore.textContent = final;
+  ui.endTag.textContent = cleared ? ('RUN ' + run + ' CLEARED') : ('RUN ' + run + ' COMPLETE');
+  const rows = [
+    ['Clean strikes', clean + ' of ' + results.length],
+    ['Real repetitions', reps + ' of ' + results.length],
+    ['Lunges landed', legHit + ' of ' + legRes.length],
+  ];
+  if(hm.mult < 0.999) rows.push(['Struck', String(score) + '  \u00d7' + hm.mult.toFixed(2) + ' legwork']);
+  if(uns) rows.push(['Not observed', uns + (uns===1?' spark':' sparks')]);
+  ui.endRows.innerHTML = rows.map(r=>'<tr><td class="k">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('')
+    + '<tr><td class="k">Legwork floor</td><td class="v '+(hm.ok?'good':'bad')+'">'
+    + (hm.ok ? 'CLEARED' : 'NOT CLEARED') + '</td></tr>';
+  ui.endNote.textContent = hm.ok
+    ? 'A repetition counts only when the spark was reached with the legs doing the work.'
+    : 'The run did not travel enough to count as a workout, so most of what you struck did not pay. The low sparks want you to take your body there, not fold at the waist.';
+  ui.oEnd.hidden = false;
+  recPush({ k:'run_end', t:nowClock(), run, raw:score, final, cleared, clean, reps,
+            unscored:uns, legHit, legTotal:legRes.length,
+            hip:+hm.hip.toFixed(3), lat:+hm.lat.toFixed(3), frac:+hm.frac.toFixed(3),
+            mult:+hm.mult.toFixed(3), floorOk:hm.ok, recDropped });
+}
+
+/* ---- drawing ---- */
+function drawMirror(dim){
+  const f = videoFit();
+  ctx.save();
+  ctx.translate(W,0); ctx.scale(-1,1);
+  try { ctx.drawImage(video, W-f.dx-f.dw, f.dy, f.dw, f.dh); } catch(e){}
+  ctx.restore();
+  ctx.fillStyle = 'rgba(7,8,15,'+dim+')'; ctx.fillRect(0,0,W,H);
+}
+
+const BONES = [[J.shA,J.elA],[J.elA,J.wrA],[J.shB,J.elB],[J.elB,J.wrB],
+               [J.shA,J.shB],[J.shA,J.hipA],[J.shB,J.hipB],[J.hipA,J.hipB],
+               [J.hipA,J.knA],[J.knA,J.ankA],[J.hipB,J.knB],[J.knB,J.ankB]];
+
+function drawPlayer(alpha){
+  if(!pose) return;
+  const P = {}; let any=false;
+  for(const k in J){ const p = read(pose, J[k]); if(p){ P[J[k]] = px(p); any=true; } }
+  if(!any) return;
+  ctx.save();
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='rgba(246,241,230,'+alpha+')';
+  ctx.lineWidth = Math.max(5, Math.min(W,H)*0.015);
+  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  const n = P[J.nose];
+  if(n){ ctx.fillStyle='rgba(246,241,230,'+alpha+')'; ctx.beginPath();
+    ctx.arc(n.x, n.y, Math.max(8, Math.min(W,H)*0.022), 0, 7); ctx.fill(); }
+  // the hands are what strikes, so they are marked
+  for(const k of [J.wrA, J.wrB]){
+    if(!P[k]) continue;
+    ctx.fillStyle = 'rgba(79,214,224,'+alpha+')';
+    ctx.beginPath(); ctx.arc(P[k].x, P[k].y, Math.max(7, Math.min(W,H)*0.019), 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSpark(t, now){
+  const o = lastReadable();
+  const q = px(t.at);
+  // the ring is sized off the player's own torso, so the target it draws is
+  // the target that is scored
+  const torsoPx = o ? o.torso * videoFit().dh : Math.min(W,H)*0.18;
+  const r = torsoPx * TUNE.HIT_R;
+  const life = Math.max(0, Math.min(1, (t.dieAt - now) / LIFETIME_MS));
+  const col = t.legs ? '79,214,224' : '255,176,46';
+
+  ctx.save();
+  // glow
+  const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, r*1.5);
+  g.addColorStop(0, 'rgba('+col+',.42)');
+  g.addColorStop(1, 'rgba('+col+',0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, r*1.5, 0, 7); ctx.fill();
+  // the hit radius, drawn as what it is
+  ctx.strokeStyle = 'rgba('+col+',.30)'; ctx.lineWidth = Math.max(1.5, r*0.04);
+  ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 7); ctx.stroke();
+  // the inner zone that earns full credit
+  ctx.strokeStyle = 'rgba('+col+',.85)'; ctx.lineWidth = Math.max(3, r*0.09);
+  ctx.beginPath(); ctx.arc(q.x, q.y, r*(TUNE.CENTRE_R/TUNE.HIT_R), 0, 7); ctx.stroke();
+  // life remaining, counting down around the hit radius
+  ctx.strokeStyle = 'rgba('+col+',.95)'; ctx.lineWidth = Math.max(4, r*0.12);
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(q.x, q.y, r*1.2, -Math.PI/2, -Math.PI/2 + life*Math.PI*2); ctx.stroke();
+  if(t.legs){
+    ctx.fillStyle = 'rgba('+col+',.9)'; ctx.font = Math.round(Math.min(W,H)*0.028)+'px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('LUNGE', q.x, q.y + r*1.9);
+  }
+  ctx.restore();
+}
+
+function drawVerdict(t){
+  const r = t.judged; if(!r) return;
+  const a = Math.min(1, t.flash*1.6);
+  const txt = r.verdict === 'CLEAN' ? 'STRUCK'
+            : r.verdict === 'CLIPPED' ? 'CLIPPED'
+            : r.verdict === 'MISSED' ? 'MISSED'
+            : 'NOT SEEN';
+  const col = r.verdict === 'CLEAN' ? '#7fc08a'
+            : r.verdict === 'CLIPPED' ? '#ffb02e'
+            : r.verdict === 'MISSED' ? '#d4635a' : '#8a90ad';
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(7,8,15,'+(0.42*a)+')'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = col; ctx.textAlign='center';
+  ctx.font = Math.round(Math.min(W,H)*0.105)+'px Georgia';
+  ctx.fillText(txt, W/2, H*0.46);
+  ctx.font = Math.round(Math.min(W,H)*0.033)+'px Georgia';
+  if(r.verdict === 'UNSCORED'){
+    ctx.fillStyle = '#8a90ad';
+    ctx.fillText('not your fault — this one does not count', W/2, H*0.53);
+  } else if(r.rep){
+    ctx.fillStyle = '#7fc08a';
+    ctx.fillText(r.legsOk ? 'counted — legs did the work' : 'counted', W/2, H*0.53);
+  } else if(r.legsOk === false){
+    ctx.fillStyle = '#ffb02e';
+    ctx.fillText('reached, but not with your legs', W/2, H*0.53);
+  }
+  ctx.restore();
+}
+
+/* ---- the fit gate ----
+   Two questions, not one: are the legs in the picture, and is there room on
+   screen for the sparks. The second is the one that is specific to this game,
+   and it is answered by placing every spark against the body as it stands and
+   checking they all land on screen. Still advice, not a lock — the override
+   below is always enabled. */
+let fitOk = false, fitSince = 0, fitWhy = 'nobody';
+function checkFit(now){
+  const kn = read(pose, J.knA) || read(pose, J.knB);
+  const an = read(pose, J.ankA) || read(pose, J.ankB);
+  let ok = !!(kn && an);
+  fitWhy = ok ? 'legs' : 'legs';
+  if(ok){
+    const o = pose ? observe(pose, read, frameAR()) : null;
+    const st = stanceOk(o);
+    ok = st.ok;
+    fitWhy = st.ok ? 'ok' : st.why;
+  }
+  if(ok !== fitOk){ fitOk = ok; fitSince = now; }
+  return ok && (now - fitSince) > 600;
+}
+function fitMessage(){
+  switch(fitWhy){
+    case 'ok':    return 'Good. Starting\u2026';
+    case 'legs':  return 'Step back until your knees and feet are in the picture.';
+    case 'close': return 'A bit further back \u2014 the sparks need room around you.';
+    case 'low':   return 'Further back, or prop the phone a little higher.';
+    case 'high':  return 'Further back, or prop the phone a little lower.';
+    case 'room':  return 'A bit further back \u2014 the sparks need room around you.';
+    default:      return 'Step back until your whole body is in the picture.';
+  }
+}
+
+/* ---- audio: small, synthesised, no files ---- */
+let actx = null;
+function initAudio(){ try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} }
+function blip(f, g, d){
+  if(!actx) return;
+  const o = actx.createOscillator(), v = actx.createGain();
+  o.type='triangle'; o.frequency.value=f;
+  v.gain.setValueAtTime(0, actx.currentTime);
+  v.gain.linearRampToValueAtTime(g, actx.currentTime+0.012);
+  v.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+d);
+  o.connect(v); v.connect(actx.destination); o.start(); o.stop(actx.currentTime+d+0.05);
+}
+
+async function keepAwake(){
+  try { if('wakeLock' in navigator){ wake = await navigator.wakeLock.request('screen'); } } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state !== 'idle') keepAwake();
+});
+
+/* ---- the loop ---- */
+let lastFrameAt = 0;
+
+function frame(now){
+  requestAnimationFrame(frame);
+  if(video.readyState < 2 || !landmarker){ return; }
+
+  let fresh = false, clockT = now;
+  if(video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    if(lastFrameAt && now - lastFrameAt > 120){
+      recPush({ k:'gap', t:now, ms:Math.round(now-lastFrameAt) });
+    }
+    lastFrameAt = now;
+    lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true;
+      clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+
+    if(fresh){
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+                                        +(p.z||0).toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+(vt).toFixed(4), ready:+performance.now().toFixed(1),
+                clock:+clockT.toFixed(1), lm });
+      if(!pose && lostSince === null){ lostSince = now; recPush({ k:'lost', t:now }); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:now, out:Math.round(now-lostSince) }); lostSince = null; }
+    }
+  }
+
+  if(state === 'fit'){
+    drawMirror(0.45); drawPlayer(0.9);
+    const ok = checkFit(now);
+    ui.fitMsg.textContent = ok ? 'Good. Starting…' : 'Step back until your knees and feet are in the picture.';
+    if(ok){ ui.oFit.hidden = true; startRun(); }
+    return;
+  }
+
+  if(state !== 'play'){ if(state==='over'){ drawMirror(0.75); } return; }
+
+  // one observation per fresh frame, carrying its own capture time
+  if(fresh && pose){
+    const o = observe(pose, read, frameAR());
+    samples.push({ t: clockT, o });
+    if(samples.length > 400) samples.shift();
+    hipMeter.push(o);
+    const hm = hipMeter.get();
+    ui.legsFill.style.width = Math.round(hm.frac*100) + '%';
+    ui.legsTxt.textContent = hm.ok ? 'LEGWORK — FLOOR CLEARED' : 'LEGWORK';
+  }
+
+  drawMirror(0.52);
+  drawPlayer(0.6);
+
+  if(pendingSpawn && now >= pendingSpawn) spawnTarget();
+
+  if(target){
+    if(!target.judged){
+      drawSpark(target, now);
+      // The spark DIES at dieAt, but the landmarks describing the body over
+      // its lifetime do not exist until the pipeline has run. Judging at
+      // death reads an interval the estimates have not reached yet, which in
+      // Gap returned UNSCORED on every wall of a round while every unit test
+      // passed. Wait for the evidence, then judge.
+      if(now >= target.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40) judgeNow();
+    } else {
+      drawVerdict(target);
+      target.flash -= 0.045;
+      if(target.flash <= 0){
+        tNo++; target = null;
+        ui.hNo.textContent = Math.min(tNo+1, TARGETS.length) + '/' + TARGETS.length;
+        setTimeout(spawnTarget, GAP_MS);
+      }
+    }
+  }
+}
+
+function startRun(){
+  run++; score = 0; tNo = 0; results = []; samples = []; pendingSpawn = 0;
+  hipMeter.reset();
+  state = 'play';
+  ui.hud.hidden = false; ui.legs.hidden = false;
+  ui.hScore.textContent = '0';
+  ui.hNo.textContent = '1/' + TARGETS.length;
+  ui.legsFill.style.width = '0%'; ui.legsTxt.textContent = 'LEGWORK';
+  recPush({ k:'run_start', t:nowClock(), run, targets: TARGETS.map(t=>t.id) });
+  setTimeout(spawnTarget, 900);
+}
+
+/* ---- starting up ---- */
+function dropStream(){
+  const s = video.srcObject;
+  if(s){ try { s.getTracks().forEach(t => t.stop()); } catch(e){} }
+  video.srcObject = null;
+}
+function waitForFrames(ms){
+  return new Promise((res, rej) => {
+    if(video.readyState >= 2) return res();
+    let done = false;
+    const ok = () => { if(done) return; done = true; clean(); res(); };
+    const giveUp = () => { if(done) return; done = true; clean();
+      rej(new Error('The camera turned on but sent no picture. Close any other app using it, then try again.')); };
+    const t = setTimeout(giveUp, ms || 10000);
+    function clean(){ clearTimeout(t);
+      video.removeEventListener('loadeddata', ok); video.removeEventListener('playing', ok); }
+    video.addEventListener('loadeddata', ok); video.addEventListener('playing', ok);
+  });
+}
+
+let starting = false;
+async function begin(){
+  if(starting || state !== 'idle') return;
+  starting = true;
+  const btn = document.getElementById('bStart'); if(btn) btn.disabled = true;
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx && actx.state === 'suspended') await actx.resume();
+    // a tall screen wants a tall frame: a landscape request crops the legs
+    // before the tracker ever sees them
+    const tall = window.innerHeight > window.innerWidth;
+    const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
+    const s = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:vW}, height:{ideal:vH}, facingMode:'user' }, audio:false });
+    dropStream();
+    video.srcObject = s;
+    const playing = video.play();
+    if(playing && playing.catch) playing.catch(()=>{});
+    await Promise.race([ playing ? playing.catch(()=>{}) : Promise.resolve(),
+                         new Promise(r => setTimeout(r, 3000)) ]);
+    await waitForFrames(8000);
+    if(!landmarker) await loadTracker();
+    recHeader();
+    ui.loadMsg.hidden = true; ui.oStart.hidden = true; ui.oFit.hidden = false;
+    state = 'fit'; keepAwake();
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream();
+    ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    if(err && err.name === 'NotAllowedError') m = 'Camera permission denied. Allow it in the address bar and reload.';
+    if(err && err.name === 'NotFoundError') m = 'No camera found on this device.';
+    if(err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    if(err && err.name === 'AbortError') m = 'The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  } finally {
+    starting = false;
+    const b2 = document.getElementById('bStart'); if(b2) b2.disabled = false;
+  }
+}
+
+document.getElementById('bStart').addEventListener('click', begin);
+// The override is always enabled. A player the camera cannot frame must still
+// be able to start; the gate is advice, not a lock.
+document.getElementById('bGo').addEventListener('click', () => { ui.oFit.hidden = true; startRun(); });
+document.getElementById('bAgain').addEventListener('click', () => { ui.oEnd.hidden = true; startRun(); });
+document.getElementById('bRec').addEventListener('click', () => {
+  const lines = rec.map(o => JSON.stringify(o)).join('\n');
+  const blob = new Blob([lines], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sparks-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+});
+
+window.__SPARKS__ = { TUNE, TARGETS, LIFETIME_MS, GAP_MS, J, makeReader, observe, placeTarget,
+                      stanceLimits, hipWindow, stanceOk,
+                      velocityAt, findOnset, arcBetween, hipTravel, judgeTarget,
+                      makeHipMeter, iso, idist, iang, zone, rec };
+</script>
+</body>
+</html>
