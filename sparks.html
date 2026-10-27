@@ -100,6 +100,11 @@
   <div class="row"><button id="bGo" class="ghost">Start anyway</button></div>
 </div>
 
+<div class="ov" id="oRot" hidden style="z-index:9">
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Sparks is played sideways. Your camera sees a wide picture &mdash; held sideways it fills the screen instead of sitting in a band across the middle, and you appear about three times bigger with no change to where you stand.</p>
+</div>
+
 <div class="ov" id="oEnd" hidden>
   <div class="tag" id="endTag">RUN COMPLETE</div>
   <h1 id="endScore" style="font-size:clamp(40px,16vw,74px)">0</h1>
@@ -1399,7 +1404,28 @@ function resize(){
   c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
-addEventListener('resize', resize); resize();
+/* SPARKS IS PLAYED SIDEWAYS.
+
+   The camera sensor is physically landscape: held upright it hands over a
+   picture wider than it is tall, the page fits it by width, and the play
+   area is a band across the middle of a long screen. Held sideways the
+   picture and the screen are the same shape.
+
+   Measured from the live target list, on a 4:3 camera and a tall phone:
+   the stance the gate asks for is IDENTICAL either way (0.228 — height is
+   what binds, and turning the phone does not change the camera's vertical
+   field of view), while the player goes from 33% to 96% of the screen
+   height and the black from 65% to 38%. Same distance, nearly three times
+   the picture.
+
+   This is the only change in this build. */
+function landscapeOK(){ return W > H; }
+function checkRotation(){
+  if(!ui || !ui.oRot) return;
+  ui.oRot.hidden = landscapeOK();
+}
+addEventListener('resize', () => { resize(); checkRotation(); }); resize();
+addEventListener('orientationchange', () => { resize(); checkRotation(); });
 
 function videoFit(){
   const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
@@ -1422,7 +1448,7 @@ const ui = {
   hScore:document.getElementById('hScore'), streak:document.getElementById('streak'),
   hStreak:document.getElementById('hStreak'), hStreakN:document.getElementById('hStreakN'),
   loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
-  fitMsg:document.getElementById('fitMsg'),
+  fitMsg:document.getElementById('fitMsg'), oRot:document.getElementById('oRot'),
   endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
   endTag:document.getElementById('endTag'), endNote:document.getElementById('endNote'),
 };
@@ -2541,6 +2567,7 @@ function waitForFrames(ms){
 let starting = false;
 async function begin(){
   if(starting || state !== 'idle') return;
+  if(!landscapeOK()){ checkRotation(); return; }   // sideways only
   starting = true;
   const btn = document.getElementById('bStart'); if(btn) btn.disabled = true;
   ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
@@ -2581,6 +2608,7 @@ async function begin(){
 }
 
 document.getElementById('bStart').addEventListener('click', begin);
+checkRotation();   // the ui object exists by here, so this is the first honest look
 // The override is always enabled. A player the camera cannot frame must still
 // be able to start; the gate is advice, not a lock.
 document.getElementById('bGo').addEventListener('click', () => { ui.oFit.hidden = true; startRun(); });
