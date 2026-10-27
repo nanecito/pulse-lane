@@ -97,7 +97,6 @@
 
 <div class="ov" id="oFit" hidden style="background:transparent;justify-content:flex-end;padding-bottom:40px">
   <p class="sub" id="fitMsg">Step back until your feet are inside the frame.</p>
-  <p class="note" id="fitCam" style="opacity:.55;font-size:12px;margin:2px 0 8px"></p>
   <div class="row"><button id="bGo" class="ghost">Start anyway</button></div>
 </div>
 
@@ -1037,19 +1036,8 @@ function makeHipMeter(){
  * latency times the drift speed. Measured, not assumed — see the      *
  * drift harness.                                                      *
  * ------------------------------------------------------------------ */
-/* DRIFT IS OFF. Hugo, after playing three builds in a row that each felt
-   worse than the one before: "don't start drift, go back to the basics."
-
-   He is right and the reason is not taste. Drift was built on top of a game
-   whose camera was handing over the wrong frame, so it was never judged on
-   its own terms — and every build after it added mechanism to something
-   that did not yet work. Setting the speed to zero leaves the whole
-   capture-time machinery in place (sparkPos still reads at the capture
-   timestamp; a still spark is simply the case where that cancels to
-   nothing) so this is one number to put back, not a rebuild, once the
-   basics are actually good. */
-const DRIFT_MIN = 0.00;
-const DRIFT_MAX = 0.00;   // torso per second
+const DRIFT_MIN = 0.07;
+const DRIFT_MAX = 0.20;   // torso per second
 
 /* Centre to centre, for every pair of sparks alive at the same time, for
    the whole of their overlap. Two hit radii is 0.84, so at 1.10 no point in
@@ -1162,21 +1150,8 @@ const ARM = { shX: 0.40, shY: 1.00, reach: 1.44 };
    This does not weaken the anti-cheat on a leg spark: amplitude was never
    what separated a lunge from a plant. The hip gate is, and it is
    untouched. */
-/* Hugo, after playing: "maybe just touch the centre, and not really like
-   doing the slamming movement — that's the purpose of the game."
-
-   He is right about the feel and I am keeping one thing he did not ask to
-   keep. Sparks DRIFT now, and if travel stopped mattering entirely a spark
-   could float onto a hand that is already parked and pay for it. Amplitude
-   is what stops that, so it does not go away — it stops being a grade and
-   becomes a floor. 0.32 of the honest travel earns FULL credit, so a
-   comfortable reach to the middle of a spark scores exactly like a lunge
-   at it. Below 0.14 it collapses, which is where a poke lives.
-
-   Measured, not asserted: the poke archetype — hand already beside the
-   spark, nudges it in, dead on centre — still has to fail. */
-const CHORD_FRAC_IN = 0.32;
-const CHORD_FRAC_OUT = 0.14;
+const CHORD_FRAC_IN = 0.55;
+const CHORD_FRAC_OUT = 0.22;
 function chordNeed(bx, by){
   const rx = bx < 0 ? -REST_HAND.x : REST_HAND.x;
   const full = Math.hypot(bx - rx, by - REST_HAND.y);
@@ -1386,7 +1361,7 @@ function recHeader(){
     game:'sparks', build:BUILD,
     orientation: (window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
     screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
-    video:{ w:video.videoWidth, h:video.videoHeight }, camTried: camTried.slice(), camPicked,
+    video:{ w:video.videoWidth, h:video.videoHeight },
     ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
     coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
     note:'capture = video.currentTime in seconds on the video clock; ready = performance.now() in ms when the estimate returned; clock = capture mapped into the performance clock by the running offset, minus POSE_LATENCY_MS',
@@ -1414,7 +1389,7 @@ let POSE_LATENCY_MS = 200;
 let clockOffset = null;          // performance-ms minus capture-ms
 
 /* ================= the game ================= */
-const BUILD = 'sparks-m7-basics';
+const BUILD = 'sparks-m1';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -1447,7 +1422,7 @@ const ui = {
   hScore:document.getElementById('hScore'), streak:document.getElementById('streak'),
   hStreak:document.getElementById('hStreak'), hStreakN:document.getElementById('hStreakN'),
   loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
-  fitMsg:document.getElementById('fitMsg'), fitCam:document.getElementById('fitCam'),
+  fitMsg:document.getElementById('fitMsg'),
   endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
   endTag:document.getElementById('endTag'), endNote:document.getElementById('endNote'),
 };
@@ -2024,48 +1999,6 @@ function drawVerdict(t){
    checking they all land on screen. Still advice, not a lock — the override
    below is always enabled. */
 let fitOk = false, fitSince = 0, fitWhy = 'nobody';
-/* IS THE BODY STILL USABLE, MID-RUN?
-
-   checkFit only ever ran on the setup screen. Once the round started
-   nothing looked again — so a player who drifted toward the phone kept
-   playing, and the game kept scoring, against a body whose hips were off
-   the bottom of the frame and were therefore being GUESSED by the tracker.
-   A screenshot from a real phone showed exactly that: a head filling the
-   picture, a torso measuring about eight times what the fit gate allows,
-   and a score still ticking up. Everything downstream of that number is
-   arithmetic on an invented body.
-
-   So the check runs the whole time now. It does not end the run and it
-   does not take points away — it says so on screen, and it stops NEW
-   sparks being placed from a body that cannot support them, because a
-   spark placed off a guessed hip is a spark in the wrong place. */
-let playFitOk = true, playFitWhy = 'ok', playFitSince = 0;
-function checkPlayFit(now){
-  const o = pose ? observe(pose, read, frameAR(), scaleTrack, nowClock()) : null;
-  let why = 'nobody';
-  if(o && o.readable){
-    const kn = read(pose, J.knA) || read(pose, J.knB);
-    const st = stanceOk(o);
-    why = st.ok ? (kn ? 'ok' : 'legs') : st.why;
-  }
-  const ok = (why === 'ok');
-  if(ok !== playFitOk){ playFitOk = ok; playFitSince = now; }
-  playFitWhy = why;
-  // a brief wobble is not a problem; a sustained one is
-  return playFitOk || (now - playFitSince) < 700;
-}
-function playFitMessage(){
-  switch(playFitWhy){
-    case 'close': return 'TOO CLOSE \u2014 STEP BACK';
-    case 'room':  return 'TOO CLOSE \u2014 STEP BACK';
-    case 'low':   return 'STEP BACK OR RAISE THE PHONE';
-    case 'high':  return 'STEP BACK OR LOWER THE PHONE';
-    case 'legs':  return 'YOUR LEGS ARE OUT OF FRAME';
-    case 'nobody':return 'CANNOT SEE YOU';
-    default:      return 'STEP BACK INTO FRAME';
-  }
-}
-
 function checkFit(now){
   const kn = read(pose, J.knA) || read(pose, J.knB);
   const an = read(pose, J.ankA) || read(pose, J.ankB);
@@ -2470,7 +2403,6 @@ function frame(now){
     drawMirror(0.45); drawPlayer(0.9);
     const ok = checkFit(now);
     ui.fitMsg.textContent = fitMessage();
-    if(ui.fitCam) setCamLine();
     if(ok){ ui.oFit.hidden = true; startRun(); }
     return;
   }
@@ -2509,12 +2441,8 @@ function frame(now){
      backlog would hand the player a burst of sparks at once through no fault
      of theirs, and would put the track out of step with its own music. It is
      recorded, so a thin run can be explained rather than guessed at. */
-  const bodyOk = checkPlayFit(now);
   if(dueSpark){
-    if(!bodyOk){
-      recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'body not usable: ' + playFitWhy });
-      dueSpark = null;
-    } else if(live.filter(t => !t.judged).length >= MAX_ALIVE){
+    if(live.filter(t => !t.judged).length >= MAX_ALIVE){
       recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'screen full' });
       dueSpark = null;
     } else if(spawnTarget(dueSpark)) dueSpark = null;
@@ -2561,34 +2489,7 @@ function frame(now){
     if(f.flash <= 0) fading.splice(i, 1);
   }
   drawParts(dt);
-
-  /* And say it, loudly, while it is true. A game that quietly scores
-     nonsense is worse than one that stops: the player has no way of
-     knowing which of their runs meant anything. */
-  if(!bodyOk) drawFitBanner();
   ctx.restore();
-}
-
-function drawFitBanner(){
-  {
-    const msg = playFitMessage();
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.font = Math.round(Math.min(W,H) * 0.030) + 'px Georgia';
-    const w = ctx.measureText(msg).width, padX = Math.min(W,H)*0.035;
-    const bw = w + padX*2, bh = Math.min(W,H)*0.082;
-    const bx = (W - bw)/2, by = H * 0.30;
-    ctx.fillStyle = 'rgba(212,99,90,0.92)';
-    if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, bh/2); ctx.fill(); }
-    else ctx.fillRect(bx, by, bw, bh);
-    ctx.fillStyle = '#fff6ec';
-    ctx.fillText(msg, W/2, by + bh*0.66);
-    ctx.font = Math.round(Math.min(W,H) * 0.021) + 'px Georgia';
-    ctx.fillStyle = '#8a90ad';
-    ctx.fillText('sparks are paused until the camera can see your body',
-                 W/2, by + bh + Math.min(W,H)*0.034);
-    ctx.restore();
-  }
 
   // the clock across the top, outside the shake
   const left = Math.max(0, RUN_SECONDS - songTime());
@@ -2637,95 +2538,6 @@ function waitForFrames(ms){
   });
 }
 
-/*==CAMPICK_START==*/
-/* WRONG TWICE, so this one MEASURES instead of asking.
-
-   What actually matters on a phone held upright is VERTICAL FIELD OF
-   VIEW — how much of a standing body fits in the picture. Nothing else
-   about the frame comes close, because a body whose legs are outside the
-   picture has its hips GUESSED by the tracker, and every number after
-   that is arithmetic on an invented body.
-
-   Attempt one asked with `ideal`, which a phone is free to ignore, and it
-   did: 4:3 landscape, letterboxed. Attempt two asked with `exact` and an
-   explicit 9:16 — and the phone obliged by CROPPING its 4:3 sensor top
-   and bottom, which threw away the one thing that mattered and left a
-   short strip across the middle. Strictly worse, and shipped on reasoning
-   rather than on a measurement.
-
-   So: open each candidate, read what the track actually delivered, close
-   it, and keep the constraint whose frame has the SMALLEST width/height —
-   because for one sensor a wider aspect is a vertical crop of a narrower
-   one. Ties go to the higher resolution. Whatever the device does with
-   the request, the kept one is the one measured to show the most body.
-
-   This function is extracted from the live file and run against a real
-   browser camera by camtest.mjs. It is not described anywhere else. */
-async function pickCamera(tall, gum){
-  gum = gum || (c => navigator.mediaDevices.getUserMedia(c));
-  const cands = tall
-    ? [ { width:{ideal:720},  height:{ideal:1280} },
-        { aspectRatio:{ideal:0.75} },
-        { width:{ideal:960},  height:{ideal:1280} },
-        { } ]
-    : [ { width:{ideal:1280}, height:{ideal:720} },
-        { } ];
-  /* 4:3 is as much vertical field of view as an ordinary sensor has; only a
-     portrait or square frame beats it. So the moment a candidate comes back
-     at 4:3 or better, stop — keep that stream, and never open the camera
-     again. On the phone this was all for, that is ONE getUserMedia call.
-     Opening and closing a phone camera four times to shop around would be
-     its own way of making the start worse, which is the mistake this whole
-     function is here to stop repeating. */
-  const GOOD = 4/3 + 0.01;
-  let best = null;           // { stream, c, wh, px }
-  const tried = [];
-  for(const c of cands){
-    let probe = null;
-    try { probe = await gum({ video: Object.assign({ facingMode:'user' }, c), audio:false }); }
-    catch(e){ continue; }
-    let st = {};
-    try { st = probe.getVideoTracks()[0].getSettings() || {}; } catch(e){}
-    const w = st.width || 0, h = st.height || 0;
-    if(!w || !h){ stopAll(probe); continue; }
-    tried.push(w + '\u00d7' + h);
-    const wh = w / h, px = w * h;
-    if(!best || wh < best.wh - 0.001 || (Math.abs(wh - best.wh) <= 0.001 && px > best.px)){
-      if(best) stopAll(best.stream);
-      best = { stream: probe, c, wh, px };
-    } else {
-      stopAll(probe);
-    }
-    if(best.wh <= GOOD) break;
-  }
-  if(!best){
-    const stream = await gum({ video:{ facingMode:'user' }, audio:false });
-    return { stream, tried, chose:null, wh:null };
-  }
-  return { stream: best.stream, tried, chose: best.c, wh: best.wh };
-}
-function stopAll(s){ try { s.getTracks().forEach(t => t.stop()); } catch(e){} }
-/*==CAMPICK_END==*/
-
-/* What the camera actually handed over, kept so it can be shown on screen
-   and written into the recording. Two builds were spent inferring this
-   from screenshots; it is one line to just say it. */
-let camTried = [];
-let camPicked = null;        // what pickCamera settled on, as {w,h}
-function setCamLine(){
-  const c = camNow();
-  ui.fitCam.textContent = c ? 'camera ' + c : '';
-  ui.fitCam.hidden = !c;
-  return ui.fitCam.textContent;
-}
-function camNow(fw, fh){   // fw/fh let a harness drive the real function
-  const w = fw || video.videoWidth || (camPicked && camPicked.w) || 0;
-  const h = fh || video.videoHeight || (camPicked && camPicked.h) || 0;
-  if(!w || !h) return '';
-  const screenTall = window.innerHeight > window.innerWidth;
-  return w + '\u00d7' + h + (screenTall && h <= w ? '  \u2014 wide frame, stand further back' : '');
-}
-
 let starting = false;
 async function begin(){
   if(starting || state !== 'idle') return;
@@ -2737,13 +2549,10 @@ async function begin(){
     if(actx && actx.state === 'suspended') await actx.resume();
     // a tall screen wants a tall frame: a landscape request crops the legs
     // before the tracker ever sees them
-    const picked = await pickCamera(window.innerHeight > window.innerWidth);
-    camTried = picked.tried;
-    camPicked = null;
-    try { const st = picked.stream.getVideoTracks()[0].getSettings();
-          if(st && st.width && st.height) camPicked = { w:st.width, h:st.height }; }
-    catch(e){}
-    const s = picked.stream;
+    const tall = window.innerHeight > window.innerWidth;
+    const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
+    const s = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:vW}, height:{ideal:vH}, facingMode:'user' }, audio:false });
     dropStream();
     video.srcObject = s;
     const playing = video.play();
