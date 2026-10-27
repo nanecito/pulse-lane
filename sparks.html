@@ -42,7 +42,11 @@
     text-shadow:0 1px 6px rgba(0,0,0,.9)}
   /* an id selector beats the [hidden] attribute, so without this the score
      and the legwork bar sit on top of the start and setup screens */
-  #hud[hidden],#legs[hidden]{display:none}
+  #hud[hidden],#legs[hidden],#streak[hidden]{display:none}
+  #streak{position:fixed;top:64px;left:0;right:0;text-align:center;z-index:3;
+    pointer-events:none;text-shadow:0 2px 10px rgba(0,0,0,.9)}
+  #streak b{display:block;font-weight:400;font-size:30px;color:var(--spark-l);letter-spacing:.04em}
+  #streak span{font-size:11px;letter-spacing:.2em;color:var(--dim)}
   #hud .r{text-align:right}
   #hud b{font-weight:400;color:var(--spark);font-size:22px;display:block}
   /* the legs meter is the whole point of the game, so it is on screen the
@@ -67,9 +71,10 @@
 <div id="wrap"><canvas id="c"></canvas></div>
 
 <div id="hud" hidden>
-  <div><span style="color:var(--dim)">SPARK</span><b id="hNo">1/8</b></div>
+  <div><span style="color:var(--dim)" id="hSec">&nbsp;</span><b id="hTime">3:00</b></div>
   <div class="r"><span style="color:var(--dim)">SCORE</span><b id="hScore">0</b></div>
 </div>
+<div id="streak" hidden><b id="hStreak"></b><span id="hStreakN"></span></div>
 <div id="legs" hidden>
   <div id="legsBar"><div id="legsFill"></div></div>
   <div id="legsTxt">LEGWORK</div>
@@ -82,6 +87,7 @@
     <li>Stand back so your whole body, feet included, is in the picture.</li>
     <li>Sweep a hand through the spark. A poke does not count &mdash; the swing is what scores.</li>
     <li>The low ones want a lunge, not a bend at the waist. The bar at the bottom is watching your legs.</li>
+    <li>A run is three minutes. The music fills out while you keep landing them.</li>
   </ul>
   <div class="row"><button id="bStart">Start</button></div>
   <p class="note" id="loadMsg" hidden>Waking the camera&hellip;</p>
@@ -171,7 +177,34 @@ const TUNE = {
      out at the EDGE of the radius instead of at the centre, because the pass
      was one sample long, and honest full-length swings were scored as misses
      with full amplitude and almost no centrality. */
-  PASS_MAX_GAP: 150,  // ms of invisibility the pass can bridge
+  /* A pass ends when the hand is SEEN outside the radius, and not before.
+     Ending it on a long hole instead threw away the evidence: a wrist lost
+     for 193 ms entered at the rim, reappeared dead centre at 0.04 torso, and
+     the pass had already been cut at the hole — so an honest strike was
+     scored on the rim it entered at and came back MISSED. The hole is a
+     reason to be uncertain about the middle, not a reason to discard what
+     was seen after it. Whether the hand might have left and returned
+     unobserved is unknowable; that it was inside both before and after is
+     observed, and the simpler reading is believed. The uncertainty about
+     the unwatched middle is handled below, by giving it to the player. */
+  /* Centrality is a claim about the deepest the hand got, and a hole in the
+     middle of the pass hides exactly that. With a fifth of the frames
+     missing, a full honest sweep was observed grazing the rim, scored
+     centrality 0.06 and came back MISSED with amplitude 1.0.
+
+     A fixed limit on the hole was the wrong instrument: 150 ms sounds small
+     but the hand crosses the whole zone in about 200, so a hole under the
+     limit still hides the middle of it. The uncertainty is computable
+     instead. Over a hole of g seconds at v torso/sec the hand could have got
+     v*g/2 closer than anything seen, so that much is given to the player —
+     never charging them for an interval nobody watched.
+
+     Only the hole in EXCESS of this device's own frame interval counts,
+     measured from the median gap in the window rather than assumed, so a
+     normally sampled pass gets no benefit at all and a camera dropping
+     frames does not quietly inflate everyone's scores. Past PASS_OBS_GAP of
+     excess the pass is not observed enough to judge and goes UNSCORED. */
+  PASS_OBS_GAP: 250,  // ms of EXCESS hole past which the pass is unjudgeable
 
   /* Before a MISS may be declared, the window has to have been watched well
      enough that a strike could not have hidden in it. A miss is a claim about
@@ -228,13 +261,18 @@ const TUNE = {
      player's score with the per-spark gate working perfectly. The run itself
      has to clear a floor regardless of which sparks were hit.
 
+     The floor is a RATE, not a total, and it is charged PER LEG SPARK
+     PRESENTED. A fixed total cannot work once a run is not a fixed length:
+     the same number that an eight spark test run cleared comfortably would
+     be trivial over a three minute track and brutal over a short one. Per
+     leg spark it scales with whatever the track asks for, and it ignores the
+     high and wide sparks, which are honestly armable and whose hips should
+     not be expected to move at all.
+
      Both numbers come from the floor sweep: 15% under the 5th percentile of
-     what a player who takes their body to every spark actually travels. At
-     this floor, across sixty honest runs and a hundred and twenty cheating
-     ones spanning four noise levels, three swing speeds and fourteen ways of
-     moving, no honest run failed and no cheating run passed. */
-  SESSION_HIP:  2.70, // total hip path over the run, in torso units
-  SESSION_LAT:  0.75, // total lateral hip travel over the run
+     what a player who takes their body to every spark actually travels. */
+  HIP_PER_LEG:  0.74, // torso units of hip path per leg spark presented
+  LAT_PER_LEG:  0.21, // and of lateral hip travel
 
   /* The floor is not a label, it is a multiplier. This is the share of the
      score that survives doing no legwork at all; the rest is earned by the
@@ -468,57 +506,53 @@ function hipTravel(samples, oi, ci, at){
  * a spark's death is a deadline in display time while the strike is  *
  * reconstructed from delayed samples.                                *
  * ---------------------------------------------------------------- */
-function judgeTarget(t, samples){
+/* The observations that belong to this spark, as indices into samples. */
+function judgeWindow(t, samples){
   const lo = t.lightAt - TUNE.JUDGE_PRE, hi = t.dieAt + TUNE.JUDGE_POST;
   const win = [];
   for(let i = 0; i < samples.length; i++){
     const s = samples[i];
     if(s.t >= lo && s.t <= hi && s.o.readable) win.push(i);
   }
-  const blank = { verdict:'UNSCORED', quality:0, amplitude:null, centrality:null,
-                  execMs:null, anticipationMs:null, velocity:null, sweep:null,
-                  chord:null, hip:null, legCredit:null, legsOk:null, rep:false, points:0,
-                  samples:win.length, limb:null, nearest:null };
-  if(win.length < TUNE.JUDGE_MIN) return blank;
+  return win;
+}
 
-  /* The strike is the PASS through the zone, not the rest that follows it.
-     Taking the nearest approach across the whole window scores the wrong
-     moment: a hand that arrives at the spark and stays there sits at its
-     nearest point long after the swing is over, so the onset search finds a
-     stationary hand one sample away and the arc comes back as nothing. In
-     simulation that made the same movement score 1.00 on one side and 0.00
-     on the other, decided by where the noise happened to put the minimum.
+/* The strike: the FIRST contiguous pass through the hit radius.
 
-     So: the FIRST contiguous pass through the hit radius. Its entry is when
-     the hand got there, and that is what the timing and the arc are measured
-     to. Its nearest point is how centrally it passed. Two quantities, each
-     from the sample that actually carries it.
+   Taking the nearest approach across the whole window scores the wrong
+   moment: a hand that arrives at the spark and stays sits at its nearest
+   point long after the swing is over, so the onset search finds a stationary
+   hand one sample away and the arc comes back as nothing. In simulation that
+   made the same movement score 1.00 on one side and 0.00 on the other,
+   decided by where the noise happened to put the minimum.
 
-     Both hands are eligible. The player decides which hand to use, not the
-     game; the earlier pass wins. */
+   Its ENTRY is when the hand got there, and that is what the timing is
+   measured to. Its DEEPEST point is the end of the swing, and that is what
+   the arc is measured to.
+
+   Both hands are eligible. The player decides which hand to use, not the
+   game; the earlier pass wins.
+
+   Lives in its own function because the judgment and the is-it-ready check
+   both need it, and two copies of this would drift apart. */
+function findPass(t, samples, win){
   const distAt = (i, key) => {
     const s = samples[i], p = s.o.limbs[key];
     return p ? idist(p, t.at, s.o.ar) / s.o.torso : null;
   };
-
   let hit = null, nearest = Infinity, everVisible = false;
   for(const key of ['wrA','wrB']){
-    let k0 = -1, k1 = -1, lastIn = null;
+    let k0 = -1, k1 = -1, exited = false;
     for(let k = 0; k < win.length; k++){
       const d = distAt(win[k], key);
-      if(d === null){
-        // invisible. The pass bridges a hole, up to a bound; past that it is
-        // over, because the hand could have left and come back.
-        if(k0 >= 0 && samples[win[k]].t - lastIn > TUNE.PASS_MAX_GAP) break;
-        continue;
-      }
+      if(d === null) continue;          // invisible: the pass bridges it
       everVisible = true;
       if(d < nearest) nearest = d;
       if(d <= TUNE.HIT_R){
         if(k0 < 0) k0 = k;
-        k1 = k; lastIn = samples[win[k]].t;
+        k1 = k;
       }
-      else if(k0 >= 0) break;          // seen, and outside: the pass is over
+      else if(k0 >= 0){ exited = true; break; }   // seen, and outside: over
     }
     if(k0 < 0) continue;
     let bd = Infinity, bi = win[k0];
@@ -526,8 +560,56 @@ function judgeTarget(t, samples){
       const d = distAt(win[k], key);
       if(d !== null && d < bd){ bd = d; bi = win[k]; }
     }
-    if(!hit || k0 < hit.k0) hit = { key, k0, entryI: win[k0], bestI: bi, d: bd };
+    if(!hit || k0 < hit.k0)
+      hit = { key, k0, entryI: win[k0], bestI: bi, lastI: win[k1], d: bd, exited };
   }
+  return { hit, nearest, everVisible };
+}
+
+/* Is there enough evidence to judge NOW, rather than waiting for the spark to
+   expire?
+
+   This exists for feel, not for correctness. Judging only at expiry means a
+   player who strikes early waits out the rest of the lifetime plus the
+   pipeline delay before anything happens — up to 1.2 seconds between their
+   hand going through the spark and the game reacting. A reward that late is
+   not a reward. It also leaves the spark sitting there after it has been hit.
+
+   It must not change any verdict, only when the same verdict arrives. So it
+   waits for exactly what the judgment needs and nothing less: a pass that has
+   demonstrably ENDED, the velocity window around the entry filled, and an
+   onset to measure back to. Short of that it declines and the caller falls
+   back to the expiry deadline. */
+function readyToJudge(t, samples){
+  if(!samples.length) return false;
+  const newestT = samples[samples.length - 1].t;
+  const { hit } = findPass(t, samples, judgeWindow(t, samples));
+  if(!hit) return false;                       // no strike seen yet
+  const need = TUNE.VEL_WIN_MAX / 2 + 60;
+  /* The pass has to have ended for a reason that can be SEEN: the hand was
+     observed outside the radius, or the hole since it was last inside grew
+     past what a pass may bridge. Running out of samples is not evidence the
+     pass ended — the hand may still be travelling deeper, and the deepest
+     point is what centrality is measured from. Accepting that as an ending
+     judged five strikes out of 2304 on a truncated pass, each one scoring
+     LOWER than the truth: one honest movement came back MISSED at quality
+     0.20 that the full window scored CLEAN at 1.00. */
+  if(!hit.exited) return false;
+  // the velocity window centred on the entry has to be filled
+  if(newestT - samples[hit.entryI].t < need) return false;
+  if(velocityAt(samples, samples[hit.entryI].t, hit.key) === null) return false;
+  return findOnset(samples, hit.entryI, hit.key) !== null;
+}
+
+function judgeTarget(t, samples){
+  const win = judgeWindow(t, samples);
+  const blank = { verdict:'UNSCORED', quality:0, amplitude:null, centrality:null,
+                  execMs:null, anticipationMs:null, velocity:null, sweep:null,
+                  chord:null, hip:null, legCredit:null, legsOk:null, rep:false, points:0,
+                  samples:win.length, limb:null, nearest:null };
+  if(win.length < TUNE.JUDGE_MIN) return blank;
+
+  const { hit, nearest, everVisible } = findPass(t, samples, win);
 
   // A hand that was never visible is no claim about the player. A hand that
   // was plainly and continuously visible and was not there is a miss, and it
@@ -583,9 +665,42 @@ function judgeTarget(t, samples){
   const arc = arcBetween(samples, oi, deepI, key);
   if(!arc) return blank;
 
+  /* How well was the pass itself watched? The span runs from the sample
+     before entry to the one after the last in-radius sample, because the
+     deepest point could have fallen in either of those gaps. */
+  let passGap = 0;
+  {
+    let last = null;
+    for(let i = Math.max(0, hit.entryI - 1); i <= Math.min(samples.length - 1, hit.lastI + 1); i++){
+      const s = samples[i];
+      if(!s.o.limbs[key]) continue;
+      if(last !== null) passGap = Math.max(passGap, s.t - last);
+      last = s.t;
+    }
+  }
+  // this device's own frame interval, measured rather than assumed
+  let medGap = 33;
+  {
+    const gaps = [];
+    let last = null;
+    for(const i of win){
+      const s = samples[i];
+      if(!s.o.limbs[key]) continue;
+      if(last !== null) gaps.push(s.t - last);
+      last = s.t;
+    }
+    if(gaps.length){ gaps.sort((a,b)=>a-b); medGap = gaps[Math.floor(gaps.length/2)]; }
+  }
+  const excess = Math.max(0, passGap - medGap);
+  if(excess > TUNE.PASS_OBS_GAP)
+    return Object.assign({}, blank, { nearest:+hit.d.toFixed(4) });
+
   const best = { i: entryI, key, d: hit.d };
 
-  const centrality = zone(best.d, TUNE.CENTRE_R, TUNE.HIT_R);
+  // the hand could have been this much deeper inside the hole nobody saw
+  const slack = Math.max(0, vel) * (excess / 1000) / 2;
+  const dEff = Math.max(0, best.d - slack);
+  const centrality = zone(dEff, TUNE.CENTRE_R, TUNE.HIT_R);
   const cAmp = zone(arc.chord, TUNE.CHORD_IN, TUNE.CHORD_OUT);
   const sAmp = arc.sweep === null ? null : zone(arc.sweep, TUNE.SWEEP_IN, TUNE.SWEEP_OUT);
   // Amplitude takes the better of sweep and chord: a sweep straight along the
@@ -672,7 +787,7 @@ function judgeTarget(t, samples){
            chord:+arc.chord.toFixed(4),
            hip: hip ? { lat:+hip.lat.toFixed(4), drop:+hip.drop.toFixed(4),
                         toward: hip.toward === null ? null : +hip.toward.toFixed(4) } : null,
-           nearest:+hit.d.toFixed(4),
+           nearest:+hit.d.toFixed(4), passGapMs:+excess.toFixed(0),
            legCredit: legCredit === null ? null : +legCredit.toFixed(4),
            legsOk, rep, points, samples:win.length, limb:best.key };
 }
@@ -698,11 +813,17 @@ function makeHipMeter(){
       const d = Math.hypot(dx, dy);
       if(d >= TUNE.HIP_STEP){ hip += d; lat += Math.abs(dx); anchor = p; }
     },
-    get(){
-      const frac = Math.min(1, Math.min(hip / TUNE.SESSION_HIP, lat / TUNE.SESSION_LAT));
-      return { hip, lat, frac,
+    /* nLeg is how many sparks that wanted the legs have been PRESENTED, not
+       how many were hit: a player who ignores every one of them has still
+       been asked, and owes the travel. */
+    get(nLeg){
+      const needHip = TUNE.HIP_PER_LEG * (nLeg || 0);
+      const needLat = TUNE.LAT_PER_LEG * (nLeg || 0);
+      const frac = (nLeg > 0)
+        ? Math.min(1, Math.min(hip / needHip, lat / needLat)) : 1;
+      return { hip, lat, frac, needHip, needLat,
         mult: TUNE.FLOOR_KEEP + (1 - TUNE.FLOOR_KEEP) * frac,
-        ok: hip >= TUNE.SESSION_HIP && lat >= TUNE.SESSION_LAT };
+        ok: nLeg === 0 || (hip >= needHip && lat >= needLat) };
     },
     reset(){ anchor = null; hip = 0; lat = 0; buf = []; }
   };
@@ -716,22 +837,37 @@ function makeHipMeter(){
    Hands only in this milestone. Foot sparks add a whole separate tracking
    question and would not help answer the three questions.
 
-   These eight positions were CHOSEN BY SCREENING, not picked by eye. Each
+   These sixteen positions were CHOSEN BY SCREENING, not picked by eye. Each
    one was run through the simulation against four kinds of player, and a
    position only survived if an honest swing scores CLEAN, a spark marked
    legs cannot be reached by the arm alone, and the hip travel of a player
    who takes their body there separates from one who plants and folds. Three
    earlier candidates were dropped for sitting close enough to the resting
-   hand that nobody had to move at all. */
+   hand that nobody had to move at all.
+
+   The envelope is deliberately NOT widened past |bx| 1.35 and by 2.05. The
+   stance a set demands is derived from its most extreme sparks, so a spark
+   further out would push the player back until their body filled 60% of the
+   frame instead of 69% — and a smaller body in frame means more jitter
+   measured in torso units, which is the quantity the matcher actually breaks
+   on. Variety comes from filling the envelope, not from stretching it. */
 const TARGETS = [
-  { id:'high-L', name:'HIGH LEFT',  bx:-0.95, by: 2.05, legs:false },
-  { id:'side-R', name:'SIDE RIGHT', bx: 1.35, by:-0.65, legs:true  },
-  { id:'wide-R', name:'WIDE RIGHT', bx: 1.35, by: 1.15, legs:false },
-  { id:'deep-L', name:'DEEP LEFT',  bx:-0.65, by:-1.15, legs:true  },
-  { id:'high-R', name:'HIGH RIGHT', bx: 0.95, by: 2.05, legs:false },
-  { id:'side-L', name:'SIDE LEFT',  bx:-1.35, by:-0.65, legs:true  },
-  { id:'wide-L', name:'WIDE LEFT',  bx:-1.35, by: 1.15, legs:false },
-  { id:'deep-R', name:'DEEP RIGHT', bx: 0.65, by:-1.15, legs:true  },
+  { id:'high-L',  name:'HIGH LEFT',   bx:-0.95, by: 2.05, legs:false },
+  { id:'high-R',  name:'HIGH RIGHT',  bx: 0.95, by: 2.05, legs:false },
+  { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 2.05, legs:false },
+  { id:'cross-L', name:'ACROSS LEFT', bx:-1.25, by: 1.70, legs:false },
+  { id:'cross-R', name:'ACROSS RIGHT',bx: 1.25, by: 1.70, legs:false },
+  { id:'wide-L',  name:'WIDE LEFT',   bx:-1.35, by: 1.15, legs:false },
+  { id:'wide-R',  name:'WIDE RIGHT',  bx: 1.35, by: 1.15, legs:false },
+  { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.50, legs:false },
+  { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.50, legs:false },
+  { id:'side-L',  name:'SIDE LEFT',   bx:-1.35, by:-0.65, legs:true },
+  { id:'side-R',  name:'SIDE RIGHT',  bx: 1.35, by:-0.65, legs:true },
+  { id:'low-L',   name:'LOW LEFT',    bx:-1.10, by:-0.95, legs:true },
+  { id:'low-R',   name:'LOW RIGHT',   bx: 1.10, by:-0.95, legs:true },
+  { id:'deep-L',  name:'DEEP LEFT',   bx:-0.65, by:-1.15, legs:true },
+  { id:'deep-R',  name:'DEEP RIGHT',  bx: 0.65, by:-1.15, legs:true },
+  { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.30, legs:true },
 ];
 
 /* How far back the player has to stand, COMPUTED from the sparks above rather
@@ -889,7 +1025,9 @@ const ui = {
   oEnd:document.getElementById('oEnd'), hud:document.getElementById('hud'),
   legs:document.getElementById('legs'), legsFill:document.getElementById('legsFill'),
   legsTxt:document.getElementById('legsTxt'),
-  hNo:document.getElementById('hNo'), hScore:document.getElementById('hScore'),
+  hTime:document.getElementById('hTime'), hSec:document.getElementById('hSec'),
+  hScore:document.getElementById('hScore'), streak:document.getElementById('streak'),
+  hStreak:document.getElementById('hStreak'), hStreakN:document.getElementById('hStreakN'),
   loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
   fitMsg:document.getElementById('fitMsg'),
   endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
@@ -897,13 +1035,123 @@ const ui = {
 };
 
 let state = 'idle';
-let run = 0, score = 0, tNo = 0, target = null, results = [];
+let run = 0, score = 0, target = null, results = [];
 let samples = [];                     // recent observations, capture-stamped
 let hipMeter = makeHipMeter();
 let wake = null;
-let pendingSpawn = 0;
+let streak = 0, bestStreak = 0, sparkNo = 0, legShown = 0;
+let shake = 0, parts = [], fading = [];
+
+/* ================= the song =================
+   A run is a track. Three minutes, built like one: a count-in, four sections
+   that add density and legwork, a breather, a swell, and a finale.
+
+   Everything the player has to do is on the grid, because a spark landing on
+   the beat reads as music rather than as a demand. That is safe to do ONLY
+   because the timing of the swing is not scored — see the block above the
+   execution-speed fields. If timing ever became a score, putting sparks on
+   the beat would turn a 150-250 ms pipeline into a rhythm game that cannot
+   be played.
+
+   Lifetimes do NOT shorten as the track builds. They are an experimental
+   condition, not a difficulty knob: 1.3 s is condition one and the other
+   conditions get measured on a real body before anything moves. Difficulty
+   comes from how often sparks arrive and how many want the legs.          */
+const BPM = 100;
+const BEAT = 60 / BPM;                       // seconds
+const BAR = BEAT * 4;
+
+const SECTIONS = [
+  // bars, beats between sparks, share of sparks that want the legs, label
+  { bars: 4,  cadence: 0,   legs: 0,    name:'' },          // count-in, no sparks
+  { bars: 16, cadence: 4,   legs: 0.20, name:'WARM' },
+  { bars: 16, cadence: 4,   legs: 0.35, name:'BUILD' },
+  { bars: 16, cadence: 3,   legs: 0.45, name:'PUSH' },
+  { bars: 12, cadence: 3,   legs: 0.55, name:'PEAK' },
+  { bars: 6,  cadence: 4,   legs: 0.30, name:'BREATHE' },
+  { bars: 2,  cadence: 0,   legs: 0,    name:'' },          // swell, no sparks
+  { bars: 3,  cadence: 0,   legs: 0,    name:'FINALE' },    // the finale spark
+];
+const TOTAL_BARS = SECTIONS.reduce((a, s) => a + s.bars, 0);
+const RUN_SECONDS = TOTAL_BARS * BAR;
+
+const FINALE_ID = 'floor-C';     // the one no amount of folding can reach
+const FINALE_LIFETIME = 2200;
+const FINALE_MULT = 3;
+
+const LEG_POOL = TARGETS.filter(t => t.legs && t.id !== FINALE_ID);
+const ARM_POOL = TARGETS.filter(t => !t.legs);
+
+/* Which spark comes next. Never the same one twice running, and never the
+   same side twice running when there is a choice, because two sparks on one
+   side is a reach and then another reach, while alternating is travel. */
+let lastPick = null;
+function pickSpark(legShare){
+  const pool = (Math.random() < legShare ? LEG_POOL : ARM_POOL).slice();
+  const side = lastPick ? Math.sign(lastPick.bx) : 0;
+  let choice = pool.filter(t => t.id !== (lastPick && lastPick.id) && Math.sign(t.bx) !== side);
+  if(!choice.length) choice = pool.filter(t => t.id !== (lastPick && lastPick.id));
+  if(!choice.length) choice = pool;
+  const t = choice[Math.floor(Math.random() * choice.length)];
+  lastPick = t;
+  return t;
+}
+
+/* The schedule: every spark in the run, as a bar/beat position, worked out
+   once at the start so the track has a shape rather than a dice roll per
+   spark. */
+/* One continuous walk down the beat, not a fresh count per section.
+
+   Counting from zero inside each section put sparks one beat apart across a
+   boundary — 0.6 s, against a 1.3 s lifetime — so the second would light
+   while the first was still alive, and with one slot holding the spark that
+   is due, the earlier one would simply have vanished. Walking the whole
+   track once means the gap is never shorter than the cadence that emitted
+   the spark. */
+function sectionAtBeat(b){
+  let bar = 0;
+  for(const s of SECTIONS){
+    if(b < (bar + s.bars) * 4) return s;
+    bar += s.bars;
+  }
+  return null;
+}
+function buildSchedule(){
+  const out = [];
+  const totalBeats = TOTAL_BARS * 4;
+  for(let beat = 0; beat < totalBeats; ){
+    const s = sectionAtBeat(beat);
+    if(!s) break;
+    if(s.cadence > 0){
+      out.push({ at: beat * BEAT, def: pickSpark(s.legs), finale:false });
+      beat += s.cadence;
+    } else beat += 1;
+  }
+  // the finale sits one beat into its own section, with the swell before it
+  let bar = 0;
+  for(const s of SECTIONS){
+    if(s.name === 'FINALE'){
+      out.push({ at: (bar * 4 + 1) * BEAT,
+                 def: TARGETS.find(t => t.id === FINALE_ID), finale:true });
+      break;
+    }
+    bar += s.bars;
+  }
+  return out.sort((x, y) => x.at - y.at);
+}
+let schedule = [], schedIdx = 0, songStart = 0;
+
+function sectionAt(sec){
+  let bar = 0;
+  for(const s of SECTIONS){
+    if(sec < (bar + s.bars) * BAR) return s;
+    bar += s.bars;
+  }
+  return SECTIONS[SECTIONS.length - 1];
+}
 
 function nowClock(){ return performance.now(); }
+function songTime(){ return actx ? (actx.currentTime - songStart) : 0; }
 
 function captureToClock(vt, ready){
   const capMs = vt * 1000;
@@ -917,57 +1165,116 @@ function lastReadable(){
   return null;
 }
 
-function spawnTarget(){
-  if(tNo >= TARGETS.length){ endRun(); return; }
-  const def = TARGETS[tNo];
+function spawnTarget(entry){
   const o = lastReadable();
-  if(!o){ pendingSpawn = nowClock() + 120; return; }   // no body yet: wait, do not guess
-  const at = placeTarget(def, o);
-  if(!at){ pendingSpawn = nowClock() + 120; return; }
+  if(!o) return false;                 // no body yet: skip it, never guess one
+  const at = placeTarget(entry.def, o);
+  if(!at) return false;
   const lightAt = nowClock();
-  target = { def, at, lightAt, dieAt: lightAt + LIFETIME_MS,
-             legs: def.legs, judged:null, flash:0 };
-  pendingSpawn = 0;
-  recPush({ k:'spark_light', t:lightAt, no:tNo+1, id:def.id, legs:def.legs,
-            body:{ bx:def.bx, by:def.by }, at:{ x:+at.x.toFixed(4), y:+at.y.toFixed(4) },
-            torso:+o.torso.toFixed(4), lifetime:LIFETIME_MS });
+  const life = entry.finale ? FINALE_LIFETIME : LIFETIME_MS;
+  sparkNo++;
+  if(entry.def.legs) legShown++;
+  target = { def: entry.def, at, lightAt, dieAt: lightAt + life, life,
+             legs: entry.def.legs, finale: entry.finale,
+             judged:null, flash:0, caught:false };
+  recPush({ k:'spark_light', t:lightAt, no:sparkNo, id:entry.def.id, legs:entry.def.legs,
+            finale:entry.finale, songT:+songTime().toFixed(3),
+            body:{ bx:entry.def.bx, by:entry.def.by },
+            at:{ x:+at.x.toFixed(4), y:+at.y.toFixed(4) },
+            torso:+o.torso.toFixed(4), lifetime:life });
+  return true;
 }
 
-function judgeNow(){
-  const r = judgeTarget(target, samples);
-  target.judged = r;
-  results.push({ id:target.def.id, isLeg:target.def.legs, ...r });
-  score += r.points;
+/* The reward, fired at judgment. */
+function burst(t, r){
+  const q = Math.max(0, Math.min(1, r.quality || 0));
+  const leg = t.legs ? (r.legCredit || 0) : 0;
+  const p = px(t.at);
+  const o = lastReadable();
+  const rad = (o ? o.torso * videoFit().dh : Math.min(W,H)*0.18) * TUNE.HIT_R;
+  const n = Math.round((t.finale ? 90 : 26) + q * (t.finale ? 70 : 44) + leg * 26);
+  const warm = t.legs ? [79,214,224] : [255,176,46];
+  /* Speeds are in pixels per SECOND and sized off the spark's own radius, so
+     the burst is the same gesture on any phone. Wanted: reach about two and
+     a half times the spark radius within a quarter second and be gone inside
+     two thirds of one. Against the drag below that needs a mean near six to
+     fourteen radii per second — an earlier version used a fraction of a
+     radius and the particles travelled ten pixels, which rendered as a solid
+     white ball sitting on the player's hand. */
+  for(let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2;
+    const sp = rad * (6 + Math.random() * 8) * (0.65 + q * 0.5) * (t.finale ? 1.4 : 1);
+    const white = Math.random() < 0.22;
+    parts.push({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - rad*2,
+                 life:1, decay:1.6 + Math.random()*1.4,
+                 size:(1.0 + Math.random()*2.2) * (t.finale ? 1.5 : 1),
+                 col: white ? [255,250,235] : warm });
+  }
+  // small on purpose: the player's head is already moving, so a big shake
+  // reads as the camera losing them rather than as impact
+  shake = Math.min(1, 0.35 + q * 0.5 + (t.finale ? 0.5 : 0));
+}
+
+function judgeNow(t){
+  const r = judgeTarget(t, samples);
+  t.judged = r;
+  results.push({ id:t.def.id, isLeg:t.def.legs, finale:t.finale, ...r });
+
+  /* UNSCORED never breaks a streak. The camera not seeing the player is not
+     the player failing, and taking their music away for it would be the game
+     blaming them for its own eyes. */
+  let gained = 0;
+  if(r.verdict === 'CLEAN' || r.verdict === 'CLIPPED'){
+    streak++;
+    bestStreak = Math.max(bestStreak, streak);
+    const mult = (1 + Math.min(streak, 12) * 0.05) * (t.finale ? FINALE_MULT : 1);
+    gained = Math.round(r.points * mult);
+    score += gained;
+    burst(t, r);
+    chime(streak, r.quality, t.finale);
+  } else if(r.verdict === 'MISSED'){
+    streak = 0;
+    blip(170, 0.2, 0.26);
+  } else {
+    blip(330, 0.09, 0.16);     // unscored: a neutral tick, streak untouched
+  }
   ui.hScore.textContent = score;
-  recPush({ k:'spark_judge', t:nowClock(), no:tNo+1, id:target.def.id,
-            latencyAssumed:POSE_LATENCY_MS, lightAt:target.lightAt, dieAt:target.dieAt, ...r });
-  target.flash = 1;
-  if(r.verdict === 'CLEAN') blip(920, 0.2, 0.22);
-  else if(r.verdict === 'CLIPPED') blip(560, 0.17, 0.2);
-  else if(r.verdict === 'MISSED') blip(190, 0.22, 0.26);
-  else blip(340, 0.1, 0.18);
+  setStreakUI();
+  recPush({ k:'spark_judge', t:nowClock(), no:sparkNo, id:t.def.id,
+            latencyAssumed:POSE_LATENCY_MS, lightAt:t.lightAt, dieAt:t.dieAt,
+            early: nowClock() < t.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40,
+            streak, gained, ...r });
+  t.flash = 1;
+}
+
+function setStreakUI(){
+  const mult = 1 + Math.min(streak, 12) * 0.05;
+  ui.hStreak.textContent = streak >= 2 ? ('×' + mult.toFixed(2)) : '';
+  ui.hStreakN.textContent = streak >= 2 ? (streak + ' IN A ROW') : '';
 }
 
 function endRun(){
   state = 'over'; target = null;
-  ui.hud.hidden = true; ui.legs.hidden = true;
+  stopMusic();
+  ui.hud.hidden = true; ui.legs.hidden = true; ui.streak.hidden = true;
   const clean = results.filter(r=>r.verdict==='CLEAN').length;
   const reps  = results.filter(r=>r.rep).length;
   const uns   = results.filter(r=>r.verdict==='UNSCORED').length;
   const legRes = results.filter(r=>r.isLeg);
   const legHit = legRes.filter(r=>r.legsOk === true).length;
-  const hm = hipMeter.get();
+  const hm = hipMeter.get(legShown);
   const final = Math.round(score * hm.mult);
-  const cleared = hm.ok && reps >= Math.ceil(TARGETS.length * TUNE.CLEAR_REPS);
+  const cleared = hm.ok && reps >= Math.ceil(results.length * TUNE.CLEAR_REPS);
   ui.endScore.textContent = final;
   ui.endTag.textContent = cleared ? ('RUN ' + run + ' CLEARED') : ('RUN ' + run + ' COMPLETE');
   const rows = [
     ['Clean strikes', clean + ' of ' + results.length],
     ['Real repetitions', reps + ' of ' + results.length],
     ['Lunges landed', legHit + ' of ' + legRes.length],
+    ['Best streak', String(bestStreak)],
   ];
-  if(hm.mult < 0.999) rows.push(['Struck', String(score) + '  \u00d7' + hm.mult.toFixed(2) + ' legwork']);
   if(uns) rows.push(['Not observed', uns + (uns===1?' spark':' sparks')]);
+  if(hm.mult < 0.999) rows.push(['Struck', String(score) + '  ×' + hm.mult.toFixed(2) + ' legwork']);
   ui.endRows.innerHTML = rows.map(r=>'<tr><td class="k">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('')
     + '<tr><td class="k">Legwork floor</td><td class="v '+(hm.ok?'good':'bad')+'">'
     + (hm.ok ? 'CLEARED' : 'NOT CLEARED') + '</td></tr>';
@@ -976,9 +1283,10 @@ function endRun(){
     : 'The run did not travel enough to count as a workout, so most of what you struck did not pay. The low sparks want you to take your body there, not fold at the waist.';
   ui.oEnd.hidden = false;
   recPush({ k:'run_end', t:nowClock(), run, raw:score, final, cleared, clean, reps,
-            unscored:uns, legHit, legTotal:legRes.length,
-            hip:+hm.hip.toFixed(3), lat:+hm.lat.toFixed(3), frac:+hm.frac.toFixed(3),
-            mult:+hm.mult.toFixed(3), floorOk:hm.ok, recDropped });
+            unscored:uns, legHit, legTotal:legRes.length, bestStreak,
+            sparks:results.length, hip:+hm.hip.toFixed(3), lat:+hm.lat.toFixed(3),
+            frac:+hm.frac.toFixed(3), mult:+hm.mult.toFixed(3), floorOk:hm.ok,
+            legShown, needHip:+hm.needHip.toFixed(2), needLat:+hm.needLat.toFixed(2), recDropped });
 }
 
 /* ---- drawing ---- */
@@ -1024,37 +1332,97 @@ function drawSpark(t, now){
   // the target that is scored
   const torsoPx = o ? o.torso * videoFit().dh : Math.min(W,H)*0.18;
   const r = torsoPx * TUNE.HIT_R;
-  const life = Math.max(0, Math.min(1, (t.dieAt - now) / LIFETIME_MS));
+  const life = Math.max(0, Math.min(1, (t.dieAt - now) / t.life));
   const col = t.legs ? '79,214,224' : '255,176,46';
+  const age = (now - t.lightAt) / 260;
+  const pop = age < 1 ? 1 + (1 - age) * 0.5 : 1;     // it arrives, it does not fade in
+  const R = r * pop * (t.caught ? 0.72 : 1);
+  const bright = t.caught ? 1 : 0.85;
 
   ctx.save();
-  // glow
-  const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, r*1.5);
-  g.addColorStop(0, 'rgba('+col+',.42)');
+  if(t.finale){
+    ctx.strokeStyle = 'rgba(255,250,235,.5)';
+    ctx.lineWidth = Math.max(2, R*0.05);
+    ctx.beginPath(); ctx.arc(q.x, q.y, R*1.75 + Math.sin(now/120)*R*0.06, 0, 7); ctx.stroke();
+  }
+  const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, R*1.5);
+  g.addColorStop(0, 'rgba('+col+','+(t.caught ? .72 : .42)+')');
   g.addColorStop(1, 'rgba('+col+',0)');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, r*1.5, 0, 7); ctx.fill();
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, R*1.5, 0, 7); ctx.fill();
   // the hit radius, drawn as what it is
-  ctx.strokeStyle = 'rgba('+col+',.30)'; ctx.lineWidth = Math.max(1.5, r*0.04);
-  ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 7); ctx.stroke();
+  ctx.strokeStyle = 'rgba('+col+',.30)'; ctx.lineWidth = Math.max(1.5, R*0.04);
+  ctx.beginPath(); ctx.arc(q.x, q.y, R, 0, 7); ctx.stroke();
   // the inner zone that earns full credit
-  ctx.strokeStyle = 'rgba('+col+',.85)'; ctx.lineWidth = Math.max(3, r*0.09);
-  ctx.beginPath(); ctx.arc(q.x, q.y, r*(TUNE.CENTRE_R/TUNE.HIT_R), 0, 7); ctx.stroke();
+  ctx.strokeStyle = 'rgba('+col+','+bright+')'; ctx.lineWidth = Math.max(3, R*0.09);
+  ctx.beginPath(); ctx.arc(q.x, q.y, R*(TUNE.CENTRE_R/TUNE.HIT_R), 0, 7); ctx.stroke();
   // life remaining, counting down around the hit radius
-  ctx.strokeStyle = 'rgba('+col+',.95)'; ctx.lineWidth = Math.max(4, r*0.12);
+  ctx.strokeStyle = 'rgba('+col+',.95)'; ctx.lineWidth = Math.max(4, R*0.12);
   ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.arc(q.x, q.y, r*1.2, -Math.PI/2, -Math.PI/2 + life*Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(q.x, q.y, R*1.2, -Math.PI/2, -Math.PI/2 + life*Math.PI*2); ctx.stroke();
   if(t.legs){
-    ctx.fillStyle = 'rgba('+col+',.9)'; ctx.font = Math.round(Math.min(W,H)*0.028)+'px Georgia';
+    ctx.fillStyle = 'rgba('+col+',.9)';
+    ctx.font = Math.round(Math.min(W,H)*(t.finale?0.034:0.028))+'px Georgia';
     ctx.textAlign = 'center';
-    ctx.fillText('LUNGE', q.x, q.y + r*1.9);
+    ctx.fillText(t.finale ? 'FINALE' : 'LUNGE', q.x, q.y + R*1.9);
   }
   ctx.restore();
 }
 
+/* Has the hand the player can SEE reached the spark they can see?
+
+   This is a presentation fact, not a score. It fires off the drawn body,
+   which is a fifth of a second behind the body that gets judged, so it can
+   never be used to decide anything. What it does is close the gap: the spark
+   reacts the instant their hand is in it, and the burst and the points land
+   when the evidence has actually arrived. Without it the spark hangs there
+   looking untouched while the player knows perfectly well they hit it. */
+function checkCaught(t){
+  if(t.caught || !pose) return;
+  const o = lastReadable();
+  if(!o) return;
+  const q = px(t.at);
+  const rad = o.torso * videoFit().dh * TUNE.HIT_R;
+  for(const k of [J.wrA, J.wrB]){
+    const p = read(pose, k);
+    if(!p) continue;
+    const w = px(p);
+    if(Math.hypot(w.x - q.x, w.y - q.y) <= rad){
+      t.caught = true;
+      blip(1320, 0.05, 0.07);        // a tick, not a reward
+      return;
+    }
+  }
+}
+
+function drawParts(dt){
+  if(!parts.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for(let i = parts.length - 1; i >= 0; i--){
+    const p = parts[i];
+    p.life -= p.decay * dt;
+    if(p.life <= 0){ parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 900 * dt;              // they fall
+    p.vx *= 0.98; p.vy *= 0.98;
+    ctx.fillStyle = 'rgba('+p.col[0]+','+p.col[1]+','+p.col[2]+','+p.life.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.4 + p.life*0.8), 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* The verdict, as a line that does not block the next spark.
+
+   Gap puts a full screen flash here and masks the moment of judgment, because
+   the body on screen is behind the body that was judged. That still holds,
+   so there is no animation of the hand going through anything. But a full
+   screen flash every spark would strobe at this density, so the verdict is a
+   small line where the spark was. */
 function drawVerdict(t){
   const r = t.judged; if(!r) return;
-  const a = Math.min(1, t.flash*1.6);
-  const txt = r.verdict === 'CLEAN' ? 'STRUCK'
+  const a = Math.min(1, t.flash * 1.5);
+  const q = px(t.at);
+  const txt = r.verdict === 'CLEAN' ? (t.finale ? 'FINALE' : 'STRUCK')
             : r.verdict === 'CLIPPED' ? 'CLIPPED'
             : r.verdict === 'MISSED' ? 'MISSED'
             : 'NOT SEEN';
@@ -1063,20 +1431,18 @@ function drawVerdict(t){
             : r.verdict === 'MISSED' ? '#d4635a' : '#8a90ad';
   ctx.save();
   ctx.globalAlpha = a;
-  ctx.fillStyle = 'rgba(7,8,15,'+(0.42*a)+')'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle = col; ctx.textAlign='center';
-  ctx.font = Math.round(Math.min(W,H)*0.105)+'px Georgia';
-  ctx.fillText(txt, W/2, H*0.46);
-  ctx.font = Math.round(Math.min(W,H)*0.033)+'px Georgia';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = col;
+  ctx.font = Math.round(Math.min(W,H) * (t.finale ? 0.062 : 0.045)) + 'px Georgia';
+  const rise = (1 - t.flash) * Math.min(W,H) * 0.06;
+  ctx.fillText(txt, q.x, q.y - rise);
+  ctx.font = Math.round(Math.min(W,H) * 0.026) + 'px Georgia';
   if(r.verdict === 'UNSCORED'){
     ctx.fillStyle = '#8a90ad';
-    ctx.fillText('not your fault — this one does not count', W/2, H*0.53);
-  } else if(r.rep){
-    ctx.fillStyle = '#7fc08a';
-    ctx.fillText(r.legsOk ? 'counted — legs did the work' : 'counted', W/2, H*0.53);
-  } else if(r.legsOk === false){
+    ctx.fillText('not your fault', q.x, q.y - rise + Math.min(W,H)*0.035);
+  } else if(r.legsOk === false && t.legs){
     ctx.fillStyle = '#ffb02e';
-    ctx.fillText('reached, but not with your legs', W/2, H*0.53);
+    ctx.fillText('not with your legs', q.x, q.y - rise + Math.min(W,H)*0.035);
   }
   ctx.restore();
 }
@@ -1114,9 +1480,171 @@ function fitMessage(){
   }
 }
 
-/* ---- audio: small, synthesised, no files ---- */
-let actx = null;
-function initAudio(){ try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} }
+/* ---- audio: synthesised, no files, no licences ----
+
+   The track is built out of oscillators at runtime. Five layers, and which
+   of them are playing is decided by the streak: a pad underneath always, then
+   drums, bass, a melody and a shimmer on top as the player keeps landing
+   sparks. Break the streak and the layers come off in the same order they
+   went on. Nothing is said about how well they are doing; they hear it.
+
+   Scheduled against actx.currentTime with a lookahead, never against
+   setTimeout or rAF, because the audio clock is the only one that does not
+   drift when the page is busy. The same clock carries the song position that
+   decides when sparks appear.                                            */
+let actx = null, master = null, layerGain = {}, schedTimer = null, schedAt = 0;
+const LOOKAHEAD = 0.12, TICK = 25;
+
+function initAudio(){
+  try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
+  master = actx.createGain();
+  master.gain.value = 0.9;
+  master.connect(actx.destination);
+  for(const k of ['pad','drum','bass','arp','shine']){
+    const g = actx.createGain();
+    g.gain.value = (k === 'pad') ? 1 : 0;
+    g.connect(master);
+    layerGain[k] = g;
+  }
+}
+
+// how many layers the current streak has earned
+const LAYER_AT = { pad:0, drum:1, bass:3, arp:6, shine:10 };
+let layerStreak = -1;
+function updateLayers(){
+  if(!actx || streak === layerStreak) return;
+  layerStreak = streak;
+  for(const k in LAYER_AT){
+    const want = streak >= LAYER_AT[k] ? 1 : 0;
+    const g = layerGain[k].gain;
+    g.cancelScheduledValues(actx.currentTime);
+    g.setTargetAtTime(want, actx.currentTime, 0.18);
+  }
+}
+
+function voice(dest, type, freq, t, dur, peak, detune){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if(detune) o.detune.setValueAtTime(detune, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(dest);
+  o.start(t); o.stop(t + dur + 0.04);
+}
+function noise(dest, t, dur, peak, hp){
+  const n = Math.floor(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i = 0; i < n; i++) d[i] = (Math.random()*2 - 1) * (1 - i/n);
+  const s = actx.createBufferSource(); s.buffer = buf;
+  const f = actx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp || 6000;
+  const g = actx.createGain(); g.gain.value = peak;
+  s.connect(f); f.connect(g); g.connect(dest);
+  s.start(t);
+}
+
+// A minor, four bars. Roots and the pentatonic the melody walks.
+const ROOTS = [110.00, 87.31, 130.81, 98.00];          // Am F C G
+const CHORD = [[0,3,7],[0,4,7],[0,4,7],[0,4,7]];
+const PENT  = [0, 3, 5, 7, 10];
+const semi = n => Math.pow(2, n/12);
+
+function scheduleBeat(bIndex, t){
+  if(!actx) return;
+  const bar = Math.floor(bIndex / 4), beat = bIndex % 4;
+  const root = ROOTS[bar % 4];
+  const sec = sectionAt(bIndex * BEAT);
+  const peak = sec.name === 'PEAK' || sec.name === 'FINALE';
+
+  if(beat === 0){
+    for(const iv of CHORD[bar % 4]){
+      voice(layerGain.pad, 'triangle', root * 2 * semi(iv), t, BAR * 1.05, 0.055, -4);
+      voice(layerGain.pad, 'sine',     root * semi(iv),     t, BAR * 1.05, 0.045, +5);
+    }
+  }
+  // drums
+  if(beat === 0 || beat === 2){
+    const k = actx.createOscillator(), g = actx.createGain();
+    k.type = 'sine';
+    k.frequency.setValueAtTime(130, t); k.frequency.exponentialRampToValueAtTime(46, t + 0.11);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.21);
+    k.connect(g); g.connect(layerGain.drum); k.start(t); k.stop(t + 0.26);
+  }
+  if(beat === 1 || beat === 3) noise(layerGain.drum, t, 0.09, 0.10, 2200);
+  noise(layerGain.drum, t + BEAT/2, 0.035, 0.045, 8000);
+  if(peak) noise(layerGain.drum, t + BEAT/4, 0.03, 0.03, 9000);
+
+  // bass
+  if(beat === 0) voice(layerGain.bass, 'sawtooth', root/2, t, BEAT*1.6, 0.11);
+  if(beat === 2) voice(layerGain.bass, 'sawtooth', root/2, t, BEAT*0.7, 0.08);
+
+  // melody: pentatonic sixteenths, denser at the peak
+  const steps = peak ? 4 : 2;
+  for(let i = 0; i < steps; i++){
+    const n = PENT[(bIndex * steps + i * 3) % PENT.length];
+    voice(layerGain.arp, 'square', root * 2 * semi(n), t + i * (BEAT/steps),
+          BEAT/steps * 0.8, 0.035);
+  }
+  if(beat === 0) voice(layerGain.shine, 'sine', root * 6 * semi(PENT[bar % PENT.length]),
+                       t, BAR * 0.8, 0.028);
+}
+
+/* The spark schedule rides the same clock. The scheduler marks a spark as due
+   at a wall-clock moment; the draw loop lights it on the first frame past
+   that, and the moment it actually appeared is what gets recorded as lightAt.
+   Up to one frame of slip against the beat is inaudible; claiming a spark
+   appeared when it did not would not be. */
+let dueSpark = null;
+
+function scheduler(){
+  if(!actx || state !== 'play') return;
+  while(schedAt < actx.currentTime - songStart + LOOKAHEAD){
+    const bIndex = Math.round(schedAt / BEAT);
+    scheduleBeat(bIndex, songStart + schedAt);
+    schedAt += BEAT;
+  }
+  const sT = songTime();
+  while(schedIdx < schedule.length && schedule[schedIdx].at <= sT + 0.05){
+    dueSpark = schedule[schedIdx++];
+  }
+  if(sT >= RUN_SECONDS && state === 'play' && !target) endRun();
+}
+
+function startMusic(){
+  if(!actx) return;
+  songStart = actx.currentTime + 0.12;
+  schedAt = 0;
+  for(const k in layerGain) layerGain[k].gain.value = (k === 'pad') ? 1 : 0;
+  layerStreak = -1;
+  if(schedTimer) clearInterval(schedTimer);
+  schedTimer = setInterval(scheduler, TICK);
+}
+function stopMusic(){
+  if(schedTimer){ clearInterval(schedTimer); schedTimer = null; }
+  if(!actx) return;
+  for(const k in layerGain){
+    const g = layerGain[k].gain;
+    g.cancelScheduledValues(actx.currentTime);
+    g.setTargetAtTime(0, actx.currentTime, 0.25);
+  }
+}
+
+/* The hit: a chime that climbs the pentatonic as the streak grows, so a long
+   run of sparks walks up the scale. */
+function chime(st, quality, finale){
+  if(!actx) return;
+  const step = PENT[Math.min(st - 1, 20) % PENT.length];
+  const oct = Math.min(3, Math.floor((st - 1) / PENT.length));
+  const f = 440 * semi(step) * Math.pow(2, oct) * (finale ? 2 : 1);
+  const now = actx.currentTime;
+  voice(master, 'sine', f, now, finale ? 1.1 : 0.42, 0.16 + 0.1 * (quality || 0));
+  voice(master, 'triangle', f * 2, now + 0.015, finale ? 0.7 : 0.26, 0.05);
+  if(finale) voice(master, 'sine', f * 1.5, now + 0.05, 1.0, 0.09);
+}
+
 function blip(f, g, d){
   if(!actx) return;
   const o = actx.createOscillator(), v = actx.createGain();
@@ -1124,7 +1652,7 @@ function blip(f, g, d){
   v.gain.setValueAtTime(0, actx.currentTime);
   v.gain.linearRampToValueAtTime(g, actx.currentTime+0.012);
   v.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+d);
-  o.connect(v); v.connect(actx.destination); o.start(); o.stop(actx.currentTime+d+0.05);
+  o.connect(v); v.connect(master || actx.destination); o.start(); o.stop(actx.currentTime+d+0.05);
 }
 
 async function keepAwake(){
@@ -1135,10 +1663,12 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---- the loop ---- */
-let lastFrameAt = 0;
+let lastFrameAt = 0, lastRaf = 0;
 
 function frame(now){
   requestAnimationFrame(frame);
+  const dt = lastRaf ? Math.min(0.05, (now - lastRaf) / 1000) : 0.016;
+  lastRaf = now;
   if(video.readyState < 2 || !landmarker){ return; }
 
   let fresh = false, clockT = now;
@@ -1169,12 +1699,15 @@ function frame(now){
   if(state === 'fit'){
     drawMirror(0.45); drawPlayer(0.9);
     const ok = checkFit(now);
-    ui.fitMsg.textContent = ok ? 'Good. Starting…' : 'Step back until your knees and feet are in the picture.';
+    ui.fitMsg.textContent = fitMessage();
     if(ok){ ui.oFit.hidden = true; startRun(); }
     return;
   }
 
-  if(state !== 'play'){ if(state==='over'){ drawMirror(0.75); } return; }
+  if(state !== 'play'){
+    if(state === 'over'){ drawMirror(0.75); drawParts(dt); }
+    return;
+  }
 
   // one observation per fresh frame, carrying its own capture time
   if(fresh && pose){
@@ -1182,47 +1715,95 @@ function frame(now){
     samples.push({ t: clockT, o });
     if(samples.length > 400) samples.shift();
     hipMeter.push(o);
-    const hm = hipMeter.get();
+    const hm = hipMeter.get(legShown);
     ui.legsFill.style.width = Math.round(hm.frac*100) + '%';
     ui.legsTxt.textContent = hm.ok ? 'LEGWORK — FLOOR CLEARED' : 'LEGWORK';
   }
 
+  // the shake is applied to the world, never to the overlays, so the score
+  // and the legwork bar stay still while the picture moves
+  ctx.save();
+  if(shake > 0){
+    shake = Math.max(0, shake - dt * 4.5);
+    const m = shake * shake * Math.min(W,H) * 0.012;
+    ctx.translate((Math.random()-0.5)*m, (Math.random()-0.5)*m);
+  }
   drawMirror(0.52);
   drawPlayer(0.6);
 
-  if(pendingSpawn && now >= pendingSpawn) spawnTarget();
+  // a spark falls due on the song clock; it lights on the next frame, and the
+  // moment it actually appeared is what is recorded
+  /* A spark that falls due while the previous one is still live, or while
+     the camera cannot see the player, is DROPPED rather than queued. A
+     backlog would hand the player a burst of sparks at once through no fault
+     of theirs, and would put the track out of step with its own music. It is
+     recorded, so a thin run can be explained rather than guessed at. */
+  if(dueSpark){
+    if(target){
+      recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'previous still live' });
+      dueSpark = null;
+    } else if(spawnTarget(dueSpark)) dueSpark = null;
+    else if(now - (dueSpark.firstTried || (dueSpark.firstTried = now)) > 400){
+      recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'no body visible' });
+      dueSpark = null;
+    }
+  }
 
+  /* A judged spark stops being the spark and goes off to fade on its own.
+     Holding the next one back until the verdict finished animating cost most
+     of a second at three-beat cadence, which is longer than the gap between
+     sparks: the track would have fallen behind its own music. */
   if(target){
     if(!target.judged){
+      checkCaught(target);
       drawSpark(target, now);
-      // The spark DIES at dieAt, but the landmarks describing the body over
-      // its lifetime do not exist until the pipeline has run. Judging at
-      // death reads an interval the estimates have not reached yet, which in
-      // Gap returned UNSCORED on every wall of a round while every unit test
-      // passed. Wait for the evidence, then judge.
-      if(now >= target.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40) judgeNow();
-    } else {
-      drawVerdict(target);
-      target.flash -= 0.045;
-      if(target.flash <= 0){
-        tNo++; target = null;
-        ui.hNo.textContent = Math.min(tNo+1, TARGETS.length) + '/' + TARGETS.length;
-        setTimeout(spawnTarget, GAP_MS);
+      /* Judge as soon as the evidence for a completed strike has arrived,
+         and otherwise at the deadline. The deadline is the old behaviour and
+         is still the backstop: the spark ARRIVES at dieAt, but the landmarks
+         describing the body over its lifetime do not exist until the pipeline
+         has run. Judging at death reads an interval the estimates have not
+         reached yet, which in Gap returned UNSCORED on every wall of a round
+         while every unit test passed. */
+      if(readyToJudge(target, samples) ||
+         now >= target.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40){
+        judgeNow(target);
+        fading.push(target);
+        target = null;
       }
     }
   }
+  for(let i = fading.length - 1; i >= 0; i--){
+    const f = fading[i];
+    drawVerdict(f);
+    f.flash -= dt * 1.6;
+    if(f.flash <= 0) fading.splice(i, 1);
+  }
+  drawParts(dt);
+  ctx.restore();
+
+  // the clock across the top, outside the shake
+  const left = Math.max(0, RUN_SECONDS - songTime());
+  ui.hTime.textContent = Math.floor(left/60) + ':' + String(Math.floor(left%60)).padStart(2,'0');
+  const sec = sectionAt(songTime());
+  if(sec.name && ui.hSec.textContent !== sec.name) ui.hSec.textContent = sec.name;
+  updateLayers();
 }
 
 function startRun(){
-  run++; score = 0; tNo = 0; results = []; samples = []; pendingSpawn = 0;
+  run++; score = 0; results = []; samples = []; streak = 0; bestStreak = 0;
+  sparkNo = 0; legShown = 0; parts = []; fading = []; shake = 0; target = null; dueSpark = null;
+  lastPick = null; schedIdx = 0;
+  schedule = buildSchedule();
   hipMeter.reset();
   state = 'play';
-  ui.hud.hidden = false; ui.legs.hidden = false;
+  ui.hud.hidden = false; ui.legs.hidden = false; ui.streak.hidden = false;
   ui.hScore.textContent = '0';
-  ui.hNo.textContent = '1/' + TARGETS.length;
+  ui.hSec.textContent = '';
   ui.legsFill.style.width = '0%'; ui.legsTxt.textContent = 'LEGWORK';
-  recPush({ k:'run_start', t:nowClock(), run, targets: TARGETS.map(t=>t.id) });
-  setTimeout(spawnTarget, 900);
+  setStreakUI();
+  startMusic();
+  recPush({ k:'run_start', t:nowClock(), run, bpm:BPM, runSeconds:+RUN_SECONDS.toFixed(1),
+            sparks:schedule.length, schedule: schedule.map(s=>({ at:+s.at.toFixed(2), id:s.def.id, finale:s.finale })) });
 }
 
 /* ---- starting up ---- */
