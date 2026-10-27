@@ -1534,7 +1534,27 @@ const BAR = BEAT * 4;
    gone in 1.3 s. The run OPENS slowly on purpose — six beats apart, one
    spark at a time, five full seconds to find it — so the game can be
    learned before it is played. */
-const SECTIONS = [
+/* ONE-MINUTE TEST RUN.
+
+   Hugo, while we are still finding out what is broken: "is it worth making
+   it shorter? Maybe like a minute for now... something we can really work
+   out the issues with, without wearing me out."
+
+   Right, and it costs nothing: a recording from a one-minute run says
+   exactly as much about a failure as a recording from three minutes, and
+   he has to play it standing up every time.
+
+   Nothing is made slower, because the opening IS the slow part — six beats
+   between sparks, five-second lifetimes, about 1.7 on screen. The test run
+   keeps the count-in and the whole of WARM, takes a third of BUILD so the
+   density starts to climb, and ends on the finale.
+
+   EVERYTHING derives from this list — total length, the spark schedule, the
+   music, the section the HUD shows — so the full run comes back by flipping
+   one constant. Nothing else in the file knows which list it got. */
+const TEST_RUN = true;
+
+const FULL_SECTIONS = [
   // bars, beats between sparks, share wanting the legs, lifetime ms, energy, label
   { bars: 4,  cadence: 0, legs: 0,    life: 4200, energy: 0.15, name:'' },   // count-in
   { bars: 16, cadence: 6, legs: 0.15, life: 5000, energy: 0.35, name:'WARM' },
@@ -1545,6 +1565,15 @@ const SECTIONS = [
   { bars: 5,  cadence: 0, legs: 0,    life: 4000, energy: 0.70, name:'LIFT' },
   { bars: 4,  cadence: 0, legs: 0,    life: 4000, energy: 1.00, name:'FINALE' },
 ];
+
+const TEST_SECTIONS = [
+  { bars: 4,  cadence: 0, legs: 0,    life: 4200, energy: 0.15, name:'' },   // count-in
+  { bars: 16, cadence: 6, legs: 0.15, life: 5000, energy: 0.35, name:'WARM' },
+  { bars: 7,  cadence: 4, legs: 0.30, life: 4400, energy: 0.55, name:'BUILD' },
+  { bars: 4,  cadence: 0, legs: 0,    life: 4000, energy: 1.00, name:'FINALE' },
+];
+
+const SECTIONS = TEST_RUN ? TEST_SECTIONS : FULL_SECTIONS;
 /* The lifetime of a spark lighting right now, from the section it lands in. */
 function lifetimeNow(){
   const sec = sectionAt(songTime());
