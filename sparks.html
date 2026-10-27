@@ -1275,6 +1275,70 @@ const TARGETS = [
    every spark on screen; past a certain t there is none. These bounds fall
    out of the target list and change with it. */
 const SPARK_MARGIN = 0.02;
+
+/* ------------------------------------------------------------------ *
+ * THE VIEW WINDOW                                                     *
+ *                                                                     *
+ * A phone camera sensor is physically landscape. Held upright it      *
+ * hands over a frame wider than it is tall, the page fits it by       *
+ * width, and two thirds of a tall screen is black. Measured on a real *
+ * phone: a 4:3 frame fills 35% of the screen height.                  *
+ *                                                                     *
+ * So the picture is ZOOMED and the SIDES are cropped. Full height is  *
+ * kept, which is the dimension that decides whether a standing body   *
+ * is in shot; what is lost is the edges of the room.                  *
+ *                                                                     *
+ * The zoom is NOT a style setting. It is the largest zoom at which    *
+ * every spark this player's stance can produce is still on screen,    *
+ * with room to stand off centre. Derived, never typed:                *
+ *                                                                     *
+ *   half the width the sparks need = (bxMax + HIT_R) * torso / ar     *
+ *   plus VIEW_OFFCENTRE to stand off to one side                      *
+ *   plus SPARK_MARGIN, the margin everything else already uses        *
+ *                                                                     *
+ * It is clamped so it can never ask the player to stand further back  *
+ * than they already had to: zoomFor() is a function of the stance,    *
+ * so a stance the gate allows always fits the window it produces.     *
+ * The tracker below only ever lets the zoom DROP quickly — stepping   *
+ * closer widens the view immediately, stepping back narrows it slowly *
+ * — so the sparks cannot be cropped away by a player moving.          *
+ * ------------------------------------------------------------------ */
+const VIEW_OFFCENTRE = 0.06;      // room to stand off centre, in frame widths
+
+function zoomFor(torso, ar, screenAR){
+  if(!torso || !ar) return 1;
+  const L = stanceLimits();
+  const half = (L.bxMax + TUNE.HIT_R) * torso / ar + VIEW_OFFCENTRE + SPARK_MARGIN;
+  const want = 1 / (2 * half);
+  // cover: the zoom at which the frame fills the screen's height. Past it
+  // there is nothing left to gain and the sides are thrown away for nothing.
+  const cover = screenAR ? Math.max(1, ar / screenAR) : Infinity;
+  return Math.max(1, Math.min(cover, want));
+}
+
+let VIEW_Z = 1;
+function setViewZoom(z){ VIEW_Z = (z > 1 && isFinite(z)) ? z : 1; }
+function viewZoom(){ return VIEW_Z; }
+/* The slice of the camera frame that is actually on screen, in the frame's
+   own normalised coordinates. Everything the scorer does stays in those
+   coordinates; only what is VISIBLE changes. */
+function viewWindow(){
+  const w = 1 / VIEW_Z;
+  return { x0: (1 - w) / 2, x1: (1 + w) / 2, w };
+}
+/* Is this spark, at this body's scale, wholly on screen? A spark outside the
+   view still scores perfectly well — the camera can see the hand go there —
+   but the player cannot see it to go for it, and a bloom they never saw would
+   still count against the legwork floor, which counts blooms PRESENTED. So
+   one is never placed: it is dropped and recorded, exactly like a spark
+   dropped for crowding. */
+function inView(p, o){
+  if(!p || !o || !o.ar) return false;
+  const v = viewWindow();
+  const m = TUNE.HIT_R * (o.scale || o.torso) / o.ar;
+  return (p.x - m) >= v.x0 + SPARK_MARGIN && (p.x + m) <= v.x1 - SPARK_MARGIN;
+}
+
 function stanceLimits(){
   let byHi = -Infinity, byLo = Infinity, bxMax = 0;
   for(const t of TARGETS){
@@ -1301,10 +1365,15 @@ function stanceOk(o){
   const w = hipWindow(o.torso);
   if(o.hip.y < w.lo) return { ok:false, why:'low', torso:o.torso };
   if(o.hip.y > w.hi) return { ok:false, why:'high', torso:o.torso };
+  /* Horizontally this is checked against what is ON SCREEN, not against the
+     whole camera frame. A spark outside the view is still inside the
+     camera's picture and would still score — the player simply could not
+     see it, and Sparks is a game about things you look at. */
+  const v = viewWindow();
   for(const t of TARGETS){
     const p = placeTarget(t, o);
     const m = TUNE.HIT_R * o.torso;
-    if(p.x - m/o.ar < SPARK_MARGIN || p.x + m/o.ar > 1 - SPARK_MARGIN ||
+    if(p.x - m/o.ar < v.x0 + SPARK_MARGIN || p.x + m/o.ar > v.x1 - SPARK_MARGIN ||
        p.y - m < SPARK_MARGIN || p.y + m > 1 - SPARK_MARGIN)
       return { ok:false, why:'room', torso:o.torso, id:t.id };
   }
@@ -1404,7 +1473,9 @@ addEventListener('resize', resize); resize();
 function videoFit(){
   const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
   if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
-  const sc = Math.min(W/vw, H/vh);           // contain: the whole frame, bars and all
+  // contain, then zoomed by however much the view window allows. The canvas
+  // clips what falls outside, which is exactly the side-crop.
+  const sc = Math.min(W/vw, H/vh) * viewZoom();
   const dw = vw*sc, dh = vh*sc;
   return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
 }
@@ -1594,6 +1665,7 @@ function spawnTarget(entry){
   if(!o) return false;                 // no body yet: skip it, never guess one
   const at = placeTarget(entry.def, o);
   if(!at) return false;
+  if(!inView(at, o)){ entry.offView = true; return false; }
   const lightAt = nowClock();
   const life = entry.finale ? FINALE_LIFETIME : lifetimeNow();
   const dieAt = lightAt + life;
@@ -1999,6 +2071,39 @@ function drawVerdict(t){
    checking they all land on screen. Still advice, not a lock — the override
    below is always enabled. */
 let fitOk = false, fitSince = 0, fitWhy = 'nobody';
+/* Drives the view zoom from the body the camera is actually seeing.
+
+   It takes the MINIMUM of the recent window rather than the latest value, so
+   a player stepping toward the phone widens the view on the very next frame,
+   while stepping back narrows it only after the window has passed. The safe
+   direction is immediate; the cosmetic one is slow. Then it slews, because a
+   picture that breathes with the tracker's noise is worse than a slightly
+   stale one.
+
+   It is deliberately NOT reset per run: the view the player set themselves up
+   in at the fit screen is the view the run starts in. */
+const VIEW_WINDOW_MS = 1200;
+const VIEW_SLEW = 0.06;
+let viewBuf = [], viewShown = 1;
+function updateView(o, now){
+  const f = videoFit();
+  const ar = frameAR();
+  const screenAR = (H > 0) ? W / H : 1;
+  const torso = o && (o.scale || o.torso);
+  if(torso){
+    viewBuf.push({ t: now, z: zoomFor(torso, ar, screenAR) });
+    const cut = now - VIEW_WINDOW_MS;
+    while(viewBuf.length && viewBuf[0].t < cut) viewBuf.shift();
+  }
+  if(!viewBuf.length) return;
+  let want = Infinity;
+  for(const b of viewBuf) if(b.z < want) want = b.z;
+  // down at once, up slowly
+  viewShown = (want < viewShown) ? want : viewShown + (want - viewShown) * VIEW_SLEW;
+  setViewZoom(viewShown);
+}
+function resetView(){ viewBuf = []; viewShown = 1; setViewZoom(1); }
+
 function checkFit(now){
   const kn = read(pose, J.knA) || read(pose, J.knB);
   const an = read(pose, J.ankA) || read(pose, J.ankB);
@@ -2006,6 +2111,7 @@ function checkFit(now){
   fitWhy = ok ? 'legs' : 'legs';
   if(ok){
     const o = pose ? observe(pose, read, frameAR(), scaleTrack, nowClock()) : null;
+    updateView(o, now);
     const st = stanceOk(o);
     ok = st.ok;
     fitWhy = st.ok ? 'ok' : st.why;
@@ -2415,6 +2521,7 @@ function frame(now){
   // one observation per fresh frame, carrying its own capture time
   if(fresh && pose){
     const o = observe(pose, read, frameAR(), scaleTrack, nowClock());
+    updateView(o, now);
     samples.push({ t: clockT, o });
     if(samples.length > 400) samples.shift();
     hipMeter.push(o);
@@ -2448,7 +2555,8 @@ function frame(now){
     } else if(spawnTarget(dueSpark)) dueSpark = null;
     else if(now - (dueSpark.firstTried || (dueSpark.firstTried = now)) > 400){
       recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id,
-                why:'no body visible or no room' });
+                why: dueSpark.offView ? 'would have been off the side of the view'
+                                      : 'no body visible or no room' });
       dueSpark = null;
     }
   }
