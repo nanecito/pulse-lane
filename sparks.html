@@ -1629,7 +1629,7 @@ const BAR = BEAT * 4;
    EVERYTHING derives from this list — total length, the spark schedule, the
    music, the section the HUD shows — so the full run comes back by flipping
    one constant. Nothing else in the file knows which list it got. */
-const TEST_RUN = true;
+const TEST_RUN = false;   /* the full run. The one-minute version stays in the file as TEST_SECTIONS. */
 
 const FULL_SECTIONS = [
   // bars, beats between sparks, share wanting the legs, lifetime ms, energy, label
