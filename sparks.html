@@ -598,7 +598,41 @@ function hipAround(samples, i){
   return n ? { x:sx/n, y:sy/n } : null;
 }
 
-function hipTravel(samples, oi, ci, at){
+/* THE DIRECTION THE BODY HAS TO TRAVEL for a spark to be reachable at all.
+   Body frame, y UP.
+
+   Every leg spark sits 1.90-2.33 torsos from a standing shoulder against an
+   arm reach of 1.44, so the arm alone never gets there and the body must
+   close the gap. The shortest way to close it is straight along the line
+   from the SHOULDER to the spark.
+
+   This replaces projecting onto the hip->spark line, which asked for a
+   direction the body does not actually need to travel. The two diverge in
+   proportion to how lateral the spark is, and on the side sparks they very
+   nearly swap emphasis: a straight-down dip is worth 0.87 of the direction
+   the body must go, and only 0.43 of the hip->spark line.
+
+     spark        must-move dir     hip->spark dir    a dip is worth
+     side-L/R     0.50, -0.87       0.90, -0.43       0.87 vs 0.43
+     low-L/R      0.34, -0.94       0.76, -0.65       0.94 vs 0.65
+     deep-L/R     0.12, -0.99       0.49, -0.87       0.99 vs 0.87
+     floor-C      0.17, -0.99       0.00, -1.00       0.99 vs 1.00
+
+   Measured on a real three-minute run: a 0.34-torso drop at a side spark
+   scored 0.07 and failed the gate, while the same player's drops at low and
+   deep sparks passed. The ordering of the error matched the ordering of the
+   failures exactly. */
+function reachDir(bx, by){
+  const sx = bx < 0 ? -ARM.shX : ARM.shX;
+  const vx = bx - sx, vy = by - ARM.shY;
+  const d = Math.hypot(vx, vy);
+  return d > 1e-6 ? { x: vx/d, y: vy/d } : null;
+}
+
+/* aim is the spark's position in BODY frame ({bx, by}), not on screen: the
+   direction wanted is a property of the target and the arm, not of where the
+   hip happened to be when the hand arrived. */
+function hipTravel(samples, oi, ci, aim){
   const a = samples[oi].o, b = samples[ci].o;
   if(!a.hip || !b.hip) return null;
   const h0 = hipAround(samples, oi), h1 = hipAround(samples, ci);
@@ -606,10 +640,10 @@ function hipTravel(samples, oi, ci, at){
   const dx = (h1.x - h0.x) * a.ar / a.scale;
   const dy = (h1.y - h0.y) / a.scale;
   let toward = null;
-  if(at){
-    const ux = (at.x - h0.x) * a.ar, uy = (at.y - h0.y);
-    const ud = Math.hypot(ux, uy);
-    if(ud > 1e-6) toward = dx*(ux/ud) + dy*(uy/ud);
+  if(aim){
+    const u = reachDir(aim.bx, aim.by);
+    /* dy is SCREEN y, which grows downward; the body frame has y UP. */
+    if(u) toward = dx * u.x + dy * (-u.y);
   }
   return { lat:Math.abs(dx), drop:Math.abs(dy), toward };
 }
@@ -908,7 +942,7 @@ function judgeTarget(t, samples){
      committed to, and taking it from the onset would ask for a direction
      that was already stale by the time they got there. Entry is also where
      the timing is taken, so the two agree. */
-  const hip = hipTravel(samples, oi, entryI, sparkPos(t, samples[entryI].t));
+  const hip = hipTravel(samples, oi, entryI, sparkBody(t, samples[entryI].t));
   const legCredit = (hip && hip.toward !== null)
     ? zone(hip.toward, TUNE.LEG_FULL, TUNE.LEG_NONE) : null;
   const legsOk = !t.legs ? null
