@@ -87,6 +87,13 @@ canvas{display:block;width:100%;height:100%}
   text-transform:uppercase;text-align:center}
 .study .cnt{font-family:var(--display);font-weight:700;color:var(--fg);opacity:.85;
   font-size:clamp(40px,13vw,86px);line-height:1}
+.study .go{font-family:var(--display);font-weight:700;color:var(--fg);opacity:.85;
+  font-size:clamp(22px,6.4vw,38px);line-height:1.1;text-align:center;
+  transition:color .12s linear,opacity .12s linear}
+.study .go.lit{color:var(--amber);opacity:1}
+.study .go small{display:block;font-family:inherit;font-weight:400;
+  font-size:clamp(10px,2.6vw,13px);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--muted);margin-top:10px}
 /* the setup and ready screens are read while standing two metres back */
 .setTop h2{font-size:clamp(30px,8vw,52px)!important}
 .setTop p{font-size:clamp(17px,4.6vw,26px)!important}
@@ -232,7 +239,7 @@ button[disabled]{opacity:.5;cursor:default}
   <canvas id="studyArt" width="520" height="340"></canvas>
   <div class="nm" id="studyName"></div>
   <div class="ti" id="studyTitle"></div>
-  <div class="cnt" id="studyCount">5</div>
+  <div class="go" id="studyGo">Raise a hand<small>when you have it</small></div>
 </div>
 
 <div class="overlay" id="oEnd" hidden>
@@ -265,7 +272,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 26;          // bump on every deploy; shown on the start card
+const BUILD = 28;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -455,7 +462,7 @@ const ui = {
   bGo:document.getElementById('bGo'),
   oStudy:document.getElementById('oStudy'), studyArt:document.getElementById('studyArt'),
   studyName:document.getElementById('studyName'), studyTitle:document.getElementById('studyTitle'),
-  studyCount:document.getElementById('studyCount'),
+  studyGo:document.getElementById('studyGo'),
   kcal:document.getElementById('eKcal'), kcalNote:document.getElementById('eKcalNote'),
   streakChip:document.getElementById('streakChip')
 };
@@ -763,7 +770,23 @@ const ART = [
  ['Grant Wood - American Gothic - Google Art Project.jpg','American Gothic','Grant Wood']
 ];
 const ART_N = 6;             // boards on the circuit, a fresh set each race
-const STUDY_SECS  = 5;      // how long the painting is shown before the race
+/* The study card has no timer. Five seconds was arbitrary, and on a repeat
+   race it was dead time you could not skip. It now waits for the player, for
+   as long as they want.
+   Advanced with a RAISED HAND, not a tap: the phone is across the room, and
+   walking over to tap it is what put you bent over the camera at the green
+   flag in the first place. Same gesture and threshold as the finish-line
+   quiz. A tap still works, because a hand read that fails must never trap
+   anyone on a screen.
+   The flag then drops when your hands come back DOWN. Starting on the raise
+   would begin the race with one arm in the air, and the wrists ARE the
+   steering input - a single raised hand sits near full lock. */
+const STUDY_RAISE = 0.55;   // seconds a hand is held up before it counts
+const STUDY_DROP  = 0.30;   // seconds with both hands down before the flag
+const STUDY_BLIND = 6.0;    // seconds UNREADABLE while armed before going anyway.
+                            // Only counts time the body cannot be seen at all:
+                            // hands deliberately held up wait forever, which is
+                            // the whole point of removing the timer.
 const STUDY_BOARD = 3;      // which board carries it again: (3+0.5)/6 = 58% of the lap
 /* The brake is not armed until you are actually racing. Hugo kept tripping it
    while still settling into position, which pinned the car at the line. It
@@ -930,7 +953,7 @@ let legsSeen = false, legsGone = 0, legsWarned = false;
 let hipRef = null, shRef = null;
 let limbPrev = {}, jumpT = 0, jumped = false, jumpRun = 0;
 let quizOpen=false, quizArt=null, quizOpts=null, quizRight=0, quizHold=0, quizSide=0, quizDone=false;
-let studyT=0, studyFresh=true, studyTick=-1;
+let studyFresh=true, studyArmed=false, studyHold=0, studyDown=0, studyBlind=0, studyMode='';
 let brakeArmed=false, kcal=0;
 const seenLatch = {kn:false, an:false};
 let rest={}, lastLift=null;
@@ -1061,7 +1084,21 @@ function readPose(dt, now){
   steer += (steerRaw - steer) * (1 - Math.pow(0.72, dt*60));
 
   if(base){
-    if(hipRef===null){ hipRef = base.hipY; shRef = base.shY; }
+    /* Seeded from the body in front of the camera on THIS frame, not from the
+       calibration pose. base.hipY is captured when you grip the wheel, and the
+       study card then holds the race until you say you are ready - so by the
+       green flag that measurement is as old as you spent looking at the
+       painting. Seeded from base, a 0.26-torso lean
+       read as a full squat and held the brake down the instant it armed: the
+       ready screen checked your stance, and the study card handed you a reason
+       to abandon it. Measured on build 26 from a standing start, a 30cm lean
+       cost 2.37s of braking and 15 km/h at the five-second mark.
+       Seeded here, every green-flag stance begins at squatDepth 0, and a squat
+       from that height still brakes at once because the reference only follows
+       DOWN over REF_DOWN. It also stops makeBase's hipY:0.55 fallback from
+       reaching the brake, which a bad calibration read could otherwise turn
+       into a phantom squat for the whole race. */
+    if(hipRef===null){ hipRef = hp.y; shRef = sh.y; }
     const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y < ref ? REF_UP : REF_DOWN));
     hipRef = follow(hipRef, hp.y);
     shRef  = follow(shRef,  sh.y);
@@ -2543,30 +2580,71 @@ function drawInto(cv, im){
 function enterStudy(fresh){
   stopFlag();
   pickArt();
-  studyFresh = fresh; studyT = STUDY_SECS; studyTick = -1;
+  studyFresh = fresh;
+  studyArmed = false; studyHold = 0; studyDown = 0; studyBlind = 0; studyMode = '';
   ui.oCal.hidden = true; ui.oCal.classList.remove('counting');
   ui.oEnd.hidden = true; ui.hud.hidden = true;
   ui.studyName.textContent  = quizArt ? quizArt[2] : '';
   ui.studyTitle.textContent = quizArt ? quizArt[1] : '';
-  ui.studyCount.textContent = String(STUDY_SECS);
+  ui.studyGo.classList.remove('lit');
+  setStudyGo('Raise a hand', 'when you have it');
   drawInto(ui.studyArt, quizArt ? artImg[quizArt[0]] : null);
   ui.oStudy.hidden = false;
   state = 'study';
   keepAwake();
 }
-function studyStep(dt){
-  studyT -= dt;
+function setStudyGo(big, small){
+  ui.studyGo.textContent = big;
+  const s = document.createElement('small');
+  s.textContent = small;
+  ui.studyGo.appendChild(s);
+}
+function armStudy(){
+  if(state !== 'study') return;
+  if(studyArmed){ leaveStudy(); return; }   // a second tap means go now
+  studyArmed = true; studyDown = 0; studyBlind = 0; studyMode = '';
+  try { blip(680, 0.12, 0.26); } catch(e){}
+}
+function leaveStudy(){
+  if(state !== 'study') return;
+  ui.oStudy.hidden = true;
+  ui.studyGo.classList.remove('lit');
+  startRace(studyFresh);
+}
+function studyStep(r, dt){
   // the picture may still be arriving; keep trying, the name is up either way
   if(quizArt && artImg[quizArt[0]] && artImg[quizArt[0]] !== 'failed'){
     drawInto(ui.studyArt, artImg[quizArt[0]]);
   }
-  const n = Math.min(STUDY_SECS, Math.max(1, Math.ceil(studyT - 1e-6)));
-  if(n !== studyTick){ studyTick = n; ui.studyCount.textContent = String(n);
-    try { blip(n===1?660:440, 0.10, 0.20); } catch(e){} }
-  if(studyT <= 0){
-    ui.oStudy.hidden = true;
-    startRace(studyFresh);
+  const sh = mid(L.lsh, L.rsh);
+  const lw = pt(L.lwr), rw = pt(L.rwr);
+  const canRead = !!(sh && base);
+  // same test the finish-line quiz uses, so one gesture means one thing
+  const up = (w) => !!(canRead && w && (sh.y - w.y) > base.torso*0.22);
+  const say = (mode, big, small, lit) => {
+    if(mode === studyMode) return;
+    studyMode = mode; setStudyGo(big, small);
+    ui.studyGo.classList.toggle('lit', !!lit);
+  };
+
+  if(!studyArmed){
+    const raised = up(lw) || up(rw);
+    studyHold = raised ? studyHold + dt : 0;
+    if(!canRead)     say('blind', 'Raise a hand', 'or tap - you are out of the picture', false);
+    else if(raised)  say('hold',  'Raise a hand', 'hold it', true);
+    else             say('wait',  'Raise a hand', 'when you have it', false);
+    if(studyHold > STUDY_RAISE) armStudy();
+    return;
   }
+
+  // Armed. The flag waits for the hands to come back to the wheel, so the race
+  // never starts with an arm in the air reading as full lock.
+  studyBlind = canRead ? 0 : studyBlind + dt;
+  const down = canRead && !up(lw) && !up(rw);
+  studyDown = down ? studyDown + dt : 0;
+  if(!canRead) say('armedBlind', 'Take the wheel', 'step into the picture', true);
+  else         say('armed',      'Take the wheel', 'hands down to start', true);
+  if(studyDown > STUDY_DROP || studyBlind > STUDY_BLIND) leaveStudy();
 }
 
 /* ---- getting back in for a second race ----
@@ -2783,7 +2861,7 @@ function frame(now){
 
   if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); return; }
   if(state==='ready'){ drawMirror(0.5); readyStep(r,dt); return; }
-  if(state==='study'){ studyStep(dt); return; }
+  if(state==='study'){ studyStep(r, dt); return; }
 
   if(state==='race'){
     acc+=dt;
@@ -2809,6 +2887,10 @@ document.getElementById('bGo').addEventListener('click', function(){
   beginRaceFrom(readPose(0, performance.now()), state !== 'ready');
 });
 document.getElementById('bMore').addEventListener('click', enterReady);
+/* Tap anywhere on the study card does what the raised hand does. Tapping
+   means walking to the phone, which is why it is the fallback and not the
+   control. */
+document.getElementById('oStudy').addEventListener('click', armStudy);
 document.getElementById('bAgain').addEventListener('click', function(){
   stopFlag(); quizOpen=false;
   ui.oCal.classList.remove('counting');
