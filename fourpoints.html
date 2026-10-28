@@ -450,12 +450,16 @@ function match(cfg, fv){
    footH       foot contact height
    armMode     'hand'    the palm is the contact
                'forearm' the elbow is the contact and the forearm lies down
+   footDir     +1 toes point toward the head, -1 away from it
+   tucked      true: the toes are curled under and the heel is up, as in a plank;
+               false: the sole is flat on the floor
    kneeBulge/elbowBulge  the direction the joint sticks out, as a vector in
                figure coordinates. A squatting knee goes forward over the toes,
                a crab's knee goes up, a plank's hardly bends. Gap picks the fold
                by a single sign, which is enough for a standing figure seen
                head-on and is not enough here.
-   oneSided    SIDE only: one hand and one foot carry, the others are raised
+   topArmUp    SIDE only: how far above the shoulder the free hand reaches
+   topFootUp   SIDE only: how far the stacked top foot sits above the bottom one
    ------------------------------------------------------------------ */
 // Segment lengths as multiples of the torso (hip joint to shoulder), from
 // ordinary adult proportions. torso ~0.50 m, upper arm 0.33, forearm+hand 0.26,
@@ -467,47 +471,54 @@ function match(cfg, fv){
 // FOREARM's base. It is corrected to 0.52 and that correction is why FOREARM's base
 // comes out at a plank's real length.
 const SEG = { torso:1.0, upper:0.66, fore:0.52, thigh:0.88, shin:0.86,
-              hipHalf:0.26, shHalf:0.40, head:0.44, foot:0.24 };
+              hipHalf:0.26, shHalf:0.40, head:0.44, foot:0.24,
+              // The ankle JOINT is not on the floor. On a flat foot it sits about
+              // 8 cm up, on tucked toes about 15 cm. Putting it at zero makes the
+              // shin absorb that height, and in ANCHOR that inverted the whole
+              // squat: the hip came out ABOVE the knee, which is the one thing a
+              // deep squat is defined as not being.
+              ankleFlat:0.16, ankleToe:0.30 };
 
 const CONFIGS = [
   { id:'BEAST', name:'Beast', cue:'Hands under your shoulders, knees hovering',
-    pose:{ hipH:0.95, torsoRise:0.15, handAhead:0.00, handH:0, footBehind:-1.15, footH:0.22,
-           armMode:'hand', kneeDrop:0.14, elbowBulge:{x:-1,y:0} },
+    pose:{ hipH:0.95, torsoRise:0.15, handAhead:0.00, handH:0, footBehind:-1.15, footH:0.30,
+           armMode:'hand', kneeDrop:0.14, elbowBulge:{x:-1,y:0}, footDir:-1, tucked:true },
     w:{ hipH:1.8, torsoRise:1.6, kneeRise:3.0, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.2, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
         legExt:1.4, armExt:1.0, asym:1.2 } },
 
   { id:'FOREARM', name:'Forearm', cue:'Down onto your elbows, body long and low',
-    pose:{ hipH:0.52, torsoRise:0.10, handAhead:0.62, handH:0, footBehind:-1.66, footH:0.08,
-           armMode:'forearm', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1} },
+    pose:{ hipH:0.52, torsoRise:0.10, handAhead:0.62, handH:0, footBehind:-1.70, footH:0.30,
+           armMode:'forearm', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1}, footDir:-1, tucked:true },
     w:{ hipH:1.8, torsoRise:1.4, kneeRise:1.2, handRise:1.0, elbowRise:1.8, footRise:0.8,
         base:1.2, elbowA:1.4, elbowB:1.4, kneeA:0.8, kneeB:0.8,
         legExt:1.6, armExt:1.2, asym:1.2 } },
 
   { id:'CRAB', name:'Crab', cue:'Hands behind you, hips up, face the ceiling',
-    pose:{ hipH:0.92, torsoRise:0.08, handAhead:0.38, handH:0, footBehind:-0.95, footH:0.05,
-           armMode:'hand', kneeDrop:null, elbowBulge:{x:1,y:-0.3}, kneeBulge:{x:0,y:1} },
+    pose:{ hipH:0.92, torsoRise:0.08, handAhead:0.38, handH:0, footBehind:-0.95, footH:0.16,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:1,y:-0.3}, kneeBulge:{x:0,y:1}, footDir:-1 },
     w:{ hipH:1.8, torsoRise:1.6, kneeRise:3.0, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.4, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
         legExt:1.4, armExt:1.0, asym:1.2 } },
 
-  { id:'ANCHOR', name:'Anchor', cue:'Feet flat, hips low, hands planted out in front',
-    pose:{ hipH:0.55, torsoRise:0.50, handAhead:0.10, handH:0, footBehind:0.10, footH:0,
-           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:-0.2}, kneeBulge:{x:1,y:0.2} },
+  { id:'ANCHOR', name:'Anchor', cue:'Sit right down, knees above your hips, hands planted',
+    pose:{ hipH:0.40, torsoRise:0.70, handAhead:0.18, handH:0, footBehind:0.21, footH:0.16,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:-0.2}, kneeBulge:{x:1,y:0.6}, footDir:+1 },
     w:{ hipH:2.0, torsoRise:1.8, kneeRise:1.4, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.8, elbowA:0.8, elbowB:0.8, kneeA:1.4, kneeB:1.4,
         legExt:1.8, armExt:1.0, asym:1.2 } },
 
   { id:'SIDE', name:'Side', cue:'One hand, one foot, chest turned open',
-    pose:{ hipH:0.62, torsoRise:0.40, handAhead:0.02, handH:0, footBehind:-1.58, footH:0.04,
-           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1}, oneSided:0.62 },
+    pose:{ hipH:0.62, torsoRise:0.40, handAhead:0.02, handH:0, footBehind:-1.60, footH:0.16,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1},
+           topArmUp:0.90, topFootUp:0.22, footDir:-1 },
     w:{ hipH:1.4, torsoRise:1.2, kneeRise:1.0, handRise:1.0, elbowRise:0.8, footRise:1.0,
         base:1.0, elbowA:0.8, elbowB:0.8, kneeA:0.8, kneeB:0.8,
         legExt:1.2, armExt:1.0, asym:2.4 } },
 
   { id:'SPAN', name:'Span', cue:'Hands and feet planted, hips to the sky',
-    pose:{ hipH:1.52, torsoRise:-0.46, handAhead:0.00, handH:0, footBehind:-0.62, footH:0,
-           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:-0.4,y:-1} },
+    pose:{ hipH:1.52, torsoRise:-0.46, handAhead:0.00, handH:0, footBehind:-0.66, footH:0.16,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:-0.4,y:-1}, footDir:-1 },
     w:{ hipH:2.0, torsoRise:2.0, kneeRise:1.4, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.4, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
         legExt:1.6, armExt:1.0, asym:1.2 } },
@@ -576,14 +587,36 @@ function configSkeleton(cfg){
     kn = hinge(hipB, SEG.thigh, ank, SEG.shin, p.kneeBulge);
   }
   const ankF = ankle;
-  const toe = { x: ankF.x - SEG.foot, y: Math.max(0, ankF.y - 0.04) };
-  return { sh, hip, shA, shB, hipA, hipB, el, wr, kn, ank:ankF, head, toe };
+  // The foot. Raising the ankle joint off the floor without giving the figure a
+  // foot left nothing but the hands actually touching, and the floor fit lost its
+  // baseline: one posture came out 7.6 degrees wrong. The toe or the sole is what
+  // rests on the floor, and it is what the fit reads.
+  const fd = p.footDir === undefined ? -1 : p.footDir;
+  let toe, heel;
+  if(p.tucked){
+    toe  = { x: ankF.x + fd*0.05, y: 0 };                    // ball of the foot
+    heel = { x: ankF.x - fd*0.16, y: ankF.y + 0.10 };        // lifted behind it
+  } else {
+    toe  = { x: ankF.x + fd*0.36, y: 0 };
+    heel = { x: ankF.x - fd*0.12, y: 0 };
+  }
+
+  // The free side, when there is one. Solved, not translated.
+  let top = null;
+  if(p.topArmUp !== undefined){
+    const wr2 = { x: sh.x + 0.06, y: sh.y + p.topArmUp };
+    const ank2 = { x: ankF.x, y: ankF.y + p.topFootUp };
+    top = { wr: wr2, ank: ank2,
+            el: hinge(shA, SEG.upper, wr2, SEG.fore, { x:-1, y:0.4 }),
+            kn: hinge(hipB, SEG.thigh, ank2, SEG.shin, p.kneeBulge) };
+  }
+  return { sh, hip, shA, shB, hipA, hipB, el, wr, kn, ank:ankF, head, toe, heel, top };
 }
 
 // Turn the figure into landmarks the real feature reader consumes, rotated by
 // `rot` and placed at `cx, cy` at scale `s`. The across-camera separation of
 // the paired joints is added here and nowhere else.
-function skeletonLandmarks(g, s, cx, cy, rot, oneSided){
+function skeletonLandmarks(g, s, cx, cy, rot){
   const out = [];
   for(let i=0;i<33;i++) out.push({ x:0.5, y:0.5, z:0, visibility:0 });
   const c = Math.cos(rot||0), sn = Math.sin(rot||0);
@@ -597,19 +630,23 @@ function skeletonLandmarks(g, s, cx, cy, rot, oneSided){
   const across = (q,k) => ({ x:q.x + k, y:q.y });
   put(J.shA, across(g.sh,  0.02)); put(J.shB, across(g.sh, -0.02));
   put(J.hipA,across(g.hip, 0.02)); put(J.hipB,across(g.hip,-0.02));
-  put(J.elA, across(g.el,  0.02)); put(J.elB, across(g.el, -0.02));
-  put(J.knA, across(g.kn,  0.02)); put(J.knB, across(g.kn, -0.02));
   put(J.nose, g.head);
-  if(oneSided){
-    // one hand and one foot carry; the other two are lifted clear of the floor
-    put(J.wrA, g.wr); put(J.wrB, { x:g.wr.x, y:g.wr.y + oneSided });
-    put(J.ankA, g.ank); put(J.ankB, { x:g.ank.x, y:g.ank.y + oneSided });
+  if(!g.top){
+    put(J.elA, across(g.el,  0.02)); put(J.elB, across(g.el, -0.02));
+    put(J.knA, across(g.kn,  0.02)); put(J.knB, across(g.kn, -0.02));
+  }
+  if(g.top){
+    // one hand and one foot carry; the free arm reaches up and the top foot stacks
+    put(J.wrA, g.wr);  put(J.wrB, g.top.wr);
+    put(J.ankA, g.ank); put(J.ankB, g.top.ank);
+    put(J.elA, g.el);  put(J.elB, g.top.el);
+    put(J.knA, g.kn);  put(J.knB, g.top.kn);
   } else {
     put(J.wrA, across(g.wr, 0.02)); put(J.wrB, across(g.wr, -0.02));
     put(J.ankA,across(g.ank,0.02)); put(J.ankB,across(g.ank,-0.02));
   }
   put(J.toeA, across(g.toe, 0.02)); put(J.toeB, across(g.toe,-0.02));
-  put(J.heelA,across(g.ank, 0.02)); put(J.heelB,across(g.ank,-0.02));
+  put(J.heelA,across(g.heel,0.02)); put(J.heelB,across(g.heel,-0.02));
   return out;
 }
 
@@ -629,7 +666,7 @@ function floorOf(g, s, cx, cy, rot){
 function featsFromPose(cfg, rot){
   const g = configSkeleton(cfg);
   const s = 0.11, cx = 0.42, cy = 0.74, r = rot||0;
-  const lm = skeletonLandmarks(g, s, cx, cy, r, cfg.pose.oneSided);
+  const lm = skeletonLandmarks(g, s, cx, cy, r);
   return features(lm, makeReader(), floorOf(g, s, cx, cy, r));
 }
 
@@ -647,12 +684,21 @@ for(const c of CONFIGS) c.feats = featsFromPose(c, 0).f;
 // from each end, and anything else means a bone was stretched to make the pose fit.
 function reachReport(cfg){
   const g = configSkeleton(cfg);
-  return {
+  const r = {
     arm: dist(g.sh,g.wr)/(SEG.upper+SEG.fore),
     leg: dist(g.hip,g.ank)/(SEG.thigh+SEG.shin),
     thigh: dist(g.hip,g.kn)/SEG.thigh,
     shin: dist(g.kn,g.ank)/SEG.shin,
   };
+  if(g.top){
+    r.topArm   = dist(g.sh,g.top.wr)/(SEG.upper+SEG.fore);
+    r.topLeg   = dist(g.hip,g.top.ank)/(SEG.thigh+SEG.shin);
+    r.topUpper = dist(g.shA,g.top.el)/SEG.upper;
+    r.topFore  = dist(g.top.el,g.top.wr)/SEG.fore;
+    r.topThigh = dist(g.hipB,g.top.kn)/SEG.thigh;
+    r.topShin  = dist(g.top.kn,g.top.ank)/SEG.shin;
+  }
+  return r;
 }
 
 /* ---- the loads and the resolution table ----------------------------
@@ -1281,7 +1327,7 @@ function drawGhost(cfg, alpha){
   if(!fr) return false;
   const g = configSkeleton(cfg);
   const L = [[g.sh,g.hip],[g.sh,g.el],[g.el,g.wr],[g.hip,g.kn],[g.kn,g.ank],
-             [g.ank,g.toe],[g.sh,g.head]];
+             [g.ank,g.toe],[g.ank,g.heel],[g.sh,g.head]];
   ctx.save();
   ctx.lineWidth = 9; ctx.lineCap='round';
   ctx.strokeStyle = 'rgba(224,183,98,'+(alpha*0.85)+')';
@@ -1307,7 +1353,7 @@ function drawGhost(cfg, alpha){
 // screen and in the corner during a round, for when the ghost cannot be placed.
 function drawConfigDiagram(cfg, x, y, w, h, col, lw){
   const g = configSkeleton(cfg);
-  const pts = [g.sh,g.hip,g.el,g.wr,g.kn,g.ank,g.head,g.toe];
+  const pts = [g.sh,g.hip,g.el,g.wr,g.kn,g.ank,g.head,g.toe,g.heel];
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   for(const p of pts){ x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); }
   y1 += 0.3; x0 -= 0.1; x1 += 0.1;              // room for the head and the toe
@@ -1316,7 +1362,7 @@ function drawConfigDiagram(cfg, x, y, w, h, col, lw){
   const oy = y + h - (h - (y1-y0)*sc)/2 + y0*sc;
   const m = q => ({ x: ox + q.x*sc, y: oy - q.y*sc });
   const L = [[g.sh,g.hip],[g.sh,g.el],[g.el,g.wr],[g.hip,g.kn],[g.kn,g.ank],
-             [g.ank,g.toe],[g.sh,g.head]];
+             [g.ank,g.toe],[g.ank,g.heel],[g.sh,g.head]];
   ctx.save();
   // the floor it is resting on
   ctx.strokeStyle='rgba(140,134,121,0.55)'; ctx.lineWidth=1.5;
@@ -1324,14 +1370,12 @@ function drawConfigDiagram(cfg, x, y, w, h, col, lw){
   // SIDE is the one configuration defined by what is NOT on the floor, so the
   // raised hand and foot are drawn too. Without them its diagram was identical
   // to a plank's and the cue showed nothing of the thing being asked for.
-  const lift = cfg.pose.oneSided;
-  if(lift){
+  const lift = cfg.pose.topArmUp;
+  if(lift && g.top){
     ctx.strokeStyle=col; ctx.globalAlpha=0.40; ctx.lineWidth=(lw||5)*0.8; ctx.lineCap='round';
     ctx.setLineDash([5,5]);
-    for(const [a,b] of [[g.sh,{x:g.el.x,y:g.el.y+lift}],
-                        [{x:g.el.x,y:g.el.y+lift},{x:g.wr.x,y:g.wr.y+lift}],
-                        [g.hip,{x:g.kn.x,y:g.kn.y+lift}],
-                        [{x:g.kn.x,y:g.kn.y+lift},{x:g.ank.x,y:g.ank.y+lift}]]){
+    for(const [a,b] of [[g.sh,g.top.el],[g.top.el,g.top.wr],
+                        [g.hip,g.top.kn],[g.top.kn,g.top.ank]]){
       const u=m(a), v=m(b);
       ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(v.x,v.y); ctx.stroke();
     }
