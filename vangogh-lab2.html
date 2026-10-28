@@ -277,7 +277,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 29;          // bump on every deploy; shown on the start card
+const BUILD = 30;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -289,22 +289,29 @@ const LAB = true;          // the experimental build: jump recovery, painting bo
    useless here - a frantic bounce reaches 3.37 against a small jump's 3.75 -
    but the both-feet signal separates them by 30x. */
 const JUMP_V       = 1.5;   // torsos/sec, both limbs together
-const JUMP_HOLD    = 0.60;  // seconds of assisted recovery per jump
-const JUMP_PULL    = 2.6;   // how hard it drags you back toward the middle
+const JUMP_HOLD    = 0.55;  // seconds of assisted recovery per jump
+const JUMP_PULL    = 6.2;   // how hard it drags you back toward the middle.
+                            // Was 2.6 with a stronger value reserved for the
+                            // mounds; the mounds are gone, so every off-road
+                            // jump gets what they used to give.
 const JUMP_RELIEF  = 0.5;   // off-road speed drain is cut to this while recovering
-/* The mounds off the road. Jumping on one throws you back toward the lane far
-   faster than walking it back, so going wide has an answer you aim for rather
-   than react to - which is the only kind of answer this input can carry.
-   The window is deliberately loose: at the off-road speed cap a 200 ms
-   pipeline delay is already about 3 segments of travel, so demanding segment
-   precision would be demanding something the camera cannot deliver. Miss one
-   and the ordinary jump still works, just less well - a miss costs you the
-   difference, never the recovery. */
-const BUMP_EVERY   = 10;    // segments between mounds, both sides
-const BUMP_NEAR    = 3;     // segments either side that still count as "on it"
-const BUMP_OFF     = 1.35;  // lane units from the centre line: off the road
-const BUMP_PULL    = 6.2;   // lane units/sec back toward the road off a bump
-const BUMP_HOLD    = 0.55;  // seconds the launch lasts
+/* OFF THE ROAD IS ROUGH GROUND, and that is the whole mechanic.
+   Build 29 put discrete swirl mounds along the verge to jump over. Wrong read
+   of what Hugo asked for: he meant the SURFACE is broken out there, not that
+   there are objects on it. There is nothing to aim at now - the entire verge
+   is the thing.
+   Marching does almost nothing off the road: the rough ground holds you to
+   ROUGH_LIMIT of top speed and drags ROUGH_BITE times harder than tarmac, so
+   driving your way back out is not a strategy, it is a crawl. A jump smooths
+   the ride - the cap lifts back to the ordinary off-road limit, the drag
+   halves, and you are thrown back toward the lane. Jumping stops being a
+   bonus and becomes the way out, which is what it is for.
+   This also suits the input. There is no moment to hit and no object to line
+   up, so none of it asks the player to react inside the camera's 150-250 ms. */
+const ROUGH_LIMIT  = 0.16;  // fraction of top speed the rough ground holds you to
+const ROUGH_BITE   = 2.2;   // how much harder it drags than the ordinary verge
+const ROUGH_SHAKE  = 9.0;   // how hard the car judders over it, at full speed
+const JUMP_SAY     = 2;     // excursions that get the spoken "Jump!", then it stops
 let LAPS = 1;                    // the race is a number of laps, not a clock
 const HARD_CAP = 20*60;          // a session cannot run forever
 const segmentLength = 200, rumbleLength = 3, lanes = 3;
@@ -857,23 +864,8 @@ function pickArt(){
   quizArt = artSet[k];
   for(const a of artSet) loadArt(a);
 }
-function buildBumps(){
-  bumps=[]; bumpSeg=new Set();
-  for(let i=BUMP_EVERY;i<segments.length-BUMP_EVERY;i+=BUMP_EVERY){
-    bumpSeg.add(i);
-    bumps.push({ z:i*segmentLength, side:-1, seed:i*7 });
-    bumps.push({ z:i*segmentLength, side: 1, seed:i*7+3 });
-  }
-}
-function onBumpNow(z){
-  const n = segments.length;
-  const c = Math.floor(z/segmentLength) % n;
-  for(let d=-BUMP_NEAR; d<=BUMP_NEAR; d++) if(bumpSeg.has(((c+d)%n+n)%n)) return true;
-  return false;
-}
 function buildProps(){
   props=[];
-  buildBumps();
   for(let i=0;i<segments.length;i+=16){
     const r = srand(i*1.7);
     props.push({ z:i*segmentLength, side: r<0.5?-1:1, scale: 0.75+srand(i*4.3)*0.6, seed:i });
@@ -917,32 +909,6 @@ function drawBoard(x, groundY, roadHalfPx, b){
 /* The scale argument used to arrive as roughly 0.0003, making every tree a
    fraction of a pixel, so the cypresses have never actually been visible.
    Now passed the road half-width in pixels, like the boards and the cars. */
-/* A mound, in the brushwork of the sky rather than a ramp: a swirl that reads
-   as something to go over. Drawn at the roadside so it is visible well ahead -
-   the player aims at it, which is what this input can do. */
-function drawBump(x, groundY, w, seed){
-  if(w < 3) return;
-  const h = w*0.62;
-  ctx.save(); ctx.translate(x, groundY);
-  ctx.fillStyle = '#243A66';
-  ctx.beginPath(); ctx.moveTo(-w,0);
-  ctx.bezierCurveTo(-w*0.52,-h*1.30, w*0.52,-h*1.30, w,0);
-  ctx.closePath(); ctx.fill();
-  if(w > 7){
-    ctx.strokeStyle='rgba(242,200,75,0.80)';
-    ctx.lineWidth=Math.max(1, w*0.075);
-    ctx.lineCap='round';
-    ctx.beginPath();
-    for(let i=0;i<=24;i++){
-      const a = i/24*Math.PI*2.7 + (seed%7)*0.3;
-      const rr = w*0.46*(1 - i/28);
-      const px = Math.cos(a)*rr, py = -h*0.62 + Math.sin(a)*rr*0.48;
-      if(i) ctx.lineTo(px,py); else ctx.moveTo(px,py);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
-}
 function drawCypress(x, groundY, scale, seed){
   const h = scale*2.1, w = h*0.21;
   if(h < 8) return;
@@ -1010,8 +976,8 @@ let srcLost = 0;
 let angSm = null, angPrev = 0, angSpd = 0;
 let legsSeen = false, legsGone = 0, legsWarned = false;
 let hipRef = null, shRef = null;
-let limbPrev = {}, jumpT = 0, jumped = false, jumpRun = 0, bumpT = 0;
-let bumps = [], bumpSeg = new Set();
+let limbPrev = {}, jumpT = 0, jumped = false, jumpRun = 0;
+let rumble = 0, offRuns = 0, wasOff = false;
 let quizOpen=false, quizArt=null, quizOpts=null, quizRight=0, quizHold=0, quizSide=0, quizDone=false;
 let studyFresh=true;
 let brakeArmed=false, kcal=0;
@@ -1387,12 +1353,13 @@ function startRace(fresh){
   buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
   hitTimer=0; callTimer=0; steer=0; steerRaw=0;
   effortAvg=0; effortBase=0; chaserArmed=true; if(ui.chaser) ui.chaser.hidden=true;
-  curCorner=null; cFrames=0; cOff=0; cLean=0; cBrake=0; braking=false; brakeRamp=0; brakeAmt=0; bumpT=0;
+  curCorner=null; cFrames=0; cOff=0; cLean=0; cBrake=0; braking=false; brakeRamp=0; brakeAmt=0;
+  rumble=0; offRuns=0; wasOff=false;
   signAlpha=0; lastSignCorner=null;
   position=0; speed=0; playerX=0; boost=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
   legsSeen=false; legsGone=0; legsWarned=false; hipRef=null; shRef=null;
-  limbPrev={}; jumpT=0; jumped=false; jumpRun=0; bumpT=0; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
+  limbPrev={}; jumpT=0; jumped=false; jumpRun=0; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
   quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
   brakeArmed=false; kcal=0;
   showCall('MARCH', 'LEGS UP, KEEP THEM GOING', 'good'); callTimer = 1.8;
@@ -1573,24 +1540,37 @@ function update(dt, reading, now){
   speed = Math.max(0, Math.min(maxSpeed*1.35, speed));
   // going off in a marked corner costs far more than running wide on a straight:
   // otherwise ploughing through every bend is quicker than braking for it
-  const wideLimit = inCorner ? maxSpeed*CORNER_OFF : offRoadLimit;
-  if((playerX<-1||playerX>1) && speed>wideLimit){
-    const relief = (jumpT > 0 || bumpT > 0) ? JUMP_RELIEF : 1;
-    speed = Math.max(wideLimit, speed + offRoadDecel*(inCorner?1.6:1)*relief*dt);
+  /* Off the road, a jump SMOOTHS the ride: while it lasts the surface behaves
+     like the ordinary verge, and the rest of the time it is broken ground that
+     will not let you build speed at all. */
+  const off = Math.abs(playerX) > 1;
+  const smooth = jumpT > 0;
+  const wideLimit = smooth ? (inCorner ? maxSpeed*CORNER_OFF : offRoadLimit)
+                           : maxSpeed*ROUGH_LIMIT;
+  if(off && speed > wideLimit){
+    const bite = smooth ? JUMP_RELIEF : ROUGH_BITE;
+    speed = Math.max(wideLimit, speed + offRoadDecel*(inCorner?1.6:1)*bite*dt);
   }
+  // the car judders over the rough, and stops juddering while it is in the air
+  rumble = (off && !smooth) ? ROUGH_SHAKE*Math.min(1, speed/(maxSpeed*0.5)) : 0;
+  /* Tell them what to do about it. Nobody works out that jumping is the way
+     back on their own, so the word is on screen every time - but the voice
+     only says it for the first JUMP_SAY excursions, or it nags every lap. */
+  if(off && !wasOff && legsSeen){
+    offRuns++;
+    showCall('JUMP', 'TO GET BACK ON', 'warn'); callTimer = 0;
+    if(offRuns <= JUMP_SAY) sayNow('Jump!');
+  }
+  if(!off && wasOff && !legsWarned) hideCall();
+  wasOff = off;
   /* A jump while you are off the lane drags you back to the road. It does
      nothing when you are already on it, so it cannot be used as a shortcut
      through corners - only as a way out of trouble. */
   if(jumped && Math.abs(playerX) > 0.92){
-    if(onBumpNow(position+playerZ)){
-      bumpT = BUMP_HOLD; jumpT = 0;
-      blip(880,0.18,0.30); showCall('OVER THE BUMP','','good'); callTimer=0.9;
-    } else { jumpT = JUMP_HOLD; blip(660,0.14,0.26); }
+    jumpT = JUMP_HOLD; blip(880,0.18,0.30);
+    if(!legsWarned) hideCall();            // the JUMP prompt has been answered
   }
-  if(bumpT > 0){
-    bumpT -= dt;
-    playerX -= Math.sign(playerX) * Math.min(Math.abs(playerX), BUMP_PULL*dt);
-  } else if(jumpT > 0){
+  if(jumpT > 0){
     jumpT -= dt;
     playerX -= Math.sign(playerX) * Math.min(Math.abs(playerX), JUMP_PULL*dt);
   }
@@ -2039,6 +2019,34 @@ function renderSeg(s){
         ctx.lineTo(px+Math.cos(ang)*len, py+Math.sin(ang)*len);
         ctx.stroke();
       }
+      /* Broken ground, laid over the field brushwork. The strokes above say
+         "painted field"; these say "you do not want to drive on this": short,
+         thick, dark marks lying ACROSS the direction of travel, so the verge
+         reads as ploughed rather than mown. Near bands only - far ground is a
+         couple of pixels tall and the clods would just be dirt on the lens. */
+      if(band > 7){
+        const c0 = Math.max(2, Math.min(9, Math.round(Math.sqrt(gutNear*band)*0.30)));
+        for(let q=0;q<c0;q++){
+          const r1=srand(s.index*5.7+q*3.3), r2=srand(s.index*13.1+q*6.7), r3=srand(s.index*2.3+q*9.1);
+          const py = p2.y + (0.3+r2*0.7)*band;
+          const t  = band>0 ? (py-p2.y)/band : 0;
+          const cx = p2.x + (p1.x-p2.x)*t, cw = p2.w + (p1.w-p2.w)*t;
+          const lg = Math.max(0, cx-cw), rg = Math.max(0, W-(cx+cw));
+          if(lg+rg < 1) continue;
+          const pick = r1*(lg+rg);
+          const px = pick < lg ? pick : (cx+cw) + (pick-lg);
+          const near = Math.min(1, band/26);
+          const len = (4 + r3*9) * (0.5 + near*2.2);
+          ctx.strokeStyle = (r3 > 0.5) ? '#4A3A0E' : '#2E2608';
+          ctx.lineWidth = (2.0 + r2*3.2) * (0.6 + near*1.4);
+          ctx.globalAlpha = 0.50 + r3*0.38;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(px - len*0.5, py);
+          ctx.lineTo(px + len*0.5, py + (r3-0.5)*len*0.4);
+          ctx.stroke();
+        }
+      }
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
     }
@@ -2270,7 +2278,10 @@ function drawCar(x,y,scale,car){
 }
 function drawPlayerCar(){
   const bob=Math.sin(performance.now()/80)*(speed/maxSpeed)*2;
-  const x=W/2+(shake?(Math.random()-0.5)*shake:0);
+  // rumble is the rough ground; shake is a collision. They add.
+  const jx = (shake?(Math.random()-0.5)*shake:0) + (rumble?(Math.random()-0.5)*rumble:0);
+  const jy = rumble ? (Math.random()-0.5)*rumble*0.8 : 0;
+  const x=W/2+jx;
   // bigger on screen only. Overtaking uses playerX against each rival's lane,
   // which is in track space and has not changed, so the gaps stay exactly as
   // wide as they were.
@@ -2280,7 +2291,7 @@ function drawPlayerCar(){
      size of the cars it races. 0.26 -> 0.36 of the canvas puts them level.
      On screen only: overtaking uses playerX against each rival's lane, which is
      in track space and has not changed, so every gap is exactly as wide. */
-  const y=H*0.86+bob, w=W*0.36, h=w*0.60;
+  const y=H*0.86+bob+jy, w=W*0.36, h=w*0.60;
   ctx.save(); ctx.translate(x,y); ctx.rotate(steer*0.075);
   ctx.fillStyle='rgba(0,0,0,0.45)';
   ctx.beginPath(); ctx.ellipse(0,h*0.16,w*0.58,h*0.17,0,0,Math.PI*2); ctx.fill();
@@ -2382,15 +2393,6 @@ function render(){
       const py=lerp(s.p1.screen.y,s.p2.screen.y,pp);
       if(py>s.clip+2) continue;
       drawCypress(px, py, pw*pr.scale, pr.seed);
-    }
-    for(const bp of bumps){
-      if(findSeg(bp.z).index!==s.index) continue;
-      const bpp=(bp.z%segmentLength)/segmentLength;
-      const bw=lerp(s.p1.screen.w,s.p2.screen.w,bpp);
-      const bx=lerp(s.p1.screen.x,s.p2.screen.x,bpp) + bp.side*bw*BUMP_OFF;
-      const by=lerp(s.p1.screen.y,s.p2.screen.y,bpp);
-      if(by>s.clip+2) continue;
-      drawBump(bx, by, bw*0.40, bp.seed);
     }
     for(const c of cars){
       if(c.dz < -segmentLength*2 || c.dz > drawDistance*segmentLength) continue;
