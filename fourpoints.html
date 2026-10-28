@@ -1,0 +1,2175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<title>Four Points</title>
+<style>
+  :root{
+    --ink:#e9e4d8; --dim:#8c8679; --bg:#0b0d10; --panel:#14181d;
+    --line:#2a3038; --good:#7fd4a2; --part:#e0b762; --bad:#e07a62;
+    --beam:#8a7f6b; --load:#d8744f; --cool:#6fa8c7;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden; overscroll-behavior:none; }
+  #stage{ position:fixed; inset:0; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+  .screen{ position:fixed; inset:0; display:none; flex-direction:column;
+    padding:max(14px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right))
+            max(14px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));
+    background:var(--bg); overflow-y:auto; z-index:5; }
+  .screen.on{ display:flex; }
+  h1{ font-size:clamp(22px,4.4vw,34px); margin:0 0 2px; letter-spacing:.02em; font-weight:650; }
+  h2{ font-size:clamp(14px,2.2vw,17px); margin:16px 0 6px; color:var(--dim);
+      font-weight:600; text-transform:uppercase; letter-spacing:.09em; }
+  p{ margin:5px 0; line-height:1.45; font-size:clamp(13px,2vw,15px); color:#cdc7ba; }
+  .sub{ color:var(--dim); font-size:clamp(12px,1.8vw,14px); }
+  button{ font:inherit; font-size:clamp(15px,2.4vw,18px); font-weight:620; color:#10131a;
+    background:var(--ink); border:0; border-radius:11px; padding:14px 22px; margin:6px 8px 6px 0;
+    cursor:pointer; }
+  button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button:disabled{ opacity:.4; }
+  .row{ display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+  .cols{ display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; }
+  .col{ flex:1 1 320px; min-width:280px; }
+
+  table{ border-collapse:collapse; margin:8px 0; font-size:clamp(11px,1.7vw,13px); }
+  th,td{ border:1px solid var(--line); padding:5px 8px; text-align:center; }
+  th{ color:var(--dim); font-weight:600; }
+  td.F{ color:var(--good); font-weight:700; } td.P{ color:var(--part); }
+  td.X{ color:#6b6459; } th.rowh{ text-align:left; color:var(--ink); font-weight:600; }
+
+  #fitline{ font-size:clamp(12px,1.9vw,14px); margin:8px 0; }
+  .okmark{ color:var(--good); } .nomark{ color:var(--bad); }
+  .cal{ display:flex; gap:10px; flex-wrap:wrap; margin:6px 0 2px; }
+  .calchip{ border:1px solid var(--line); border-radius:9px; padding:6px 10px;
+    font-size:clamp(11px,1.7vw,13px); color:var(--dim); }
+  .calchip.done{ border-color:var(--good); color:var(--good); }
+  .calchip.now{ border-color:var(--ink); color:var(--ink); }
+  #calbar{ height:5px; background:var(--line); border-radius:3px; overflow:hidden; margin:8px 0 2px; }
+  #calbar > i{ display:block; height:100%; width:0%; background:var(--good); }
+
+  #rotate{ position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    text-align:center; background:var(--bg); z-index:40; padding:30px; }
+  #rotate.on{ display:flex; }
+  .results{ font-size:clamp(12px,1.9vw,14px); }
+  .results b{ color:var(--ink); }
+  .warn{ color:var(--part); }
+  .bad{ color:var(--bad); }
+  .good{ color:var(--good); }
+  code{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.92em; color:var(--cool); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="rotate"><div><h1>Turn the phone sideways</h1>
+<p>Four Points is the floor game. It wants a landscape picture, lying on its side,
+so the camera can see you from your hands to your feet.</p></div></div>
+
+<div id="sTitle" class="screen on">
+  <h1>Four Points</h1>
+  <p class="sub">Brace on your hands and feet. The structure above you groans before it
+  loads, and you choose how to hold it.</p>
+  <div class="cols">
+    <div class="col">
+      <h2>How it goes</h2>
+      <p>A sound tells you which way the weight is coming. You have a couple of seconds
+      to get into the configuration that carries it, and you have to be <em>there</em> and
+      still when the beat lands. Then the load resolves against the shape you are actually in.</p>
+      <p>It is a duel of turns, not a test of reflexes. Nothing asks you to react to
+      something that has already arrived.</p>
+      <h2>Before anything else</h2>
+      <p>Put the phone on the floor on its side, a couple of metres away, leaning on
+      something so it looks slightly down at you. It has to see the whole of you,
+      hands to feet.</p>
+      <p class="sub">The camera has never been pointed at a body on the floor before this
+      build. The setup below measures whether it can see you properly and tells you
+      straight if it cannot.</p>
+    </div>
+    <div class="col">
+      <h2>Round one</h2>
+      <p>Three ways to brace, three kinds of load, fourteen exchanges. Each way carries
+      exactly one load and fails the other two, so there is no posture to hide in.</p>
+      <div id="t1"></div>
+      <p class="sub">Later rounds use all six, where some postures partly carry a load
+      instead of failing it outright.</p>
+    </div>
+  </div>
+  <div class="row"><button id="bGo">Set up the camera</button></div>
+</div>
+
+<div id="sSetup" class="screen">
+  <h1>Setup</h1>
+  <div class="cols">
+    <div class="col">
+      <div id="fitline" class="sub">starting the camera…</div>
+      <h2>Finding the floor</h2>
+      <p class="sub">The game has no idea which way up the room is. It works that out from
+      your own hands and feet, by watching you hold a few shapes. Everything it scores
+      afterwards is measured against that line, so this part matters more than it looks.</p>
+      <div id="calchips" class="cal"></div>
+      <div id="calbar"><i></i></div>
+      <div id="calmsg" class="sub">&nbsp;</div>
+      <div class="row">
+        <button id="bCal">Start the floor check</button>
+        <button id="bSkipCal" class="ghost">Skip it</button>
+        <button id="bAssist" class="ghost">Prompts: round one only</button>
+      </div>
+      <p class="sub">Skipping is allowed and always will be. The check is advice, not a lock
+      — but a floor line more than about seven degrees out costs a clean hold, measured,
+      so a skipped check means scores you should not trust.</p>
+    </div>
+    <div class="col">
+      <h2>What it found</h2>
+      <div id="calreport" class="results sub">nothing yet.</div>
+      <h2>The full table</h2>
+      <p class="sub">Round one names the posture that answers each load while you
+      learn it. After that it only names the load, and when something gives way it
+      tells you what would have held — so the table gets learned by playing it.
+      This is the whole thing, for studying.</p>
+      <div id="t2"></div>
+    </div>
+  </div>
+  <div class="row"><button id="bStart">Start the round</button>
+  <button id="bBack" class="ghost">Back</button></div>
+</div>
+
+<div id="sEnd" class="screen">
+  <h1 id="endTitle">Round over</h1>
+  <div class="cols">
+    <div class="col"><div id="endBody" class="results"></div></div>
+    <div class="col"><h2>Every exchange</h2><div id="endLog" class="results sub"></div></div>
+  </div>
+  <div class="row">
+    <button id="bAgain">Go again</button>
+    <button id="bRec" class="ghost">Save recording</button>
+    <button id="bHome" class="ghost">Home</button>
+  </div>
+  <p class="sub">The recording is the only floor-level measurement of this camera pipeline
+  that exists. It stays on this phone unless you save it, and nothing is sent anywhere.
+  If something felt wrong, save it and send it over — that is the difference between
+  measuring the cause and guessing at it.</p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+
+/*==SCORER_START==*/
+/* ------------------------------------------------------------------
+   Four Points — the bracing configurations and the matcher.
+
+   The offline harness extracts this exact block out of the shipped HTML
+   and measures it, so what is measured is what ships.
+
+   WHY THIS IS NOT GAP'S SCORER.
+
+   Gap measures limb angles against image-vertical, which is legitimate
+   because a standing player is upright and the floor is the bottom of the
+   picture. A player on their hands and feet has no such luck: the body lies
+   along the floor, and where the floor is in the picture depends entirely on
+   where the phone was put down. An angle-to-vertical feature would measure
+   the phone, not the player.
+
+   So every feature here is measured in the FLOOR FRAME: a direction f along
+   the floor and a normal n away from it, estimated once from the player's own
+   ground contacts, with heights as signed perpendicular distances from that
+   line divided by the player's own torso. The result is scale free, position
+   free AND rotation free. A player filmed from a phone lying at any angle
+   produces the same numbers, which is checked in the harness by generating
+   the same figure at many rotations and asserting the features do not move.
+   ------------------------------------------------------------------ */
+
+const TUNE = {
+  TOL_ANG_IN:   24,    // degrees of angular error still worth full credit
+  TOL_ANG_OUT:  52,
+  TOL_RAT_IN:   0.16,  // ratio error still worth full credit
+  TOL_RAT_OUT:  0.40,
+  LOCK_FULL:    0.74,  // quality that holds the configuration cleanly
+  LOCK_PART:    0.50,  // below this the brace is not the asked-for one
+  REP_QUALITY:  0.68,  // quality needed to count as real work
+  SETTLE_Q:     0.50,
+  SETTLE_MS:    260,   // the brace must be held this long before the lock beat
+  JUDGE_PRE:    140,   // judgment interval opens this far before the lock beat
+  JUDGE_POST:   90,
+  JUDGE_MIN:    3,     // valid observations required inside that interval
+  VIS_GET:      0.15,  // confidence to acquire a landmark
+  VIS_KEEP:     0.04,  // confidence to keep one already acquired
+  VIS_FRACTION: 0.58,  // fraction of a configuration's joints that must be seen
+  FLOOR_RESID:  0.22,  // worst floor-line fit still usable, in torsos
+  HOLD_MOVE:    0.30,  // body movement a transition must actually show
+};
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28,
+            heelA:29, heelB:30, toeA:31, toeB:32 };
+
+const DEG = 180 / Math.PI;
+function dist(a,b){ return Math.hypot(b.x-a.x, b.y-a.y); }
+function wrap(d){ return ((d+180)%360+360)%360 - 180; }
+function ang(a,b){ return Math.atan2(b.y-a.y, b.x-a.x)*DEG; }
+function interior(a,b,c){ return Math.abs(wrap(ang(b,a) - ang(b,c))); }
+function midp(a,b){ return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }; }
+
+/* ---- the floor frame ----------------------------------------------
+   The floor is not given to us. It is estimated from the player's own
+   ground contacts: over a calibration window the extremities that lie
+   furthest out along one direction trace the line the body is resting on.
+   A least-squares fit through those points, with the worst sixth discarded,
+   gives the floor direction. The fit residual is reported, because a bad
+   residual means the camera is somewhere that cannot see the floor and the
+   right answer is to say so, not to score anyway.
+   ------------------------------------------------------------------ */
+function fitOnce(points, band){
+  let best = null;
+  for(let i=0;i<360;i++){
+    const th = i*Math.PI/360;                      // 0..180 degrees
+    const f = { x:Math.cos(th), y:Math.sin(th) };
+    const n = { x:-f.y, y:f.x };
+    let lo=Infinity, hi=-Infinity;
+    for(const p of points){ const d=p.x*n.x+p.y*n.y; if(d<lo)lo=d; if(d>hi)hi=d; }
+    for(const [edge,sign] of [[lo,+1],[hi,-1]]){
+      let cnt=0, ss=0;
+      for(const p of points){
+        const d = Math.abs(p.x*n.x+p.y*n.y - edge);
+        if(d <= band){ cnt++; ss += d*d; }
+      }
+      if(cnt < 3) continue;
+      const resid = Math.sqrt(ss/cnt);
+      const score = cnt - resid/band;              // most contacts, then tightest
+      if(!best || score > best.score){
+        // an origin on the line, at the middle of the contacts that defined it
+        let mx=0,my=0,m=0;
+        for(const p of points){
+          if(Math.abs(p.x*n.x+p.y*n.y - edge) <= band){ mx+=p.x; my+=p.y; m++; }
+        }
+        mx/=m; my/=m;
+        const off = (mx*n.x+my*n.y) - edge;
+        best = { score, count:cnt, f, n:{ x:n.x*sign, y:n.y*sign },
+                 ox:mx-n.x*off, oy:my-n.y*off, resid, onLine:m };
+      }
+    }
+  }
+  return best;
+}
+
+function fitFloor(points, torso){
+  if(!points || points.length < 8 || !(torso > 0.001)) return null;
+  const band = 0.12 * torso;          // a contact is "on the floor" within this
+  let best = fitOnce(points, band);
+  if(best){
+    // How well-determined is that direction? Refit on random halves of the
+    // contacts and take the spread. Measured: a floor off by 7 degrees already
+    // costs a configuration its clean pass, so the game must be able to tell when
+    // its own floor is not worth scoring against.
+    const ang = [];
+    for(let r=0;r<12;r++){
+      const half = points.filter((_,i) => (i*7+r*3) % 2 === 0);
+      if(half.length < 6) continue;
+      const sub = fitOnce(half, band);
+      if(sub) ang.push(Math.atan2(sub.f.y, sub.f.x));
+    }
+    let spread = 0;
+    if(ang.length >= 4){
+      const ref = ang[0];
+      const dd = ang.map(a => { let d=(a-ref); while(d>Math.PI/2)d-=Math.PI; while(d<-Math.PI/2)d+=Math.PI; return d; });
+      const m = dd.reduce((a,b)=>a+b,0)/dd.length;
+      spread = Math.sqrt(dd.reduce((a,b)=>a+(b-m)*(b-m),0)/dd.length) * 180/Math.PI;
+    }
+    best.angSpread = spread;
+    best.trusted = spread <= 5 && best.count >= 6;
+  }
+  return best;
+}
+// n must point AWAY from the floor, which is whichever side the torso is on.
+function orientFloor(fl, torsoPoint){
+  if(!fl) return null;
+  const d = (torsoPoint.x-fl.ox)*fl.n.x + (torsoPoint.y-fl.oy)*fl.n.y;
+  if(d < 0) fl = { f:fl.f, n:{x:-fl.n.x,y:-fl.n.y}, ox:fl.ox, oy:fl.oy, resid:fl.resid };
+  return fl;
+}
+
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i]=false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET;
+    if(v < thr){ latch[i]=false; return null; }
+    latch[i]=true;
+    return { x: 1-p.x, y: p.y, v: v };
+  };
+}
+
+// Which landmarks each feature needs. A feature whose landmarks are not
+// visible produces NOTHING, never a zero: a zero is a claim about the body.
+const NEEDS = {
+  hipH:[J.hipA,J.hipB,J.shA,J.shB],
+  torsoRise:[J.hipA,J.hipB,J.shA,J.shB],
+  kneeRise:[J.knA,J.knB,J.hipA,J.hipB,J.shA,J.shB],
+  handRise:[J.wrA,J.wrB,J.hipA,J.hipB,J.shA,J.shB],
+  elbowRise:[J.elA,J.elB,J.hipA,J.hipB,J.shA,J.shB],
+  footRise:[J.ankA,J.ankB,J.hipA,J.hipB,J.shA,J.shB],
+  base:[J.wrA,J.wrB,J.ankA,J.ankB,J.hipA,J.hipB,J.shA,J.shB],
+  elbowA:[J.shA,J.elA,J.wrA], elbowB:[J.shB,J.elB,J.wrB],
+  kneeA:[J.hipA,J.knA,J.ankA], kneeB:[J.hipB,J.knB,J.ankB],
+  legExt:[J.hipA,J.knA,J.ankA,J.hipB,J.knB,J.ankB],
+  armExt:[J.shA,J.elA,J.wrA,J.shB,J.elB,J.wrB],
+  asym:[J.wrA,J.wrB,J.ankA,J.ankB,J.hipA,J.hipB,J.shA,J.shB],
+};
+const ANGULAR = { elbowA:1, elbowB:1, kneeA:1, kneeB:1 };
+// The features that say the player is actually bearing weight on their limbs
+// rather than lying down in roughly the right outline.
+const BRACE_FEATS = ['hipH','torsoRise','kneeRise','base','legExt','armExt'];
+
+/* ---- features ------------------------------------------------------
+   Heights are signed perpendicular distances from the fitted floor line,
+   divided by the player's own torso. `base` is the along-floor span between
+   the hand contacts and the foot contacts. `torsoRise` is the height of the
+   shoulders above the hips: it is the DIFFERENCE of two heights, which makes
+   it the feature least sensitive to an error in the floor angle, so it is
+   kept and the absolute shoulder height is not — that would be the same
+   quantity a third time.
+   ------------------------------------------------------------------ */
+function features(pose, read, floor){
+  const g = {}, seen = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p){ g[k]=p; seen[J[k]]=1; } }
+  const f = {};
+  const has = (...ks) => ks.every(k => g[k]);
+  if(!has('shA','shB','hipA','hipB')) return { f, seen, torso:null, floor:null };
+
+  const sh = midp(g.shA,g.shB), hp = midp(g.hipA,g.hipB);
+  const torso = dist(sh,hp);
+  if(!(torso > 0.02)) return { f, seen, torso:null, floor:null };
+
+  // the floor frame, oriented so that n points away from the floor
+  const fl = orientFloor(floor, hp);
+  if(!fl) return { f, seen, torso, floor:null };
+  const H = p => ((p.x-fl.ox)*fl.n.x + (p.y-fl.oy)*fl.n.y) / torso;   // height
+  const A = p => ((p.x-fl.ox)*fl.f.x + (p.y-fl.oy)*fl.f.y) / torso;   // along
+
+  f.hipH = H(hp);                       // the one absolute height
+  f.torsoRise = H(sh) - H(hp);          // and everything else is a rise from it
+  if(has('knA','knB'))   f.kneeRise  = H(midp(g.knA,g.knB))  - f.hipH;
+  if(has('wrA','wrB'))   f.handRise  = H(midp(g.wrA,g.wrB))  - f.hipH;
+  if(has('elA','elB'))   f.elbowRise = H(midp(g.elA,g.elB))  - f.hipH;
+  if(has('ankA','ankB')) f.footRise  = H(midp(g.ankA,g.ankB))- f.hipH;
+  if(has('wrA','wrB','ankA','ankB'))
+    f.base = Math.abs(A(midp(g.wrA,g.wrB)) - A(midp(g.ankA,g.ankB)));
+
+  if(has('shA','elA','wrA')) f.elbowA = interior(g.shA,g.elA,g.wrA);
+  if(has('shB','elB','wrB')) f.elbowB = interior(g.shB,g.elB,g.wrB);
+  if(has('hipA','knA','ankA')) f.kneeA = interior(g.hipA,g.knA,g.ankA);
+  if(has('hipB','knB','ankB')) f.kneeB = interior(g.hipB,g.knB,g.ankB);
+
+  // straightness of a limb, as a fraction of its own fully extended length:
+  // the same trick Gap uses for squat depth, and it needs no floor at all
+  const ext = (a,b,c) => { const seg = dist(a,b)+dist(b,c); return seg>0.02 ? dist(a,c)/seg : null; };
+  const le = [];
+  if(has('hipA','knA','ankA')) le.push(ext(g.hipA,g.knA,g.ankA));
+  if(has('hipB','knB','ankB')) le.push(ext(g.hipB,g.knB,g.ankB));
+  if(le.length) f.legExt = le.reduce((a,b)=>a+b,0)/le.length;
+  const ae = [];
+  if(has('shA','elA','wrA')) ae.push(ext(g.shA,g.elA,g.wrA));
+  if(has('shB','elB','wrB')) ae.push(ext(g.shB,g.elB,g.wrB));
+  if(ae.length) f.armExt = ae.reduce((a,b)=>a+b,0)/ae.length;
+
+  // One-sidedness. SIDE is the only configuration with two contacts instead
+  // of four, and from a single camera that is not a count of anything — it is
+  // the difference in height between the two hands plus the two feet, which
+  // is a continuous quantity and does not need the limbs to be told apart.
+  if(has('wrA','wrB','ankA','ankB'))
+    f.asym = Math.abs(H(g.wrA)-H(g.wrB)) + Math.abs(H(g.ankA)-H(g.ankB));
+
+  return { f, seen, torso, floor:fl };
+}
+
+function credit(key, got, want){
+  const angular = ANGULAR[key];
+  const e = angular ? Math.abs(wrap(got-want)) : Math.abs(got-want);
+  const i = angular ? TUNE.TOL_ANG_IN : TUNE.TOL_RAT_IN;
+  const o = angular ? TUNE.TOL_ANG_OUT : TUNE.TOL_RAT_OUT;
+  if(e <= i) return 1;
+  if(e >= o) return 0;
+  return (o-e)/(o-i);
+}
+
+// Quality of a pose against one configuration. Gap's worst-feature cap is
+// kept, and it matters more here: BEAST and SPAN differ mainly in where the
+// hips are, and an average over a dozen features barely notices that.
+function match(cfg, fv){
+  let num=0, den=0, bNum=0, bDen=0, needSeen=0, needTotal=0;
+  const per = {};
+  for(const key in cfg.feats){
+    const w = cfg.w[key] === undefined ? 1 : cfg.w[key];
+    if(w <= 0) continue;
+    const need = NEEDS[key] || [];
+    needTotal += need.length;
+    for(const i of need) if(fv.seen[i]) needSeen++;
+    if(fv.f[key] === undefined) continue;
+    const c = credit(key, fv.f[key], cfg.feats[key]);
+    per[key] = c;
+    num += w*c; den += w;
+    if(BRACE_FEATS.indexOf(key) >= 0){ bNum += w*c; bDen += w; }
+  }
+  let worst = 1;
+  for(const key in per) if((cfg.w[key] === undefined ? 1 : cfg.w[key]) >= 1 && per[key] < worst) worst = per[key];
+  const mean = den>0 ? num/den : 0;
+  const floorOk = !fv.floor || fv.floor.resid/(fv.torso||1) <= TUNE.FLOOR_RESID;
+  return {
+    quality: mean*(0.55 + 0.45*worst),
+    mean, worst,
+    braceQuality: bDen>0 ? bNum/bDen : 1,
+    visible: needTotal>0 ? needSeen/needTotal : 0,
+    readable: den>0 && !!fv.floor && floorOk &&
+              (needTotal===0 || needSeen/needTotal >= TUNE.VIS_FRACTION),
+    floorOk, per,
+  };
+}
+
+/* ---- the six configurations ----------------------------------------
+   Each is described ONLY by what a body can be told to do: how high the hips
+   are, whether the shoulders are above or below them, and where the hands and
+   feet are planted. Every matcher target is then derived from the figure that
+   produces, by running the real feature reader over it. No angle and no ratio
+   below is a typed number: specifying a knee angle as well as a hip height is
+   specifying the same quantity twice, and in Gap the two disagreed by three
+   times the tolerance.
+
+   hipH        hip height above the floor, in torso lengths
+   torsoRise   shoulders above (+) or below (-) the hips, in torso lengths
+   handAhead   hand contact, along the floor from the shoulder (+ toward head)
+   handH       hand contact height (0 = planted)
+   footBehind  foot contact, along the floor from the hip (- toward the feet)
+   footH       foot contact height
+   armMode     'hand'    the palm is the contact
+               'forearm' the elbow is the contact and the forearm lies down
+   kneeBulge/elbowBulge  the direction the joint sticks out, as a vector in
+               figure coordinates. A squatting knee goes forward over the toes,
+               a crab's knee goes up, a plank's hardly bends. Gap picks the fold
+               by a single sign, which is enough for a standing figure seen
+               head-on and is not enough here.
+   oneSided    SIDE only: one hand and one foot carry, the others are raised
+   ------------------------------------------------------------------ */
+// Segment lengths as multiples of the torso (hip joint to shoulder), from
+// ordinary adult proportions. torso ~0.50 m, upper arm 0.33, forearm+hand 0.26,
+// thigh 0.44, shin+foot 0.43.
+// NOTE: Gap uses fore:0.78, which is longer than its own upper arm and cannot be
+// right. There it was harmless, because Gap specifies an arm by its direction and
+// elbow angle and an over-long forearm only drew long arms. Here the forearm length
+// decides where a planted hand sits relative to a planted elbow, and so decides
+// FOREARM's base. It is corrected to 0.52 and that correction is why FOREARM's base
+// comes out at a plank's real length.
+const SEG = { torso:1.0, upper:0.66, fore:0.52, thigh:0.88, shin:0.86,
+              hipHalf:0.26, shHalf:0.40, head:0.44, foot:0.24 };
+
+const CONFIGS = [
+  { id:'BEAST', name:'Beast', cue:'Hands under your shoulders, knees hovering',
+    pose:{ hipH:0.95, torsoRise:0.15, handAhead:0.00, handH:0, footBehind:-1.15, footH:0.22,
+           armMode:'hand', kneeDrop:0.14, elbowBulge:{x:-1,y:0} },
+    w:{ hipH:1.8, torsoRise:1.6, kneeRise:3.0, handRise:1.0, elbowRise:0.8, footRise:0.8,
+        base:1.2, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
+        legExt:1.4, armExt:1.0, asym:1.2 } },
+
+  { id:'FOREARM', name:'Forearm', cue:'Down onto your elbows, body long and low',
+    pose:{ hipH:0.52, torsoRise:0.10, handAhead:0.62, handH:0, footBehind:-1.66, footH:0.08,
+           armMode:'forearm', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1} },
+    w:{ hipH:1.8, torsoRise:1.4, kneeRise:1.2, handRise:1.0, elbowRise:1.8, footRise:0.8,
+        base:1.2, elbowA:1.4, elbowB:1.4, kneeA:0.8, kneeB:0.8,
+        legExt:1.6, armExt:1.2, asym:1.2 } },
+
+  { id:'CRAB', name:'Crab', cue:'Hands behind you, hips up, face the ceiling',
+    pose:{ hipH:0.92, torsoRise:0.08, handAhead:0.38, handH:0, footBehind:-0.95, footH:0.05,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:1,y:-0.3}, kneeBulge:{x:0,y:1} },
+    w:{ hipH:1.8, torsoRise:1.6, kneeRise:3.0, handRise:1.0, elbowRise:0.8, footRise:0.8,
+        base:1.4, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
+        legExt:1.4, armExt:1.0, asym:1.2 } },
+
+  { id:'ANCHOR', name:'Anchor', cue:'Feet flat, hips low, hands planted out in front',
+    pose:{ hipH:0.55, torsoRise:0.50, handAhead:0.10, handH:0, footBehind:0.10, footH:0,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:-0.2}, kneeBulge:{x:1,y:0.2} },
+    w:{ hipH:2.0, torsoRise:1.8, kneeRise:1.4, handRise:1.0, elbowRise:0.8, footRise:0.8,
+        base:1.8, elbowA:0.8, elbowB:0.8, kneeA:1.4, kneeB:1.4,
+        legExt:1.8, armExt:1.0, asym:1.2 } },
+
+  { id:'SIDE', name:'Side', cue:'One hand, one foot, chest turned open',
+    pose:{ hipH:0.62, torsoRise:0.40, handAhead:0.02, handH:0, footBehind:-1.58, footH:0.04,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1}, oneSided:0.62 },
+    w:{ hipH:1.4, torsoRise:1.2, kneeRise:1.0, handRise:1.0, elbowRise:0.8, footRise:1.0,
+        base:1.0, elbowA:0.8, elbowB:0.8, kneeA:0.8, kneeB:0.8,
+        legExt:1.2, armExt:1.0, asym:2.4 } },
+
+  { id:'SPAN', name:'Span', cue:'Hands and feet planted, hips to the sky',
+    pose:{ hipH:1.52, torsoRise:-0.46, handAhead:0.00, handH:0, footBehind:-0.62, footH:0,
+           armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:-0.4,y:-1} },
+    w:{ hipH:2.0, torsoRise:2.0, kneeRise:1.4, handRise:1.0, elbowRise:0.8, footRise:0.8,
+        base:1.4, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
+        legExt:1.6, armExt:1.0, asym:1.2 } },
+];
+
+// Where a joint sits when the bones either side are fixed lengths and the ends
+// are pinned. `away` picks which of the two mirror solutions, measured along
+// the floor normal so the choice means the same thing at any camera angle.
+// `bulge` is the DIRECTION the joint should stick out in, in figure coordinates
+// (+x toward the head, +y away from the floor), not a sign. A squatting knee
+// goes forward over the toes, a crab's knee goes up, a plank's hardly bends at
+// all: one scalar cannot express that, and picking by height alone put ANCHOR's
+// knee in the air and drew a figure no body could copy.
+function hinge(p, r1, q, r2, bulge){
+  const B = bulge || { x:0, y:1 };
+  const dx=q.x-p.x, dy=q.y-p.y, d=Math.hypot(dx,dy);
+  if(d < 1e-6) return { x:p.x + r1*B.x, y:p.y + r1*B.y };
+  if(d >= r1+r2 || d <= Math.abs(r1-r2)) return { x:p.x+dx/d*r1, y:p.y+dy/d*r1 };
+  const a = (r1*r1 - r2*r2 + d*d)/(2*d);
+  const h = Math.sqrt(Math.max(0, r1*r1 - a*a));
+  const bx = p.x+dx*a/d, by = p.y+dy*a/d;
+  const ux = -dy/d*h, uy = dx/d*h;
+  const s1 = { x:bx+ux, y:by+uy }, s2 = { x:bx-ux, y:by-uy };
+  const mid = { x:bx, y:by };
+  const d1 = (s1.x-mid.x)*B.x + (s1.y-mid.y)*B.y;
+  const d2 = (s2.x-mid.x)*B.x + (s2.y-mid.y)*B.y;
+  return d1 >= d2 ? s1 : s2;
+}
+
+// The figure, built in FLOOR coordinates: x runs along the floor toward the
+// head, y runs up away from it. The camera's angle is applied afterwards, so
+// the figure and the features cannot disagree about which way is up.
+function configSkeleton(cfg){
+  const p = cfg.pose;
+  const hip = { x:0, y:p.hipH };
+  const dxT = Math.sqrt(Math.max(0, SEG.torso*SEG.torso - p.torsoRise*p.torsoRise));
+  const sh  = { x:hip.x + dxT, y:hip.y + p.torsoRise };
+  const hipA = { x:hip.x, y:hip.y + SEG.hipHalf*0.0 }, hipB = { x:hip.x, y:hip.y };
+  // the two hips and shoulders separate ACROSS the camera, which a single
+  // camera cannot see, so in the drawn figure they sit together and the
+  // left/right split is applied only when landmarks are generated
+  const shA = { x:sh.x, y:sh.y }, shB = { x:sh.x, y:sh.y };
+  const head = { x:sh.x + SEG.head*dxT/SEG.torso, y:sh.y + SEG.head*p.torsoRise/SEG.torso };
+
+  let wr, el;
+  if(p.armMode === 'forearm'){
+    el = { x: sh.x + p.handAhead - SEG.fore, y: 0 };      // elbow planted
+    wr = { x: el.x + SEG.fore, y: 0 };                     // forearm along the floor
+  } else {
+    wr = { x: sh.x + p.handAhead, y: p.handH };
+    el = hinge(shA, SEG.upper, wr, SEG.fore, p.elbowBulge);
+  }
+  const ank = { x: hip.x + p.footBehind, y: p.footH };
+  let kn, ankle = ank;
+  if(p.kneeDrop !== null && p.kneeDrop !== undefined){
+    // The knees are themselves near the floor and are the thing being held clear.
+    // The knee is placed by its height, and the ANKLE IS THEN DERIVED from it along
+    // the shin: specifying the knee height and the foot position independently
+    // over-determines the shin, and it came out stretched past bone length.
+    const dy = p.kneeDrop - hip.y;
+    const dxk = -Math.sqrt(Math.max(0.0001, SEG.thigh*SEG.thigh - dy*dy));
+    kn = { x: hip.x + dxk, y: p.kneeDrop };
+    const dyS = kn.y - p.footH;
+    ankle = { x: kn.x - Math.sqrt(Math.max(0.0001, SEG.shin*SEG.shin - dyS*dyS)), y: p.footH };
+  } else {
+    kn = hinge(hipB, SEG.thigh, ank, SEG.shin, p.kneeBulge);
+  }
+  const ankF = ankle;
+  const toe = { x: ankF.x - SEG.foot, y: Math.max(0, ankF.y - 0.04) };
+  return { sh, hip, shA, shB, hipA, hipB, el, wr, kn, ank:ankF, head, toe };
+}
+
+// Turn the figure into landmarks the real feature reader consumes, rotated by
+// `rot` and placed at `cx, cy` at scale `s`. The across-camera separation of
+// the paired joints is added here and nowhere else.
+function skeletonLandmarks(g, s, cx, cy, rot, oneSided){
+  const out = [];
+  for(let i=0;i<33;i++) out.push({ x:0.5, y:0.5, z:0, visibility:0 });
+  const c = Math.cos(rot||0), sn = Math.sin(rot||0);
+  const put = (i,q,vis) => {
+    const X = q.x*c - q.y*sn, Y = q.x*sn + q.y*c;
+    out[i] = { x: 1-(cx + X*s), y: cy - Y*s, z:0, visibility: vis===undefined?0.99:vis };
+  };
+  // Paired joints separate ACROSS the player's body. From a side-on camera that is
+  // into the screen and unseeable; from an oblique one it reads along the floor. It
+  // is never a difference in height, so the split goes in x and never in y.
+  const across = (q,k) => ({ x:q.x + k, y:q.y });
+  put(J.shA, across(g.sh,  0.02)); put(J.shB, across(g.sh, -0.02));
+  put(J.hipA,across(g.hip, 0.02)); put(J.hipB,across(g.hip,-0.02));
+  put(J.elA, across(g.el,  0.02)); put(J.elB, across(g.el, -0.02));
+  put(J.knA, across(g.kn,  0.02)); put(J.knB, across(g.kn, -0.02));
+  put(J.nose, g.head);
+  if(oneSided){
+    // one hand and one foot carry; the other two are lifted clear of the floor
+    put(J.wrA, g.wr); put(J.wrB, { x:g.wr.x, y:g.wr.y + oneSided });
+    put(J.ankA, g.ank); put(J.ankB, { x:g.ank.x, y:g.ank.y + oneSided });
+  } else {
+    put(J.wrA, across(g.wr, 0.02)); put(J.wrB, across(g.wr, -0.02));
+    put(J.ankA,across(g.ank,0.02)); put(J.ankB,across(g.ank,-0.02));
+  }
+  put(J.toeA, across(g.toe, 0.02)); put(J.toeB, across(g.toe,-0.02));
+  put(J.heelA,across(g.ank, 0.02)); put(J.heelB,across(g.ank,-0.02));
+  return out;
+}
+
+// The floor line of a generated figure, in the same image coordinates the
+// reader works in: this is what the live game estimates from real contacts.
+function floorOf(g, s, cx, cy, rot){
+  const c = Math.cos(rot||0), sn = Math.sin(rot||0);
+  // The reader hands features() x already mirrored back (x: 1-p.x), so the floor
+  // line must be expressed in THAT space, not in MediaPipe's.
+  const pt = q => { const X=q.x*c-q.y*sn, Y=q.x*sn+q.y*c; return { x:cx+X*s, y:cy-Y*s }; };
+  const a = pt({ x:-3, y:0 }), b = pt({ x:3, y:0 });
+  const f = { x:(b.x-a.x), y:(b.y-a.y) };
+  const L = Math.hypot(f.x,f.y);
+  return { f:{x:f.x/L,y:f.y/L}, n:{x:-f.y/L,y:f.x/L}, ox:a.x, oy:a.y, resid:0 };
+}
+
+function featsFromPose(cfg, rot){
+  const g = configSkeleton(cfg);
+  const s = 0.11, cx = 0.42, cy = 0.74, r = rot||0;
+  const lm = skeletonLandmarks(g, s, cx, cy, r, cfg.pose.oneSided);
+  return features(lm, makeReader(), floorOf(g, s, cx, cy, r));
+}
+
+// Every matcher target in the game is produced here, from the figure the
+// player is shown. Nothing in the configurations above is a typed angle.
+for(const c of CONFIGS) c.feats = featsFromPose(c, 0).f;
+
+// How close any limb is to being stretched perfectly straight. The hinge
+// solver quietly returns a straight line when the bones cannot reach, which
+// draws a figure nobody can copy, so this is checked rather than hoped.
+// How close any limb is to being stretched perfectly straight. The hinge solver
+// quietly returns a straight line when the bones cannot reach, which draws a figure
+// nobody can copy, so this is checked rather than hoped.
+// `thigh` and `shin` must be 1.000: a correct hinge places the knee exactly one bone
+// from each end, and anything else means a bone was stretched to make the pose fit.
+function reachReport(cfg){
+  const g = configSkeleton(cfg);
+  return {
+    arm: dist(g.sh,g.wr)/(SEG.upper+SEG.fore),
+    leg: dist(g.hip,g.ank)/(SEG.thigh+SEG.shin),
+    thigh: dist(g.hip,g.kn)/SEG.thigh,
+    shin: dist(g.kn,g.ank)/SEG.shin,
+  };
+}
+
+/* ---- the loads and the resolution table ----------------------------
+   Verified by exact dynamic programming over the whole state space: with
+   three or fewer of the six configurations a player clears 21.2% of rounds,
+   with two 0.5%. The constraint that does the work is that every PAIR of
+   configurations shares at least one load they both fail, which is checkable
+   on the table by eye. If the vocabulary changes, check that first.
+   ------------------------------------------------------------------ */
+const LOADS = [
+  { id:'Compress', name:'Compression', cue:'a long groan from straight above' },
+  { id:'ShearL',   name:'Shear, left',  cue:'a creak pushing to your left' },
+  { id:'ShearR',   name:'Shear, right', cue:'a creak pushing to your right' },
+  { id:'Torsion',  name:'Torsion',      cue:'a dry twist through the frame' },
+  { id:'Settle',   name:'Settle',       cue:'a slow sag, everything going at once' },
+  { id:'Adjacent', name:'Adjacent',     cue:'a knock from the side of the room' },
+];
+const TABLE = {
+  BEAST:   { Compress:'X', ShearL:'X', ShearR:'P', Torsion:'F', Settle:'X', Adjacent:'X' },
+  FOREARM: { Compress:'F', ShearL:'P', ShearR:'X', Torsion:'X', Settle:'X', Adjacent:'X' },
+  CRAB:    { Compress:'X', ShearL:'F', ShearR:'X', Torsion:'X', Settle:'X', Adjacent:'P' },
+  ANCHOR:  { Compress:'P', ShearL:'X', ShearR:'X', Torsion:'X', Settle:'X', Adjacent:'F' },
+  SIDE:    { Compress:'P', ShearL:'X', ShearR:'X', Torsion:'X', Settle:'F', Adjacent:'P' },
+  SPAN:    { Compress:'X', ShearL:'X', ShearR:'F', Torsion:'X', Settle:'X', Adjacent:'X' },
+};
+const DAMAGE = { F:0, P:1, X:3 };
+
+// Round 1 is the three-configuration milestone table, which has its own kill
+// test and passes it at twelve loads or more. It is here so the first thing a
+// player meets is also the thing the camera has to prove it can see.
+// Chosen for SEPARABILITY, not from the kill test, which cannot tell one
+// rock-paper-scissors triple from another: all of them give 2.7% at fourteen
+// loads. What differs is whether a camera on the floor can tell the three apart.
+// Measured worst cross-score over the candidate triples:
+//   FOREARM + ANCHOR + SPAN   0.265   <-- this one
+//   BEAST + FOREARM + ANCHOR  0.337
+//   BEAST + FOREARM + SIDE    0.388   (doc 12's three)
+//   BEAST + CRAB + ANCHOR     0.456
+// These three are also the grossest postures in the vocabulary — plank, deep
+// squat, pike — distinguished by where the hips are rather than by a fine
+// distinction like BEAST's knees hovering two inches off the floor, which is
+// exactly the kind of thing a sloppy player and a single camera will disagree on.
+//
+// It is NOT a slice of the six-config table: every three-configuration slice of
+// that table carries a partial, and the milestone is defined as no-partials. The
+// two slices that are already clean rock-paper-scissors are BEAST+CRAB+SIDE and
+// CRAB+SIDE+SPAN, and both are built on the two configurations the camera reads
+// worst. So round one is the milestone in its own right, which is what doc 12
+// says it is: ANCHOR fully fails Compression here and partly carries it later.
+const MILESTONE = {
+  configs:['FOREARM','ANCHOR','SPAN'],
+  loads:['Compress','Adjacent','ShearR'],
+  n:14,
+  table:{ FOREARM:{ Compress:'F', Adjacent:'X', ShearR:'X' },
+          ANCHOR:{ Compress:'X', Adjacent:'F', ShearR:'X' },
+          SPAN:{ Compress:'X', Adjacent:'X', ShearR:'F' } },
+};
+
+/* ---- judging one exchange ------------------------------------------
+   `samples` are pose observations stamped with the time the CAMERA captured
+   them, already shifted into the game's clock. The lock beat is in that same
+   clock. Nothing here looks at render order.
+
+   Gap's hard-won lesson applies unchanged and the caller must respect it:
+   judging AT the lock beat reads an interval the estimates have not reached
+   yet, and in Gap that returned UNSCORED for every wall in a round while
+   every unit test passed.
+   ------------------------------------------------------------------ */
+function judgeLock(cfg, samples, lockAt, openedF){
+  const lo = lockAt - TUNE.JUDGE_PRE, hi = lockAt + TUNE.JUDGE_POST;
+  const win = samples.filter(s => s.t >= lo && s.t <= hi && s.m.readable);
+  if(win.length < TUNE.JUDGE_MIN){
+    const anyFloor = samples.some(s => s.t>=lo && s.t<=hi && s.m.floorOk === false);
+    return { verdict:'UNSCORED', outcome:null,
+             reason: anyFloor ? 'the floor could not be found in the picture'
+                             : 'not enough clear views of you',
+             quality:0, rep:false, damage:0, points:0, samples:win.length };
+  }
+  let best = win[0];
+  for(const s of win) if(s.m.quality > best.m.quality) best = s;
+
+  const sLo = lockAt - TUNE.SETTLE_MS;
+  const held = samples.filter(s => s.t >= sLo && s.t <= lockAt);
+  const heldSeen = held.filter(s => s.m.readable);
+  const settled = heldSeen.length >= 2
+               && heldSeen.length >= Math.ceil(held.length * 0.5)
+               && heldSeen.every(s => s.m.quality >= TUNE.SETTLE_Q);
+
+  const q = best.m.quality;
+  let verdict;
+  if(q >= TUNE.LOCK_FULL && settled) verdict = 'LOCKED';
+  else if(q >= TUNE.LOCK_PART) verdict = 'LOOSE';
+  else verdict = 'SLIPPED';
+
+  // A repetition is stricter than a score. A player who lies on the floor in
+  // roughly the right outline may score; they have not braced, and the brace
+  // features are what says so.
+  const rep = (q >= TUNE.REP_QUALITY) && best.m.braceQuality >= TUNE.REP_QUALITY
+              && verdict !== 'SLIPPED';
+  return { verdict, quality:q, braceQuality:best.m.braceQuality, settled, rep,
+           samples:win.length, bestAt:best.t };
+}
+
+// How the load resolves against the configuration the player actually held.
+// The verdict from the camera and the outcome from the table are kept apart:
+// a player who held the right configuration loosely takes the partial, never
+// the full fail, because the loose hold is the game's reading and not a claim
+// that they chose wrong.
+function resolve(load, heldId, judged, table){
+  if(!judged || judged.verdict === 'UNSCORED')
+    return { outcome:null, damage:0, points:0, unscored:true };
+  const row = table[heldId];
+  const cell = row ? row[load] : 'X';
+  let outcome = cell;
+  if(judged.verdict === 'LOOSE' && cell === 'F') outcome = 'P';
+  if(judged.verdict === 'SLIPPED') outcome = 'X';
+  const damage = DAMAGE[outcome];
+  let points = outcome === 'F' ? 100 : outcome === 'P' ? 35 : 0;
+  if(outcome !== 'X' && judged.rep) points += 20;
+  return { outcome, damage, points, unscored:false };
+}
+/*==SCORER_END==*/
+/* ================= camera, pose, the clock and the recording =================
+   Lifted from gap.html, which is the tested version of all of this, with the
+   changes a floor game forces: a landscape picture, a fit check that wants the
+   whole body rather than knees and ankles, and the floor estimate the standing
+   games never needed. */
+
+const BUILD = 'fourpoints-1';
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fsr = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fsr, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fsr, opts("CPU")); }
+}
+
+async function startCamera(){
+  // Ask for a landscape picture. The phone is lying on its side on the floor, so
+  // what we want is the sensor's long axis across the room.
+  const tries = [
+    { video:{ facingMode:'user', width:{ ideal:960 }, height:{ ideal:720 } }, audio:false },
+    { video:{ facingMode:'user' }, audio:false },
+    { video:true, audio:false },
+  ];
+  let err = null;
+  for(const t of tries){
+    try { video.srcObject = await navigator.mediaDevices.getUserMedia(t); await video.play(); return true; }
+    catch(e){ err = e; }
+  }
+  throw err || new Error('no camera');
+}
+
+/* ---- the recording ------------------------------------------------
+   This build's recording is the most valuable thing in it. Nobody has ever
+   pointed this pipeline at a body on the floor, so until this file exists every
+   number about floor-level tracking in the project is synthetic.
+
+   Each frame keeps the time the CAMERA captured it and the separate time the
+   estimate came back, every landmark with its own confidence, and the gaps where
+   frames never arrived. The floor estimate and its uncertainty are recorded too,
+   because every score depends on it and it is the one input the player cannot
+   see. Coordinates are raw, so a replay reproduces exactly what the game saw. */
+const REC_CAP = 44000;
+const rec = [];
+let recDropped = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'fourpoints', build:BUILD,
+    orientation:(innerHeight > innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'capture = video.currentTime in seconds on the video clock; ready = performance.now() in ms when the estimate returned; clock = capture mapped into the performance clock by the running offset, minus POSE_LATENCY_MS',
+    floorNote:'floor.f and floor.n are in MIRRORED frame coordinates (x: 1-x), the space the feature reader works in',
+    latencyAssumed: POSE_LATENCY_MS, tune: TUNE });
+}
+
+/* The single clock. video.currentTime is the only timestamp belonging to the
+   camera rather than the renderer, so it is what every judgment aligns to.
+
+   POSE_LATENCY_MS is ASSUMED, not measured. Measuring it needs the loopback in
+   the gate, where the screen shows a counter and the camera reads it back with
+   no human in the middle. Until that runs, 200 ms is a placeholder in the middle
+   of the published 150-250 ms band, recorded in every file so any session can be
+   re-judged once the real figure exists. */
+let POSE_LATENCY_MS = 200;
+let clockOffset = null;
+function nowClock(){ return performance.now(); }
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset*0.9 + off*0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+
+/* ================= canvas ================= */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', () => { resize(); checkOrientation(); });
+
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);        // contain: the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+// A landmark in canvas pixels. Landmarks are normalised to the CAMERA frame, not
+// the canvas, so anything drawn next to the body goes through this. In Sparks,
+// skipping it put a whole round's targets off the top of the picture.
+function px(p){ const f = videoFit(); return { x:f.dx + (1-p.x)*f.dw, y:f.dy + p.y*f.dh }; }
+// and the same mapping for a point already in the mirrored reader space
+function pxm(p){ const f = videoFit(); return { x:f.dx + p.x*f.dw, y:f.dy + p.y*f.dh }; }
+
+function checkOrientation(){
+  const portrait = innerHeight > innerWidth;
+  document.getElementById('rotate').classList.toggle('on', portrait && state !== 'idle');
+}
+
+/* ================= the floor ================= */
+/* Everything the matcher measures is a height above the floor or a rise from the
+   hip, and the floor is estimated from the player's own body. Get this wrong and
+   every score afterwards is wrong in a way the player cannot see or fix, so it is
+   measured, cross-checked between postures, and reported. */
+let floor = null;              // the accepted floor line
+let floorInfo = null;          // what the fit reported about itself
+let calPoints = [];            // every landmark seen during calibration
+let calPerPose = [];           // and the same, split by which posture was held
+
+const CAL_LM = [J.shA,J.shB,J.elA,J.elB,J.wrA,J.wrB,J.hipA,J.hipB,
+                J.knA,J.knB,J.ankA,J.ankB,J.heelA,J.heelB,J.toeA,J.toeB,J.nose];
+
+function collectFloorPoints(bucket){
+  // Every landmark, not only the ones expected to be touching. The floor is the
+  // support line of the WHOLE body: offered only the contacts, the fit can tilt
+  // to pivot on the hands and pick up the elbows, and in the harness that put
+  // one posture 11.9 degrees out while still calling itself trusted.
+  for(const i of CAL_LM){
+    const p = read(pose, i);
+    if(p) bucket.push({ x:p.x, y:p.y });
+  }
+}
+function torsoNow(){
+  const a=read(pose,J.shA), b=read(pose,J.shB), c=read(pose,J.hipA), d=read(pose,J.hipB);
+  if(!a||!b||!c||!d) return null;
+  return dist(midp(a,b), midp(c,d));
+}
+function floorAngle(fl){ return Math.atan2(fl.f.y, fl.f.x)*180/Math.PI; }
+function angleBetween(a, b){
+  let d = Math.abs(floorAngle(a) - floorAngle(b)) % 180;
+  return d > 90 ? 180-d : d;
+}
+
+// Fit the pooled floor, then check the postures agree with each other. The
+// bootstrap inside fitFloor catches NOISE; it cannot catch a systematic error,
+// because every subsample makes the same mistake. Two postures disagreeing can.
+function acceptFloor(torso){
+  const pooled = fitFloor(calPoints, torso);
+  if(!pooled) return { ok:false, why:'not enough of you was visible to find the floor' };
+  const per = [];
+  for(const b of calPerPose){
+    const f = fitFloor(b.pts, torso);
+    if(f) per.push({ id:b.id, f, ang:floorAngle(f) });
+  }
+  let worstDisagree = 0, worstPair = '';
+  for(const a of per) for(const b of per){
+    if(a.id === b.id) continue;
+    const d = angleBetween(a.f, b.f);
+    if(d > worstDisagree){ worstDisagree = d; worstPair = a.id+' and '+b.id; }
+  }
+  const info = { resid: pooled.resid/torso, spread: pooled.angSpread,
+                 onLine: pooled.count, disagree: worstDisagree, worstPair,
+                 per: per.map(p=>({ id:p.id, ang:+p.ang.toFixed(2) })),
+                 angle:+floorAngle(pooled).toFixed(2), torso:+torso.toFixed(4) };
+  // A floor off by seven degrees already costs a clean hold, measured in the
+  // harness, so the budget for everything that can go wrong here is five.
+  if(pooled.angSpread > 5) return { ok:false, why:'the floor line is not well determined — spread '+pooled.angSpread.toFixed(1)+' degrees', info };
+  if(worstDisagree > 6) return { ok:false, why:'the postures disagree about where the floor is by '+worstDisagree.toFixed(1)+' degrees ('+worstPair+')', info };
+  if(pooled.count < 8) return { ok:false, why:'too few of your hands and feet were on the floor in the picture', info };
+  return { ok:true, floor:pooled, info };
+}
+
+/* ---- is the whole of you in the picture? ----
+   The Sparks lesson, which cost a whole round: the fit test existed and was
+   correct, and the thing that needed it never called it. So this is called by
+   the setup gate AND on every judgment, and a judgment whose body is not in the
+   picture is UNSCORED rather than a failure. */
+function bodyInFrame(){
+  const need = [J.shA,J.shB,J.hipA,J.hipB,J.wrA,J.wrB,J.ankA,J.ankB];
+  let seen = 0, edge = null;
+  for(const i of need){
+    const p = read(pose, i);
+    if(!p) continue;
+    seen++;
+    if(p.x < 0.02) edge = 'left'; else if(p.x > 0.98) edge = 'right';
+    else if(p.y < 0.02) edge = 'top'; else if(p.y > 0.98) edge = 'bottom';
+  }
+  return { ok: seen >= 6 && !edge, seen, total:need.length, edge };
+}
+
+async function keepAwake(){
+  try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state !== 'idle') keepAwake();
+});
+let wake = null;
+
+/* ================= audio =================
+   The telegraph has to work on sound alone. In BEAST and FOREARM the player is
+   looking at the floor, and in CRAB they are looking at the ceiling, so for a
+   good part of this game the screen is not in view. That is a harder requirement
+   than any other game in the project has had, and it drives the design: the six
+   loads are separated on FIVE axes at once — register, texture, pitch motion,
+   stereo position and rhythm — so that no two of them differ in only one way and
+   a phone speaker losing the stereo image cannot merge a pair.
+
+   There is a matching visual for every load as well. That is redundancy for when
+   the player can see the screen, not the primary channel. All synthesised, no
+   files, no licensed audio. */
+
+let actx = null, master = null, noiseBuf = null, bed = null, bedGain = null;
+
+function initAudio(){
+  if(actx) return;
+  try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
+  master = actx.createGain(); master.gain.value = 0.9; master.connect(actx.destination);
+  const n = actx.sampleRate * 2;
+  noiseBuf = actx.createBuffer(1, n, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<n;i++) d[i] = Math.random()*2-1;
+}
+function resumeAudio(){ if(actx && actx.state === 'suspended') actx.resume(); }
+
+function noise(dur){
+  const s = actx.createBufferSource();
+  s.buffer = noiseBuf; s.loop = true;
+  s.start(); s.stop(actx.currentTime + dur + 0.1);
+  return s;
+}
+function panner(p){
+  if(actx.createStereoPanner){ const q = actx.createStereoPanner(); q.pan.value = p; return q; }
+  const q = actx.createGain(); return q;          // mono fallback: the other four axes carry it
+}
+function env(g, t0, peak, attack, hold, release){
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(peak, t0+attack);
+  g.gain.setValueAtTime(peak, t0+attack+hold);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+attack+hold+release);
+}
+
+/* ---- the six telegraphs ---- */
+const TELEGRAPH = {
+  // LOW + tonal + falling + centre + sustained
+  Compress(t0, dur){
+    const o = actx.createOscillator(), g = actx.createGain(), lp = actx.createBiquadFilter();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(78, t0);
+    o.frequency.exponentialRampToValueAtTime(46, t0+dur);
+    lp.type='lowpass'; lp.frequency.setValueAtTime(420, t0);
+    lp.frequency.exponentialRampToValueAtTime(190, t0+dur);
+    env(g, t0, 0.34, 0.14, dur*0.6, dur*0.4);
+    o.connect(lp); lp.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0+dur+0.3);
+    const sub = actx.createOscillator(), sg = actx.createGain();
+    sub.type='sine'; sub.frequency.setValueAtTime(39, t0);
+    sub.frequency.exponentialRampToValueAtTime(23, t0+dur);
+    env(sg, t0, 0.22, 0.2, dur*0.6, dur*0.4);
+    sub.connect(sg); sg.connect(master); sub.start(t0); sub.stop(t0+dur+0.3);
+  },
+  // MID + resonant noise + RISING + LEFT + sustained
+  ShearL(t0, dur){ shear(t0, dur, -0.85, 240, 760); },
+  // MID + resonant noise + FALLING + RIGHT + sustained
+  ShearR(t0, dur){ shear(t0, dur, +0.85, 760, 240); },
+  // MID + two tones beating against each other + centre + wobble
+  Torsion(t0, dur){
+    const p = panner(0), g = actx.createGain();
+    env(g, t0, 0.30, 0.10, dur*0.65, dur*0.35);
+    for(const f of [196, 203.5]){                 // 7.5 Hz beat: an audible wring
+      const o = actx.createOscillator();
+      o.type='triangle'; o.frequency.setValueAtTime(f, t0);
+      o.frequency.linearRampToValueAtTime(f*0.94, t0+dur);
+      o.connect(g); o.start(t0); o.stop(t0+dur+0.2);
+    }
+    g.connect(p); p.connect(master);
+    // a dry wooden transient so it is identifiable from its first instant
+    knock(t0, 0.9, 1400, 0.05);
+  },
+  // LOW broadband + noise + descending filter + centre + long and soft
+  Settle(t0, dur){
+    const s = noise(dur), lp = actx.createBiquadFilter(), g = actx.createGain();
+    lp.type='lowpass'; lp.Q.value = 2;
+    lp.frequency.setValueAtTime(900, t0);
+    lp.frequency.exponentialRampToValueAtTime(110, t0+dur);
+    env(g, t0, 0.30, 0.30, dur*0.4, dur*0.5);
+    s.connect(lp); lp.connect(g); g.connect(master);
+    const o = actx.createOscillator(), og = actx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(58, t0);
+    o.frequency.exponentialRampToValueAtTime(40, t0+dur);
+    env(og, t0, 0.14, 0.3, dur*0.4, dur*0.5);
+    o.connect(og); og.connect(master); o.start(t0); o.stop(t0+dur+0.3);
+  },
+  // MID-HIGH + transient + no pitch motion + wide + TWO knocks
+  Adjacent(t0, dur){
+    knock(t0, 0.55, 900, 0.09, -0.6);
+    knock(t0+0.20, 0.45, 760, 0.11, +0.6);
+    const s = noise(dur*0.5), hp = actx.createBiquadFilter(), g = actx.createGain();
+    hp.type='highpass'; hp.frequency.value = 500;
+    env(g, t0+0.03, 0.08, 0.02, 0.05, dur*0.4);
+    s.connect(hp); hp.connect(g); g.connect(master);
+  },
+};
+function shear(t0, dur, pan, f0, f1){
+  const s = noise(dur), bp = actx.createBiquadFilter(), g = actx.createGain(), p = panner(pan);
+  bp.type='bandpass'; bp.Q.value = 7.5;
+  bp.frequency.setValueAtTime(f0, t0);
+  bp.frequency.exponentialRampToValueAtTime(f1, t0+dur);
+  env(g, t0, 0.40, 0.09, dur*0.55, dur*0.45);
+  s.connect(bp); bp.connect(g); g.connect(p); p.connect(master);
+  // a touch of tone riding the noise so the pitch direction is unmistakable
+  const o = actx.createOscillator(), og = actx.createGain();
+  o.type='sawtooth';
+  o.frequency.setValueAtTime(f0*0.5, t0);
+  o.frequency.exponentialRampToValueAtTime(f1*0.5, t0+dur);
+  env(og, t0, 0.10, 0.09, dur*0.55, dur*0.45);
+  o.connect(og); og.connect(p); o.start(t0); o.stop(t0+dur+0.2);
+}
+function knock(t0, amp, freq, dur, pan){
+  if(!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain(), p = panner(pan||0);
+  o.type='triangle';
+  o.frequency.setValueAtTime(freq, t0);
+  o.frequency.exponentialRampToValueAtTime(freq*0.35, t0+dur);
+  g.gain.setValueAtTime(amp*0.5, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  o.connect(g); g.connect(p); p.connect(master);
+  o.start(t0); o.stop(t0+dur+0.05);
+  const s = noise(dur), hp = actx.createBiquadFilter(), ng = actx.createGain();
+  hp.type='highpass'; hp.frequency.value = 1800;
+  ng.gain.setValueAtTime(amp*0.28, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0+dur*0.8);
+  s.connect(hp); hp.connect(ng); ng.connect(p);
+}
+function playTelegraph(loadId, dur){
+  if(!actx) return;
+  resumeAudio();
+  const fn = TELEGRAPH[loadId];
+  if(fn) fn(actx.currentTime + 0.02, dur/1000);
+}
+
+/* ---- the lock beat, and how a load resolves ---- */
+function lockBeat(){
+  if(!actx) return;
+  const t0 = actx.currentTime + 0.01;
+  knock(t0, 1.0, 320, 0.13);
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type='square'; o.frequency.setValueAtTime(1320, t0);
+  g.gain.setValueAtTime(0.10, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+0.05);
+  o.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.08);
+}
+function outcomeSound(outcome){
+  if(!actx) return;
+  const t0 = actx.currentTime + 0.01;
+  if(outcome === 'F'){                      // it holds: one solid settled thunk
+    knock(t0, 0.8, 180, 0.22);
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(220, t0);
+    o.frequency.linearRampToValueAtTime(330, t0+0.09);
+    env(g, t0, 0.18, 0.01, 0.05, 0.22);
+    o.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.4);
+  } else if(outcome === 'P'){                // it strains: a creak that does not resolve
+    const s = noise(0.5), bp = actx.createBiquadFilter(), g = actx.createGain();
+    bp.type='bandpass'; bp.Q.value=9; bp.frequency.setValueAtTime(520,t0);
+    bp.frequency.linearRampToValueAtTime(380,t0+0.4);
+    env(g, t0, 0.26, 0.02, 0.12, 0.3);
+    s.connect(bp); bp.connect(g); g.connect(master);
+  } else {                                   // it gives: something comes down
+    knock(t0, 1.0, 120, 0.4);
+    const s = noise(0.7), lp = actx.createBiquadFilter(), g = actx.createGain();
+    lp.type='lowpass'; lp.frequency.setValueAtTime(1600,t0);
+    lp.frequency.exponentialRampToValueAtTime(140,t0+0.6);
+    env(g, t0, 0.34, 0.01, 0.1, 0.55);
+    s.connect(lp); lp.connect(g); g.connect(master);
+  }
+}
+function unscoredSound(){
+  if(!actx) return;
+  const t0 = actx.currentTime + 0.01;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type='sine'; o.frequency.value = 440;
+  env(g, t0, 0.06, 0.02, 0.04, 0.12);
+  o.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.25);
+}
+
+/* ---- the bed: a drone that tightens as the structure takes damage ---- */
+function startBed(){
+  if(!actx || bed) return;
+  bed = noise(100000);
+  const lp = actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value = 160;
+  bedGain = actx.createGain(); bedGain.gain.value = 0.05;
+  bed.connect(lp); lp.connect(bedGain); bedGain.connect(master);
+  const o = actx.createOscillator(); o.type='sine'; o.frequency.value = 47;
+  const og = actx.createGain(); og.gain.value = 0.05;
+  o.connect(og); og.connect(bedGain); o.start();
+  bed._osc = o;
+}
+function bedLevel(frac){
+  if(bedGain) bedGain.gain.setTargetAtTime(0.05 + 0.12*frac, actx.currentTime, 0.3);
+  if(bed && bed._osc) bed._osc.frequency.setTargetAtTime(47 + 9*frac, actx.currentTime, 0.4);
+}
+function stopBed(){
+  if(!bed) return;
+  try { bed.stop(); bed._osc.stop(); } catch(e){}
+  bed = null; bedGain = null;
+}
+
+/* ================= drawing =================
+   Landscape. The camera picture sits underneath, dimmed; the player's own
+   skeleton is drawn over it so they can see what the game can see; the
+   configuration being asked for is drawn as a ghost LYING ALONG THE FLOOR THE
+   GAME FOUND, at the player's own size and in their own place, which is the one
+   use of the floor frame the player sees directly. The structure and the load
+   are an overlay at the top.
+
+   Gap's rule holds here and is the reason the lock beat is masked rather than
+   animated: the body on screen is about a fifth of a second behind the body that
+   was judged, so animating the load passing through the player would visibly
+   contradict the result that was scored. */
+
+const SK = [[J.shA,J.shB],[J.shA,J.hipA],[J.shB,J.hipB],[J.hipA,J.hipB],
+            [J.shA,J.elA],[J.elA,J.wrA],[J.shB,J.elB],[J.elB,J.wrB],
+            [J.hipA,J.knA],[J.knA,J.ankA],[J.hipB,J.knB],[J.knB,J.ankB],
+            [J.ankA,J.toeA],[J.ankB,J.toeB]];
+
+function drawVideo(dim){
+  const f = videoFit();
+  ctx.save();
+  ctx.translate(W,0); ctx.scale(-1,1);          // mirrored, so left looks like left
+  ctx.drawImage(video, W-f.dx-f.dw, f.dy, f.dw, f.dh);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(11,13,16,'+dim+')';
+  ctx.fillRect(0,0,W,H);
+}
+
+function drawSkeleton(alpha){
+  if(!pose) return;
+  ctx.save();
+  ctx.lineWidth = 4; ctx.lineCap='round';
+  ctx.strokeStyle = 'rgba(233,228,216,'+alpha+')';
+  for(const [a,b] of SK){
+    const p = read(pose,a), q = read(pose,b);
+    if(!p||!q) continue;
+    const u = pxm(p), v = pxm(q);
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(v.x,v.y); ctx.stroke();
+  }
+  // a dot at every joint the game can actually see, which is also the honest
+  // answer to "why did it not score me": the dots that are missing are the reason
+  ctx.fillStyle = 'rgba(111,168,199,'+alpha+')';
+  for(const k in J){
+    const p = read(pose, J[k]);
+    if(!p) continue;
+    const u = pxm(p);
+    ctx.beginPath(); ctx.arc(u.x,u.y,3.5,0,7); ctx.fill();
+  }
+  const n = read(pose, J.nose);
+  if(n){ const u = pxm(n);
+    ctx.strokeStyle='rgba(233,228,216,'+alpha+')'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(u.x,u.y,13,0,7); ctx.stroke(); }
+  ctx.restore();
+}
+
+function drawFloor(){
+  if(!floor) return;
+  const f = videoFit();
+  const a = pxm({ x:floor.ox - floor.f.x*3, y:floor.oy - floor.f.y*3 });
+  const b = pxm({ x:floor.ox + floor.f.x*3, y:floor.oy + floor.f.y*3 });
+  ctx.save();
+  ctx.setLineDash([9,8]); ctx.lineWidth=2; ctx.strokeStyle='rgba(111,168,199,0.45)';
+  ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  ctx.restore();
+}
+
+// The ghost of the configuration being asked for, laid along the floor at the
+// player's own scale and position.
+function ghostFrame(){
+  if(!floor || !pose) return null;
+  const shA=read(pose,J.shA), shB=read(pose,J.shB), hipA=read(pose,J.hipA), hipB=read(pose,J.hipB);
+  if(!shA||!shB||!hipA||!hipB) return null;
+  const sh = midp(shA,shB), hp = midp(hipA,hipB);
+  const torso = dist(sh,hp);
+  if(!(torso > 0.02)) return null;
+  const A = p => (p.x-floor.ox)*floor.f.x + (p.y-floor.oy)*floor.f.y;
+  const Hh = p => (p.x-floor.ox)*floor.n.x + (p.y-floor.oy)*floor.n.y;
+  // f must point toward the player's head, which is whichever way the shoulders
+  // are from the hips along the floor. Without this the ghost lies back to front.
+  const sgn = (A(sh) - A(hp)) >= 0 ? 1 : -1;
+  const fx = { x:floor.f.x*sgn, y:floor.f.y*sgn };
+  // anchored at the point of the floor directly under the player's own hip, so
+  // the ghost is where they are rather than where the figure was authored
+  const anchor = { x: hp.x - floor.n.x*Hh(hp), y: hp.y - floor.n.y*Hh(hp) };
+  return { torso, fx, n:floor.n, anchor,
+    map: q => pxm({ x: anchor.x + fx.x*q.x*torso + floor.n.x*q.y*torso,
+                    y: anchor.y + fx.y*q.x*torso + floor.n.y*q.y*torso }) };
+}
+
+function drawGhost(cfg, alpha){
+  const fr = ghostFrame();
+  if(!fr) return false;
+  const g = configSkeleton(cfg);
+  const L = [[g.sh,g.hip],[g.sh,g.el],[g.el,g.wr],[g.hip,g.kn],[g.kn,g.ank],
+             [g.ank,g.toe],[g.sh,g.head]];
+  ctx.save();
+  ctx.lineWidth = 9; ctx.lineCap='round';
+  ctx.strokeStyle = 'rgba(224,183,98,'+(alpha*0.85)+')';
+  for(const [a,b] of L){
+    const u = fr.map(a), v = fr.map(b);
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(v.x,v.y); ctx.stroke();
+  }
+  const hd = fr.map(g.head);
+  ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(hd.x,hd.y, Math.max(7, fr.torso*0.17*videoFit().dh), 0, 7);
+  ctx.stroke();
+  // where the hands and feet want to be
+  ctx.fillStyle = 'rgba(224,183,98,'+alpha+')';
+  for(const q of [g.wr, g.ank]){
+    const u = fr.map(q);
+    ctx.beginPath(); ctx.arc(u.x,u.y,7,0,7); ctx.fill();
+  }
+  ctx.restore();
+  return true;
+}
+
+// A small diagram of a configuration, drawn in its own box. Used on the setup
+// screen and in the corner during a round, for when the ghost cannot be placed.
+function drawConfigDiagram(cfg, x, y, w, h, col, lw){
+  const g = configSkeleton(cfg);
+  const pts = [g.sh,g.hip,g.el,g.wr,g.kn,g.ank,g.head,g.toe];
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const p of pts){ x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); }
+  y1 += 0.3; x0 -= 0.1; x1 += 0.1;              // room for the head and the toe
+  const sc = Math.min(w/(x1-x0), h/(y1-y0)) * 0.92;
+  const ox = x + (w - (x1-x0)*sc)/2 - x0*sc;
+  const oy = y + h - (h - (y1-y0)*sc)/2 + y0*sc;
+  const m = q => ({ x: ox + q.x*sc, y: oy - q.y*sc });
+  const L = [[g.sh,g.hip],[g.sh,g.el],[g.el,g.wr],[g.hip,g.kn],[g.kn,g.ank],
+             [g.ank,g.toe],[g.sh,g.head]];
+  ctx.save();
+  // the floor it is resting on
+  ctx.strokeStyle='rgba(140,134,121,0.55)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(x+4, oy); ctx.lineTo(x+w-4, oy); ctx.stroke();
+  // SIDE is the one configuration defined by what is NOT on the floor, so the
+  // raised hand and foot are drawn too. Without them its diagram was identical
+  // to a plank's and the cue showed nothing of the thing being asked for.
+  const lift = cfg.pose.oneSided;
+  if(lift){
+    ctx.strokeStyle=col; ctx.globalAlpha=0.40; ctx.lineWidth=(lw||5)*0.8; ctx.lineCap='round';
+    ctx.setLineDash([5,5]);
+    for(const [a,b] of [[g.sh,{x:g.el.x,y:g.el.y+lift}],
+                        [{x:g.el.x,y:g.el.y+lift},{x:g.wr.x,y:g.wr.y+lift}],
+                        [g.hip,{x:g.kn.x,y:g.kn.y+lift}],
+                        [{x:g.kn.x,y:g.kn.y+lift},{x:g.ank.x,y:g.ank.y+lift}]]){
+      const u=m(a), v=m(b);
+      ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(v.x,v.y); ctx.stroke();
+    }
+    ctx.setLineDash([]); ctx.globalAlpha=1;
+  }
+  ctx.strokeStyle=col; ctx.lineWidth=lw||5; ctx.lineCap='round';
+  for(const [a,b] of L){ const u=m(a), v=m(b);
+    ctx.beginPath(); ctx.moveTo(u.x,u.y); ctx.lineTo(v.x,v.y); ctx.stroke(); }
+  // the head sits on the neck rather than swallowing the shoulder
+  const hd = m(g.head), hr = Math.max(4, sc*0.16);
+  ctx.fillStyle='#0b0d10';
+  ctx.beginPath(); ctx.arc(hd.x,hd.y, hr+2.5, 0, 7); ctx.fill();
+  ctx.strokeStyle=col; ctx.lineWidth=Math.max(2,(lw||5)*0.6);
+  ctx.beginPath(); ctx.arc(hd.x,hd.y, hr, 0, 7); ctx.stroke();
+  // and the two points that have to be on the floor are marked
+  ctx.fillStyle=col;
+  for(const q of [g.wr, g.ank]){ const u=m(q);
+    ctx.beginPath(); ctx.arc(u.x,u.y, Math.max(3, sc*0.07), 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
+/* ---- the structure overhead ---- */
+function drawStructure(t, loadId, loadPhase, damage, budget){
+  const topH = Math.max(72, H*0.26);
+  const sag = Math.min(1, damage/budget) * 10 + (loadId==='Settle' ? loadPhase*14 : 0);
+  ctx.save();
+  // the beams
+  ctx.strokeStyle = 'rgba(138,127,107,0.9)'; ctx.lineWidth = 9; ctx.lineCap='square';
+  ctx.beginPath();
+  ctx.moveTo(-10, 26); ctx.quadraticCurveTo(W/2, 26+sag, W+10, 26);
+  ctx.stroke();
+  ctx.lineWidth = 6;
+  for(let i=0;i<5;i++){
+    const x = W*(i+0.5)/5;
+    const lean = (loadId==='ShearL' ? -1 : loadId==='ShearR' ? 1 : 0) * loadPhase * 13;
+    const tw = (loadId==='Torsion') ? Math.sin(loadPhase*Math.PI*2 + i*0.9)*9*loadPhase : 0;
+    ctx.beginPath();
+    ctx.moveTo(x, 30 + sag*(1-Math.abs(i-2)/2.6));
+    ctx.lineTo(x + lean + tw, topH);
+    ctx.stroke();
+  }
+  // cracks, one per point of damage taken
+  ctx.strokeStyle = 'rgba(224,122,98,0.85)'; ctx.lineWidth = 2.5;
+  for(let d=0; d<damage && d<12; d++){
+    const x = W*(0.08 + 0.84*((d*0.37)%1));
+    ctx.beginPath();
+    ctx.moveTo(x, 20);
+    ctx.lineTo(x + (d%2?8:-8), 20 + topH*0.35);
+    ctx.lineTo(x + (d%2?-3:3), 20 + topH*0.62);
+    ctx.stroke();
+  }
+  ctx.restore();
+  return topH;
+}
+
+// The load, drawn. Redundant with the sound on purpose: this is for the moments
+// the player can see the screen, and the sound is for the moments they cannot.
+function drawLoadMark(loadId, phase, topH){
+  const a = 0.35 + 0.65*phase;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(216,116,79,'+a+')'; ctx.fillStyle = 'rgba(216,116,79,'+a+')';
+  ctx.lineWidth = 5; ctx.lineCap='round';
+  const arrow = (x,y,dx,dy,len) => {
+    const ex = x+dx*len, ey = y+dy*len;
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(ex,ey); ctx.stroke();
+    const px1 = -dy, py1 = dx;
+    ctx.beginPath(); ctx.moveTo(ex,ey);
+    ctx.lineTo(ex-dx*13+px1*9, ey-dy*13+py1*9);
+    ctx.lineTo(ex-dx*13-px1*9, ey-dy*13-py1*9);
+    ctx.closePath(); ctx.fill();
+  };
+  const y0 = topH*0.42;
+  if(loadId === 'Compress'){ for(const k of [0.3,0.5,0.7]) arrow(W*k, 8, 0, 1, topH*0.52); }
+  else if(loadId === 'ShearL'){ for(const k of [0.35,0.55]) arrow(W*k+70, topH*k*0.7+20, -1, 0, 74); }
+  else if(loadId === 'ShearR'){ for(const k of [0.35,0.55]) arrow(W*k-70, topH*k*0.7+20, 1, 0, 74); }
+  else if(loadId === 'Torsion'){
+    ctx.lineWidth=6;
+    ctx.beginPath(); ctx.arc(W/2, y0, 46, -0.5, 2.6); ctx.stroke();
+    const ax = W/2 + Math.cos(2.6)*46, ay = y0 + Math.sin(2.6)*46;
+    arrow(ax, ay, -Math.sin(2.6), Math.cos(2.6), 10);
+  }
+  else if(loadId === 'Settle'){
+    for(const k of [0.18,0.34,0.5,0.66,0.82]) arrow(W*k, 10, 0, 1, topH*0.3);
+  }
+  else if(loadId === 'Adjacent'){ arrow(26, y0, 1, 0, 92); arrow(W-26, y0, -1, 0, 92); }
+  ctx.restore();
+}
+
+function text(s, x, y, size, col, align, weight){
+  ctx.save();
+  ctx.font = (weight||600)+' '+size+'px ui-sans-serif,system-ui,sans-serif';
+  ctx.fillStyle = col; ctx.textAlign = align||'left'; ctx.textBaseline='alphabetic';
+  ctx.fillText(s, x, y); ctx.restore();
+}
+function pill(x, y, w, h, frac, col, bgcol){
+  ctx.save();
+  ctx.fillStyle = bgcol || 'rgba(42,48,56,0.85)';
+  ctx.beginPath(); ctx.roundRect(x,y,w,h,h/2); ctx.fill();
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.roundRect(x,y,Math.max(h, w*Math.max(0,Math.min(1,frac))),h,h/2); ctx.fill();
+  ctx.restore();
+}
+
+/* ================= the round =================
+   An exchange is four phases: the structure telegraphs a load, the player has a
+   window to get into a configuration, a beat lands, and the load resolves against
+   whatever they were actually holding.
+
+   The window is deliberately long. At 150-250 ms of pipeline latency nothing may
+   ask the player to correct a developing error, and this game does not: by the
+   time the beat lands the decision was made seconds ago. That is what makes a
+   floor game survivable here, and it is doc 12's whole argument. */
+
+const TELE_MS    = 1700;      // the load announces itself
+const COMMIT0    = 2800;      // window to get there, first exchange
+const COMMIT1    = 1900;      // and by the last one
+const RESOLVE_MS = 1150;
+const COUNTIN_MS = 8000;      // long on purpose: the player has to get down onto
+                              // the floor after tapping, and in Sparks a round
+                              // that began on the tap scored the player bent over
+                              // the phone
+
+let state = 'idle';
+let round = 0, score = 0, damage = 0, exNo = 0, exchanges = [], ex = null;
+let results = [], samples = [], held = null, heldSince = 0;
+let transitions = [], bracedMs = 0, lastFrameClock = 0;
+let fps = { n:0, t0:0, poseN:0 }, calStart = 0, calIdx = 0, calHoldStart = 0;
+let bestNow = null, bestQ = 0, confusion = [];
+let roundCfgs = [], roundLoads = [], roundTable = null, roundN = 14, budget = 5;
+let countFrom = 0, maskUntil = 0, banner = null;
+// Whether the game names the configuration that answers the load. On in round
+// one, which is the teaching round, and off afterwards: a game that tells you
+// the answer every time is not asking you anything.
+let assist = true, assistPref = 'auto';
+
+const CAL_SEQ = ['FOREARM','ANCHOR','SPAN'];       // the three round-one postures
+const CAL_HOLD_MS = 2600;
+const byId = {}; for(const c of CONFIGS) byId[c.id] = c;
+const loadById = {}; for(const l of LOADS) loadById[l.id] = l;
+
+const el = id => document.getElementById(id);
+function show(id){
+  for(const s of ['sTitle','sSetup','sEnd']) el(s).classList.toggle('on', s===id);
+}
+
+/* ---- round one is the milestone table ---- */
+function configureRound(r){
+  assist = assistPref === 'on' ? true : assistPref === 'off' ? false : (r === 1);
+  if(r === 1){
+    roundCfgs = MILESTONE.configs.map(i=>byId[i]);
+    roundLoads = MILESTONE.loads.slice();
+    roundTable = MILESTONE.table;
+    roundN = MILESTONE.n;
+  } else {
+    roundCfgs = CONFIGS.slice();
+    roundLoads = LOADS.map(l=>l.id);
+    roundTable = TABLE;
+    roundN = 14;
+  }
+  budget = 5;
+}
+
+/* The within-round load mix is kept near uniform by dealing from a shuffled bag
+   rather than drawing independently. Doc 12 finding 4: with 60% of loads one
+   type, a three-configuration policy's clear rate jumps from 21% to 90% — a
+   "torsion round" hands the player a two-posture answer. */
+function buildExchanges(){
+  const bag = [];
+  while(bag.length < roundN) for(const l of roundLoads) bag.push(l);
+  bag.length = roundN;
+  for(let i=bag.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; }
+  exchanges = bag.map((load,i) => ({
+    load, commitMs: Math.round(COMMIT0 + (COMMIT1-COMMIT0) * (i/(roundN-1||1))) }));
+}
+
+function startRound(){
+  round++;
+  configureRound(round);
+  buildExchanges();
+  score = 0; damage = 0; exNo = 0; results = []; samples = [];
+  transitions = []; bracedMs = 0; confusion = []; ex = null;
+  fps = { n:0, t0:performance.now(), poseN:0 };
+  state = 'countin'; countFrom = nowClock();
+  show(null); checkOrientation();
+  initAudio(); resumeAudio(); startBed(); keepAwake();
+  recPush({ k:'round_start', t:nowClock(), round, n:roundN, assist,
+            configs:roundCfgs.map(c=>c.id), loads:roundLoads, budget,
+            table:roundTable, latencyAssumed:POSE_LATENCY_MS,
+            floor: floor ? { angle:+floorAngle(floor).toFixed(2), resid:+(floor.resid).toFixed(5),
+                             spread:+(floor.angSpread||0).toFixed(2), count:floor.count } : null });
+}
+
+function nextExchange(){
+  if(exNo >= exchanges.length || damage > budget){ endRound(); return; }
+  const spec = exchanges[exNo];
+  const t = nowClock();
+  ex = { no:exNo+1, load:spec.load, commitMs:spec.commitMs,
+         teleAt:t, commitAt:t+TELE_MS, lockAt:t+TELE_MS+spec.commitMs,
+         judgeAt:t+TELE_MS+spec.commitMs + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40,
+         openedF:null, judged:null, resolved:null, phase:'telegraph' };
+  const f0 = lastFeatures();
+  ex.openedF = f0 ? f0.f : null;
+  playTelegraph(spec.load, TELE_MS);
+  recPush({ k:'exchange_open', t, no:ex.no, load:spec.load, commitMs:spec.commitMs,
+            lockAt:ex.lockAt, judgeAt:ex.judgeAt });
+  exNo++;
+}
+
+let lastFV = null;
+function lastFeatures(){ return lastFV; }
+
+function doJudge(){
+  // Which configuration was the player actually in? Judged against every one in
+  // play, not only a guess, so a player who braced well in the wrong shape is
+  // scored on what they held and the confusion is recorded either way.
+  let bestCfg = null, bestJudge = null;
+  const all = [];
+  for(const cfg of roundCfgs){
+    const j = judgeLock(cfg, samples.map(s => ({ t:s.t, m:s.m[cfg.id], fv:s.fv })), ex.lockAt, ex.openedF);
+    all.push({ id:cfg.id, verdict:j.verdict, quality:+(j.quality||0).toFixed(4) });
+    if(j.verdict !== 'UNSCORED' && (!bestJudge || j.quality > bestJudge.quality)){
+      bestJudge = j; bestCfg = cfg;
+    }
+  }
+  confusion.push({ no:ex.no, load:ex.load, all });
+
+  if(!bestCfg){
+    const any = judgeLock(roundCfgs[0], samples.map(s=>({ t:s.t, m:s.m[roundCfgs[0].id], fv:s.fv })), ex.lockAt, ex.openedF);
+    ex.judged = any;
+    ex.resolved = { outcome:null, damage:0, points:0, unscored:true };
+    ex.heldId = null;
+    unscoredSound();
+  } else {
+    ex.judged = bestJudge; ex.heldId = bestCfg.id;
+    ex.resolved = resolve(ex.load, bestCfg.id, bestJudge, roundTable);
+    score += ex.resolved.points;
+    damage += ex.resolved.damage;
+    outcomeSound(ex.resolved.outcome);
+  }
+  bedLevel(Math.min(1, damage/budget));
+  results.push({ no:ex.no, load:ex.load, held:ex.heldId,
+                 verdict:ex.judged.verdict, quality:ex.judged.quality,
+                 rep:!!ex.judged.rep, outcome:ex.resolved.outcome,
+                 damage:ex.resolved.damage, points:ex.resolved.points,
+                 unscored:!!ex.resolved.unscored, samples:ex.judged.samples });
+  recPush({ k:'exchange_judge', t:nowClock(), no:ex.no, load:ex.load,
+            held:ex.heldId, verdict:ex.judged.verdict,
+            quality:+(ex.judged.quality||0).toFixed(4),
+            braceQuality:+(ex.judged.braceQuality||0).toFixed(4),
+            settled:!!ex.judged.settled, rep:!!ex.judged.rep,
+            outcome:ex.resolved.outcome, damage:ex.resolved.damage,
+            points:ex.resolved.points, samples:ex.judged.samples,
+            lockAt:ex.lockAt, judgedAt:nowClock(), confusion:all });
+  // Mask rather than animate. The body on screen is a fifth of a second behind
+  // the body that was judged, so showing the load pass through the player would
+  // contradict the result that was just scored.
+  maskUntil = nowClock() + 260;
+  ex.phase = 'resolve'; ex.resolveAt = nowClock();
+}
+
+function endRound(){
+  const cleared = damage <= budget && exNo >= exchanges.length;
+  state = 'over'; ex = null; stopBed();
+  recPush({ k:'round_end', t:nowClock(), round, cleared, score, damage,
+            exchanges:results.length, transitions:transitions.length,
+            bracedMs:Math.round(bracedMs), confusion,
+            fps: fpsReport(), recDropped });
+  renderEnd(cleared);
+  show('sEnd');
+}
+
+function fpsReport(){
+  const dt = performance.now() - fps.t0;
+  return { seconds:+(dt/1000).toFixed(1),
+           frames:fps.n, poseFrames:fps.poseN,
+           renderFps:+(fps.n/(dt/1000)).toFixed(1),
+           poseFps:+(fps.poseN/(dt/1000)).toFixed(1) };
+}
+
+/* ================= the frame loop ================= */
+function frame(now){
+  requestAnimationFrame(frame);
+  fps.n++;
+  if(video.readyState < 2 || !landmarker) { paintWaiting(); return; }
+
+  let fresh = false, clockT = now;
+  if(video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true; fps.poseN++;
+      clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+
+    if(fresh){
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+          +(p.z||0).toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', t:+clockT.toFixed(1), cap:+vt.toFixed(4), rdy:+performance.now().toFixed(1), lm });
+      onFreshPose(clockT, now);
+    }
+  }
+  paint(now);
+}
+
+function onFreshPose(clockT, wall){
+  const torso = torsoNow();
+
+  if(state === 'calibrating'){
+    collectFloorPoints(calPoints);
+    if(calIdx < CAL_SEQ.length) collectFloorPoints(calPerPose[calIdx].pts);
+    return;
+  }
+  if(!floor || !pose || !torso) { lastFV = null; return; }
+
+  const fv = features(pose, read, floor);
+  lastFV = fv;
+  // Match against every configuration in play, every frame. This is what tells
+  // the player which shape the game thinks they are in, and it is the confusion
+  // data the gate needs: a real body's quality against all six at once.
+  const ms = {};
+  let bc = null, bq = 0;
+  for(const cfg of (roundCfgs.length ? roundCfgs : CONFIGS)){
+    const m = match(cfg, fv);
+    ms[cfg.id] = m;
+    if(m.readable && m.quality > bq){ bq = m.quality; bc = cfg.id; }
+  }
+  bestNow = bc; bestQ = bq;
+
+  if(state === 'play'){
+    samples.push({ t:clockT, m:ms, fv });
+    const cutoff = clockT - 2600;
+    while(samples.length && samples[0].t < cutoff) samples.shift();
+
+    // Time actually spent braced, which is the session floor. Score and real work
+    // are different things: a player can earn points from a loose hold, and this
+    // only counts the time a brace was genuinely held.
+    const dt = lastFrameClock ? Math.min(200, clockT - lastFrameClock) : 0;
+    if(bc && bq >= TUNE.REP_QUALITY) bracedMs += dt;
+
+    // Transitions, TIMED rather than charged at a guessed cost. Doc 12's effort
+    // numbers all rest on invented transition costs, and it says plainly that the
+    // absolute figures mean nothing until a real transition is measured. So this
+    // build measures them instead of pricing them.
+    if(bc && bq >= TUNE.REP_QUALITY){
+      if(held !== bc){
+        if(held) transitions.push({ from:held, to:bc, ms:Math.round(clockT - heldSince), at:clockT });
+        held = bc; heldSince = clockT;
+      }
+    }
+  }
+  lastFrameClock = clockT;
+}
+
+/* ================= painting each state ================= */
+function paintWaiting(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+  text('starting the camera…', W/2, H/2, 16, '#8c8679', 'center');
+}
+
+function paint(now){
+  ctx.clearRect(0,0,W,H);
+  if(state === 'idle' || state === 'over'){ ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H); return; }
+
+  if(state === 'setup' || state === 'calibrating'){
+    drawVideo(0.34); drawFloor(); drawSkeleton(0.95);
+    if(state === 'calibrating' && calIdx < CAL_SEQ.length){
+      const cfg = byId[CAL_SEQ[calIdx]];
+      const bw = Math.min(260, W*0.3), bh = Math.min(190, H*0.42);
+      ctx.save(); ctx.fillStyle='rgba(11,13,16,0.78)';
+      ctx.beginPath(); ctx.roundRect(W-bw-16, 16, bw, bh+54, 12); ctx.fill(); ctx.restore();
+      drawConfigDiagram(cfg, W-bw-16, 32, bw, bh, 'rgba(224,183,98,0.95)', 6);
+      text(cfg.name.toUpperCase(), W-bw-16+bw/2, bh+68, 17, '#e9e4d8', 'center', 700);
+      const frac = Math.min(1,(nowClock()-calHoldStart)/CAL_HOLD_MS);
+      pill(W-bw-6, bh+80, bw-20, 7, frac, 'rgba(127,212,162,0.95)');
+      text(cfg.cue, 18, H-20, 15, '#cdc7ba');
+      text('hold it — '+(calIdx+1)+' of '+CAL_SEQ.length, 18, H-44, 13, '#8c8679');
+    }
+    return;
+  }
+
+  if(state === 'countin'){
+    drawVideo(0.42); drawFloor(); drawSkeleton(0.95);
+    const left = Math.max(0, COUNTIN_MS - (nowClock()-countFrom));
+    const s = Math.ceil(left/1000);
+    text(String(s), W/2, H/2+26, Math.min(130, H*0.4), '#e9e4d8', 'center', 700);
+    text('get down onto your hands and feet', W/2, H/2+72, 17, '#cdc7ba', 'center');
+    const n = roundCfgs.length, bw = Math.min(150, W/(n+1)), bh = bw*0.72;
+    for(let i=0;i<n;i++){
+      const x = W/2 - (n*bw + (n-1)*12)/2 + i*(bw+12);
+      drawConfigDiagram(roundCfgs[i], x, 18, bw, bh, 'rgba(140,134,121,0.9)', 4);
+      text(roundCfgs[i].name, x+bw/2, bh+34, 12, '#8c8679', 'center');
+    }
+    if(left <= 0){ state='play'; nextExchange(); }
+    return;
+  }
+
+  /* ---- playing ---- */
+  const t = nowClock();
+  drawVideo(0.52);
+  drawFloor();
+
+  if(ex){
+    // phase bookkeeping
+    if(ex.phase === 'telegraph' && t >= ex.commitAt){ ex.phase = 'commit'; }
+    if(ex.phase === 'commit' && t >= ex.lockAt){ ex.phase = 'locking'; lockBeat(); }
+    if(ex.phase === 'locking' && t >= ex.judgeAt){ doJudge(); }
+    if(ex.phase === 'resolve' && t >= ex.resolveAt + RESOLVE_MS){
+      if(damage > budget){ endRound(); return; }
+      nextExchange();
+    }
+  }
+
+  const phase = ex ? (ex.phase === 'telegraph'
+      ? (t-ex.teleAt)/TELE_MS
+      : Math.min(1,(t-ex.commitAt)/Math.max(1,ex.lockAt-ex.commitAt))) : 0;
+  const topH = drawStructure(t, ex?ex.load:null, Math.min(1,Math.max(0,phase)), damage, budget);
+  if(ex && ex.phase !== 'resolve') drawLoadMark(ex.load, Math.min(1,Math.max(0,phase)), topH);
+
+  const masked = t < maskUntil;
+  if(!masked){
+    drawSkeleton(0.95);
+    // The ghost of the answer is a TEACHING aid, so it is shown in round one and
+    // not after. Showing it always would delete the game.
+    if(assist && ex && (ex.phase === 'commit' || ex.phase === 'locking')){
+      const want = answerFor(ex.load);
+      if(want){
+        const pulse = 0.45 + 0.25*Math.sin(t/220);
+        if(!drawGhost(want, pulse)) ghostFallback(want);
+      }
+    }
+  } else {
+    // Masked: the judged body and the drawn body are a fifth of a second apart,
+    // so nothing about the player is drawn while the result lands.
+    ctx.save(); ctx.fillStyle='rgba(11,13,16,0.55)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+
+  drawHud(t, topH);
+}
+
+// Which configuration answers this load, for the ghost. If two do, the one that
+// fully carries it.
+function answerFor(loadId){
+  let full = null, part = null;
+  for(const cfg of roundCfgs){
+    const cell = roundTable[cfg.id] ? roundTable[cfg.id][loadId] : 'X';
+    if(cell === 'F' && !full) full = cfg;
+    else if(cell === 'P' && !part) part = cfg;
+  }
+  return full || part;
+}
+function ghostFallback(cfg){
+  const bw = Math.min(190, W*0.24), bh = bw*0.74;
+  ctx.save(); ctx.fillStyle='rgba(11,13,16,0.8)';
+  ctx.beginPath(); ctx.roundRect(W-bw-14, H-bh-52, bw, bh+40, 11); ctx.fill(); ctx.restore();
+  drawConfigDiagram(cfg, W-bw-14, H-bh-44, bw, bh, 'rgba(224,183,98,0.95)', 5);
+  text(cfg.name, W-bw-14+bw/2, H-20, 14, '#e9e4d8', 'center', 700);
+}
+
+function drawHud(t, topH){
+  const y = topH + 26;
+  text('EXCHANGE '+(ex?ex.no:results.length)+' / '+exchanges.length, 16, y, 13, '#8c8679', 'left', 700);
+  text(String(score), W-16, y, 24, '#e9e4d8', 'right', 700);
+  // damage
+  const dw = Math.min(190, W*0.26);
+  pill(16, y+10, dw, 9, damage/budget, damage>=budget ? 'rgba(224,122,98,0.95)' : 'rgba(224,183,98,0.9)');
+  text('DAMAGE '+damage+' / '+budget, 16, y+38, 12, '#8c8679');
+
+  if(ex && ex.phase === 'telegraph'){
+    const l = loadById[ex.load];
+    text('LISTEN', W/2, y+6, 15, '#8c8679', 'center', 700);
+    text(l ? l.name : ex.load, W/2, y+34, 24, '#d8744f', 'center', 700);
+    if(l) text(l.cue, W/2, y+58, 14, '#cdc7ba', 'center');
+  } else if(ex && (ex.phase === 'commit' || ex.phase === 'locking')){
+    const l = loadById[ex.load];
+    text('BRACE', W/2, y+6, 15, '#8c8679', 'center', 700);
+    // The LOAD stays on screen through the commit window, not the answer. A
+    // player who looks up late still knows what is coming; they still have to
+    // know what carries it.
+    text(l ? l.name.toUpperCase() : ex.load, W/2, y+34, 24, '#d8744f', 'center', 700);
+    if(assist){
+      const want = answerFor(ex.load);
+      if(want) text('\u2192 '+want.name.toUpperCase()+' \u00b7 '+want.cue, W/2, y+58, 14, '#e0b762', 'center');
+    } else if(l) text(l.cue, W/2, y+58, 13, '#8c8679', 'center');
+    const left = Math.max(0, ex.lockAt - t), span = ex.lockAt - ex.commitAt;
+    pill(W/2 - 110, y+70, 220, 10, left/span, 'rgba(224,183,98,0.95)');
+  } else if(ex && ex.phase === 'resolve'){
+    const r = ex.resolved, j = ex.judged;
+    if(r.unscored){
+      text('NOT SEEN', W/2, y+30, 26, '#6fa8c7', 'center', 700);
+      text(j.reason || 'the camera lost you', W/2, y+56, 14, '#cdc7ba', 'center');
+      text('not counted against you', W/2, y+78, 13, '#8c8679', 'center');
+    } else {
+      const label = r.outcome === 'F' ? 'IT HOLDS' : r.outcome === 'P' ? 'IT STRAINS' : 'IT GIVES';
+      const col = r.outcome === 'F' ? '#7fd4a2' : r.outcome === 'P' ? '#e0b762' : '#e07a62';
+      text(label, W/2, y+30, 26, col, 'center', 700);
+      text('you held '+(ex.heldId ? byId[ex.heldId].name : '—')+
+           ' · '+j.verdict.toLowerCase()+' · '+Math.round(j.quality*100)+'%',
+           W/2, y+54, 14, '#cdc7ba', 'center');
+      if(r.points) text('+'+r.points, W/2, y+76, 15, col, 'center', 700);
+      if(r.outcome !== 'F'){
+        const want = answerFor(ex.load);
+        const l = loadById[ex.load];
+        if(want) text((l?l.name:ex.load)+' is carried by '+want.name.toUpperCase(),
+                      W/2, y+98, 14, '#8c8679', 'center', 700);
+      }
+    }
+  }
+
+  // what the game thinks you are in right now, always visible, because "why did
+  // it not score me" should be answerable by looking at the screen
+  if(bestNow){
+    text(byId[bestNow].name.toUpperCase()+'  '+Math.round(bestQ*100)+'%',
+         16, H-18, 14, bestQ >= TUNE.LOCK_FULL ? '#7fd4a2' : bestQ >= TUNE.LOCK_PART ? '#e0b762' : '#8c8679', 'left', 700);
+  } else {
+    const fr = bodyInFrame();
+    text(fr.edge ? ('MOVE AWAY FROM THE '+fr.edge.toUpperCase()+' EDGE')
+                 : 'CANNOT SEE ENOUGH OF YOU', 16, H-18, 14, '#e07a62', 'left', 700);
+  }
+  if(banner && t < banner.until) text(banner.msg, W/2, H-18, 15, '#e0b762', 'center', 700);
+}
+
+/* ================= setup and calibration ================= */
+let calTorsos = [];
+
+async function enterSetup(){
+  show('sSetup');
+  state = 'setup';
+  el('fitline').textContent = 'starting the camera…';
+  try {
+    await startCamera();
+    await loadTracker();
+    recHeader();
+  } catch(e){
+    el('fitline').innerHTML = '<span class="nomark">the camera did not start: '+
+      (e && e.message ? e.message : e)+'</span>';
+    return;
+  }
+  resize(); checkOrientation();
+  requestAnimationFrame(frame);
+  setInterval(updateFitLine, 320);
+}
+
+function updateFitLine(){
+  if(state !== 'setup' && state !== 'calibrating') return;
+  const fr = bodyInFrame();
+  const t = torsoNow();
+  const bits = [];
+  bits.push(fr.ok ? '<span class="okmark">the whole of you is in the picture</span>'
+                  : '<span class="nomark">'+(fr.edge ? 'you are off the '+fr.edge+' edge'
+                     : 'only '+fr.seen+' of '+fr.total+' key joints are visible')+'</span>');
+  if(t) bits.push('your torso reads '+t.toFixed(3)+' of the frame');
+  if(innerHeight > innerWidth) bits.push('<span class="nomark">turn the phone sideways</span>');
+  el('fitline').innerHTML = bits.join(' · ');
+}
+
+function startCalibration(){
+  if(!landmarker){ el('calmsg').textContent = 'the camera is not running yet.'; return; }
+  calPoints = []; calTorsos = []; calIdx = 0;
+  calPerPose = CAL_SEQ.map(id => ({ id, pts:[] }));
+  calStart = nowClock(); calHoldStart = nowClock();
+  state = 'calibrating';
+  el('bCal').disabled = true;
+  renderCalChips();
+  el('calmsg').textContent = 'hold each shape while the bar fills.';
+  const tick = setInterval(() => {
+    const t = torsoNow(); if(t) calTorsos.push(t);
+    if(nowClock() - calHoldStart >= CAL_HOLD_MS){
+      calIdx++; calHoldStart = nowClock(); renderCalChips();
+      if(calIdx >= CAL_SEQ.length){
+        clearInterval(tick);
+        finishCalibration();
+      }
+    }
+    el('calbar').firstElementChild.style.width =
+      (100*Math.min(1,(calIdx + (nowClock()-calHoldStart)/CAL_HOLD_MS)/CAL_SEQ.length))+'%';
+  }, 90);
+}
+
+function renderCalChips(){
+  el('calchips').innerHTML = CAL_SEQ.map((id,i) =>
+    '<span class="calchip '+(i<calIdx?'done':i===calIdx?'now':'')+'">'+byId[id].name+'</span>').join('');
+}
+
+function finishCalibration(){
+  state = 'setup';
+  el('bCal').disabled = false;
+  // Median by SCALE over readable frames, not a time median. Doc 14 lesson 9: a
+  // time-median frame landed on a collapsed estimate with the body below the
+  // bottom edge and reported the player's scale as five times its real value.
+  calTorsos.sort((a,b)=>a-b);
+  const torso = calTorsos.length ? calTorsos[Math.floor(calTorsos.length/2)] : null;
+  if(!torso){
+    el('calmsg').innerHTML = '<span class="nomark">the camera never saw your shoulders and hips together. '+
+      'Move back until all of you is in the picture, and try again.</span>';
+    return;
+  }
+  const r = acceptFloor(torso);
+  floorInfo = r.info || null;
+  recPush({ k:'calibration', t:nowClock(), ok:r.ok, why:r.why||null, info:floorInfo,
+            torsoSamples:calTorsos.length, points:calPoints.length });
+  if(r.ok){
+    floor = r.floor;
+    el('calmsg').innerHTML = '<span class="okmark">floor found.</span> Scores from here are measured against it.';
+  } else {
+    el('calmsg').innerHTML = '<span class="nomark">'+r.why+'</span> '+
+      'You can still play — the override is always there — but treat the scores as unreliable.';
+    if(r.info && r.info.per && r.info.per.length) floor = fitFloor(calPoints, torso);
+  }
+  renderCalReport(torso, r);
+}
+
+function renderCalReport(torso, r){
+  const i = r.info;
+  const L = [];
+  L.push('<p><b>Your torso</b> reads '+(torso?torso.toFixed(4):'—')+' of the frame height, from '+
+         calTorsos.length+' readable frames.</p>');
+  if(i){
+    L.push('<p><b>Floor line</b> at '+i.angle+'&deg; in the picture, from '+i.onLine+
+           ' landmarks resting on it, residual '+i.resid.toFixed(3)+' torsos.</p>');
+    L.push('<p><b>How well determined:</b> '+i.spread.toFixed(1)+'&deg; of spread when refitted on '+
+           'halves of the data. <span class="sub">Budget is 5&deg;.</span></p>');
+    L.push('<p><b>Do the postures agree?</b> worst disagreement '+i.disagree.toFixed(1)+'&deg;'+
+           (i.worstPair?' ('+i.worstPair+')':'')+'. <span class="sub">Budget is 6&deg;. This is the check '+
+           'that catches a floor which is confidently wrong — refitting on halves cannot, '+
+           'because every half makes the same mistake.</span></p>');
+    L.push('<p class="sub">'+i.per.map(p=>p.id+' '+p.ang+'&deg;').join(' · ')+'</p>');
+  }
+  L.push('<p class="'+(r.ok?'good':'bad')+'">'+(r.ok?'Usable.':'Not usable: '+r.why)+'</p>');
+  L.push('<h2>Still unmeasured</h2>');
+  L.push('<p class="sub">The pipeline delay is still an assumed 200 ms, in the middle of the '+
+    'published band, because measuring it needs the camera reading a counter off the screen '+
+    'with nobody in the loop. It is written into the recording, so this session can be '+
+    're-judged once the real figure exists.</p>');
+  el('calreport').innerHTML = L.join('');
+}
+
+/* ================= the end screen ================= */
+function renderEnd(cleared){
+  el('endTitle').textContent = cleared ? 'It held' : 'It came down';
+  const locked = results.filter(r=>r.outcome==='F').length;
+  const strained = results.filter(r=>r.outcome==='P').length;
+  const gave = results.filter(r=>r.outcome==='X').length;
+  const uns = results.filter(r=>r.unscored).length;
+  const reps = results.filter(r=>r.rep).length;
+  const f = fpsReport();
+  const bracedS = bracedMs/1000;
+  // The session floor: the workout has to stay real, so clearing a round while
+  // barely holding anything does not count as having done the work. Separate
+  // from score, exactly as Gap keeps score and repetition apart.
+  const floorNeed = Math.round(exchanges.length * 0.9);
+  const floorOk = bracedS >= floorNeed;
+
+  const L = [];
+  L.push('<p><b>'+score+'</b> points · damage <b>'+damage+' of '+budget+'</b> · round '+round+
+         ' on the '+(round===1?'three-posture':'six-posture')+' table</p>');
+  L.push('<p>held '+locked+' · strained '+strained+' · gave '+gave+
+         (uns?' · <span class="warn">not seen '+uns+'</span>':'')+' — of '+results.length+'</p>');
+  L.push('<p><b>'+reps+'</b> real braces, counted separately from the score.</p>');
+  L.push('<p>time actually braced <b>'+bracedS.toFixed(0)+'s</b> against '+floorNeed+'s needed — '+
+         (floorOk?'<span class="good">cleared</span>':'<span class="bad">short</span>')+
+         '<br><span class="sub">Coasting is allowed to cost you points. Stopping has to cost '+
+         'you the round, so this is checked on its own.</span></p>');
+  if(transitions.length){
+    const ms = transitions.map(t=>t.ms).sort((a,b)=>a-b);
+    L.push('<p><b>'+transitions.length+'</b> changes of posture, median '+
+           ms[Math.floor(ms.length/2)]+' ms, fastest '+ms[0]+' ms, slowest '+ms[ms.length-1]+' ms.'+
+           '<br><span class="sub">These are measured, not priced. Every transition cost in the '+
+           'simulation is a guess, and it says so — these are the first real numbers.</span></p>');
+  }
+  L.push('<h2>What the camera managed</h2>');
+  L.push('<p>pose '+f.poseFps+' fps, render '+f.renderFps+' fps, over '+f.seconds+'s.'+
+         (f.poseFps < 15 ? ' <span class="warn">That is low.</span>' : '')+'</p>');
+  if(floorInfo) L.push('<p class="sub">floor at '+floorInfo.angle+'&deg;, spread '+
+    floorInfo.spread.toFixed(1)+'&deg;, postures disagreeing by '+floorInfo.disagree.toFixed(1)+'&deg;</p>');
+  // The confusion data, which is the real point of this build: how well a camera
+  // on the floor tells these postures apart, measured on a body rather than on a
+  // generated figure.
+  const ids = roundCfgs.map(c=>c.id);
+  const acc = {}; for(const a of ids){ acc[a] = {}; for(const b of ids) acc[a][b] = []; }
+  for(const c of confusion){
+    const best = c.all.filter(x=>x.verdict!=='UNSCORED').sort((a,b)=>b.quality-a.quality)[0];
+    if(!best) continue;
+    for(const x of c.all) if(acc[best.id] && acc[best.id][x.id]) acc[best.id][x.id].push(x.quality);
+  }
+  L.push('<h2>Could it tell the postures apart?</h2>');
+  let tab = '<table><tr><th>held</th>'+ids.map(i=>'<th>'+byId[i].name+'</th>').join('')+'</tr>';
+  for(const a of ids){
+    tab += '<tr><th class="rowh">'+byId[a].name+'</th>';
+    for(const b of ids){
+      const v = acc[a][b];
+      const mean = v.length ? (v.reduce((x,y)=>x+y,0)/v.length) : null;
+      tab += '<td class="'+(a===b?'F':mean!==null&&mean>=TUNE.LOCK_PART?'P':'X')+'">'+
+             (mean===null?'—':mean.toFixed(2))+'</td>';
+    }
+    tab += '</tr>';
+  }
+  tab += '</table>';
+  L.push(tab);
+  L.push('<p class="sub">Rows are what you were judged to be holding, columns what each '+
+    'posture scored. Off-diagonal numbers near '+TUNE.LOCK_PART+' or above mean the camera '+
+    'cannot reliably tell those two apart from the floor, and the table they are part of has '+
+    'to be rebuilt around the ones it can. On a generated figure the worst off-diagonal pair '+
+    'is 0.27; this is the first time it has been asked of a real body.</p>');
+  el('endBody').innerHTML = L.join('');
+
+  el('endLog').innerHTML = '<table><tr><th>#</th><th>load</th><th>held</th><th>verdict</th>'+
+    '<th>q</th><th>result</th><th>dmg</th><th>pts</th></tr>' +
+    results.map(r => '<tr><td>'+r.no+'</td><td>'+r.load+'</td><td>'+(r.held||'—')+'</td>'+
+      '<td>'+r.verdict.toLowerCase()+'</td><td>'+Math.round((r.quality||0)*100)+'</td>'+
+      '<td class="'+(r.outcome||'X')+'">'+(r.unscored?'not seen':r.outcome==='F'?'held':r.outcome==='P'?'strained':'gave')+'</td>'+
+      '<td>'+r.damage+'</td><td>'+r.points+'</td></tr>').join('') + '</table>';
+}
+
+function saveRecording(){
+  recPush({ k:'saved', t:nowClock(), lines:rec.length, dropped:recDropped });
+  const body = rec.map(o => JSON.stringify(o)).join('\n') + '\n';
+  const blob = new Blob([body], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'fourpoints-'+new Date().toISOString().replace(/[:.]/g,'-')+'.ndjson';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+/* ================= wiring ================= */
+function renderFullTable(){
+  const ids = CONFIGS.map(c=>c.id), lds = LOADS.map(l=>l.id);
+  let t = '<table><tr><th></th>'+LOADS.map(l=>'<th>'+l.name+'</th>').join('')+'</tr>';
+  for(const id of ids){
+    t += '<tr><th class="rowh">'+byId[id].name+'</th>';
+    for(const l of lds){ const c = TABLE[id][l];
+      t += '<td class="'+c+'">'+(c==='F'?'carries':c==='P'?'partly':'\u2013')+'</td>'; }
+    t += '</tr>';
+  }
+  el('t2').innerHTML = t + '</table>';
+}
+
+function renderTitleTable(){
+  const ids = MILESTONE.configs, lds = MILESTONE.loads;
+  let t = '<table><tr><th></th>'+lds.map(l=>'<th>'+(loadById[l]?loadById[l].name:l)+'</th>').join('')+'</tr>';
+  for(const id of ids){
+    t += '<tr><th class="rowh">'+byId[id].name+'</th>';
+    for(const l of lds){
+      const c = MILESTONE.table[id][l];
+      t += '<td class="'+c+'">'+(c==='F'?'carries':c==='P'?'partly':'fails')+'</td>';
+    }
+    t += '</tr>';
+  }
+  el('t1').innerHTML = t + '</table>';
+}
+
+el('bGo').onclick = () => { initAudio(); enterSetup(); };
+el('bCal').onclick = startCalibration;
+el('bAssist').onclick = () => {
+  assistPref = assistPref === 'auto' ? 'on' : assistPref === 'on' ? 'off' : 'auto';
+  renderAssist();
+};
+function renderAssist(){
+  const b = el('bAssist');
+  b.textContent = assistPref === 'auto' ? 'Prompts: round one only'
+                : assistPref === 'on' ? 'Prompts: always on' : 'Prompts: off';
+}
+renderAssist();
+el('bSkipCal').onclick = () => {
+  el('calmsg').innerHTML = '<span class="warn">Skipped.</span> Without a floor line nothing can be '+
+    'scored, so the game will guess one from your first few seconds. Treat the numbers as unreliable.';
+};
+el('bStart').onclick = () => {
+  if(!landmarker){ el('calmsg').textContent = 'the camera is not running yet.'; return; }
+  if(!floor){
+    // The override is always enabled — the fit check is advice, not a lock — but a
+    // round with no floor cannot be scored at all, so one is estimated from
+    // whatever is on screen right now and the player is told it is a guess.
+    const t = torsoNow();
+    if(t){ const pts=[]; collectFloorPoints(pts); floor = fitFloor(pts.concat(pts), t); }
+    banner = { msg:'playing with a guessed floor line', until: nowClock()+6000 };
+  }
+  startRound();
+};
+el('bBack').onclick = () => { state='setup'; show('sTitle'); };
+el('bAgain').onclick = () => { startRound(); };
+el('bHome').onclick = () => { state='idle'; show('sTitle'); };
+el('bRec').onclick = saveRecording;
+
+renderTitleTable();
+renderFullTable();
+resize();
+
+/* ---- hooks for the offline render and smoke harnesses ----
+   Rebuilt from the live file on every run, never carried alongside it. */
+window.__fp = {
+  CONFIGS, LOADS, TABLE, MILESTONE, TUNE, byId,
+  configSkeleton, skeletonLandmarks, features, match, judgeLock, resolve,
+  featsFromPose, reachReport, fitFloor, floorOf, makeReader, J,
+  drawConfigDiagram, drawStructure, drawLoadMark, drawGhost, drawHud, text, pill,
+  setState: s => { state = s; },
+  fakeRound(r){ round = r-1; configureRound(r); buildExchanges();
+    score=0; damage=0; exNo=0; results=[]; samples=[]; confusion=[]; transitions=[]; bracedMs=0;
+    return { cfgs:roundCfgs.map(c=>c.id), loads:roundLoads, n:roundN }; },
+  paintPlayFrame(opts){
+    const o = opts||{};
+    state='play'; W=cv.clientWidth; H=cv.clientHeight;
+    damage = o.damage||0; score = o.score||0;
+    exchanges = exchanges.length?exchanges:[{load:o.load||'Compress',commitMs:2400}];
+    ex = { no:o.no||1, load:o.load||'Compress', phase:o.phase||'commit',
+           teleAt:0, commitAt:0, lockAt:1e9, judgeAt:1e9, resolveAt:0,
+           judged:o.judged||{verdict:'LOCKED',quality:0.88,reason:null},
+           resolved:o.resolved||{outcome:'F',damage:0,points:120,unscored:false},
+           heldId:o.heldId||null, openedF:null };
+    bestNow = o.bestNow||null; bestQ = o.bestQ||0; maskUntil = 0;
+    assist = (o.assist===undefined) ? false : o.assist;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+    const topH = drawStructure(0, ex.load, o.phaseFrac===undefined?0.8:o.phaseFrac, damage, budget);
+    if(ex.phase!=='resolve') drawLoadMark(ex.load, o.phaseFrac===undefined?0.8:o.phaseFrac, topH);
+    if(o.ghost){ const c=byId[o.ghost]; const bw=Math.min(190,W*0.24), bh=bw*0.74;
+      drawConfigDiagram(c, W-bw-14, H-bh-44, bw, bh, 'rgba(224,183,98,0.95)', 5);
+      text(c.name, W-bw-14+bw/2, H-20, 14, '#e9e4d8','center',700); }
+    drawHud(0, topH);
+    return { W, H, topH };
+  },
+  paintDiagrams(){
+    W=cv.clientWidth; H=cv.clientHeight;
+    ctx.clearRect(0,0,W,H); ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+    const n=CONFIGS.length, cols=3, rows=Math.ceil(n/cols);
+    const bw=W/cols, bh=H/rows;
+    for(let i=0;i<n;i++){
+      const x=(i%cols)*bw, y=Math.floor(i/cols)*bh;
+      drawConfigDiagram(CONFIGS[i], x+10, y+14, bw-20, bh-56, 'rgba(224,183,98,0.95)', 6);
+      text(CONFIGS[i].name.toUpperCase(), x+bw/2, y+bh-24, 15, '#e9e4d8','center',700);
+      text(CONFIGS[i].cue, x+bw/2, y+bh-8, 10, '#8c8679','center');
+    }
+    return true;
+  },
+};
+</script>
+</body>
+</html>
