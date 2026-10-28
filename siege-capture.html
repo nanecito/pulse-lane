@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Long Siege — squat capture</title>
+<style>
+:root{
+  --bg:#0d0f12; --ink:#f2efe9; --muted:#8b8f98; --line:#232832;
+  --hot:#ff8a3d; --ok:#51d08a; --bad:#ff5d5d; --cyan:#4cc9f0;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font:16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  overflow:hidden; overscroll-behavior:none}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.ov{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;
+  align-items:center;padding:18px;text-align:center;gap:12px;z-index:5;
+  background:rgba(13,15,18,.93);backdrop-filter:blur(3px)}
+.ov[hidden]{display:none}
+h1{font-size:21px;margin:0;letter-spacing:.02em}
+h1 span{color:var(--hot)}
+p{margin:0;max-width:30em;color:var(--muted);font-size:14px}
+p.lead{color:var(--ink);font-size:15px}
+button{font:600 16px/1 inherit;color:#0d0f12;background:var(--hot);border:0;
+  border-radius:10px;padding:15px 26px;cursor:pointer;letter-spacing:.02em}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);
+  padding:11px 18px;font-weight:500;font-size:14px}
+button:disabled{opacity:.45}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.diag{font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);
+  border:1px solid var(--line);border-radius:10px;padding:10px 13px;text-align:left;
+  min-width:min(340px,92vw);max-width:92vw}
+.diag b{color:var(--ink);font-weight:600}
+.diag .g{color:var(--ok)} .diag .r{color:var(--bad)} .diag .y{color:var(--hot)}
+.reads{font:600 15px/1.3 inherit;letter-spacing:.02em}
+.reads.y{color:var(--ok)} .reads.n{color:var(--hot)}
+/* ---- the running HUD. Big, because it is read from across the room. ---- */
+#hud{position:fixed;inset:0;z-index:4;pointer-events:none;display:flex;
+  flex-direction:column;justify-content:space-between}
+#hud[hidden]{display:none}
+.hdr{display:flex;flex-direction:column;align-items:center;gap:8px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  width:100%;padding:12px 14px}
+.blk{font:12px/1 ui-monospace,monospace;color:var(--muted);letter-spacing:.08em}
+.fps{font:12px/1 ui-monospace,monospace;color:var(--muted);text-align:right}
+.fps .lost{color:var(--bad);font-weight:700}
+/* Everything the player reads sits on a plate, at the top or the bottom.
+   The middle belongs to the picture: he is judging whether he is in frame,
+   and text over the body makes both unreadable. */
+.plate{align-self:center;max-width:min(94vw,780px);text-align:center;
+  background:rgba(10,12,15,.74);border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;padding:9px 18px;backdrop-filter:blur(4px)}
+.cue{font:800 clamp(24px,7vw,52px)/1.05 inherit;letter-spacing:-.01em;margin:0}
+.sub{font:600 clamp(13px,3.5vw,20px)/1.3 inherit;color:var(--hot);margin-top:3px}
+/* The count lives in the bottom strip, not in its own centred plate. On a
+   sideways phone the screen is only ~412px tall and a centred plate sat
+   across the legs; here the whole of the bottom furniture is one band. */
+.cnt{font:800 clamp(22px,6vw,44px)/1 ui-monospace,monospace;color:var(--cyan);margin:0}
+.cntp{padding:5px 14px;min-width:4.5em}
+.rgt{display:flex;flex-direction:column;align-items:flex-end;gap:7px}
+.btmwrap{display:flex;flex-direction:column;align-items:center;gap:9px;padding:0 14px 18px}
+.btmrow{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;width:100%}
+.bar{position:fixed;left:0;right:0;bottom:0;height:6px;background:#1a1f28}
+.bar i{display:block;height:100%;background:var(--hot);width:0%}
+.btmrow button{pointer-events:auto}
+.prog{font:12px/1.3 ui-monospace,monospace;color:var(--muted);white-space:nowrap}
+#oEnd .diag{max-height:42vh;overflow:auto}
+/* FIND YOUR DISTANCE keeps the top of the screen clear and the picture is
+   drawn into it - see fitRegion. A full-bleed sheet here hid the body
+   behind the readout that describes it. */
+#oFit{justify-content:flex-end;gap:9px;backdrop-filter:none;
+  background:linear-gradient(to bottom,rgba(13,15,18,0) 0%,rgba(13,15,18,0) 48%,
+             rgba(13,15,18,.78) 58%,rgba(13,15,18,.95) 70%)}
+#oFit h1{font-size:18px}
+#oFit p{font-size:13px}
+.warn{color:var(--hot);font-size:13px;max-width:30em}
+.foot{font-size:11px;color:#5d626c;max-width:32em}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- running HUD -->
+<div id="hud" hidden>
+  <div class="hdr">
+    <div class="top">
+      <div class="blk" id="hBlk">—</div>
+      <div class="fps" id="hFps">—</div>
+    </div>
+    <div class="plate">
+      <p class="cue" id="hCue">—</p>
+      <div class="sub" id="hSub"></div>
+    </div>
+  </div>
+  <div class="btmwrap">
+    <div class="btmrow">
+      <div class="plate cntp"><div class="cnt" id="hCnt"></div></div>
+      <div class="rgt">
+        <div class="prog" id="hProg"></div>
+        <div class="row">
+          <button class="ghost" id="bSkip">SKIP BLOCK</button>
+          <button class="ghost" id="bStop">END &amp; SAVE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="bar"><i id="hBar"></i></div>
+</div>
+
+<!-- start -->
+<div class="ov" id="oStart">
+  <h1>THE LONG SIEGE — <span>squat capture</span></h1>
+  <p class="lead">This is not the game. It records your body doing a known list of
+     movements, so a repetition counter can be measured against it instead of guessed at.</p>
+  <p>About ten minutes, roughly 85 squats, alternating hard and easy blocks.
+     Every block can be skipped and you can save whatever you have done at any point.
+     Nothing is sent anywhere — the file is written to this phone and nowhere else.</p>
+  <div class="row"><button id="bStart">START CAMERA</button></div>
+  <p id="loadMsg" hidden>Starting the camera and loading the tracker…</p>
+  <p id="errMsg" class="warn" hidden></p>
+  <p class="foot">Turn the phone sideways if you prefer a bigger picture — it does not
+     change how far back you have to stand, only how much of the screen you fill.
+     Either way is fine here; the orientation is recorded.</p>
+</div>
+
+<!-- fit / find your distance -->
+<div class="ov" id="oFit" hidden>
+  <h1>FIND YOUR DISTANCE</h1>
+  <p class="lead">Stand back until <b>torso</b> reads about <b>0.18</b> — the car game's
+     own calibration number. Shoulders and hips are all this game scores; knees and
+     ankles are shown for information only.</p>
+  <div class="diag" id="fitDiag">waiting for the camera…</div>
+  <div class="reads n" id="fitReads">—</div>
+  <div class="row">
+    <button id="bGo">BEGIN CAPTURE</button>
+    <button class="ghost" id="bRec1">SAVE WHAT I HAVE</button>
+  </div>
+  <p class="foot">The button is always enabled — the readout is advice, not a lock.</p>
+</div>
+
+<!-- done -->
+<div class="ov" id="oEnd" hidden>
+  <h1>CAPTURE <span>DONE</span></h1>
+  <p class="lead" id="endLead">—</p>
+  <div class="diag" id="endDiag">—</div>
+  <div class="row">
+    <button id="bRec2">SAVE RECORDING</button>
+    <button class="ghost" id="bRecRaw">SAVE UNCOMPRESSED</button>
+  </div>
+  <p class="foot">Send me the file. The compressed one is much smaller and is the one
+     to use unless it refuses to attach.</p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+const BUILD = 'siege-capture-1';
+
+/* =====================================================================
+   WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT
+
+   The Long Siege needs a repetition counter, and doc 15 says to validate
+   it against human-labelled recordings. There are none: Gap has never
+   been played, and Sparks' four recordings are reaching and lunging.
+   Nobody in this project has ever recorded a squat.
+
+   Hand-labelling 33-landmark NDJSON frame by frame is a job neither of
+   us would finish, so the labels come from the STRUCTURE instead. Each
+   block names a movement and a count, and the block boundary is written
+   into the file. The expected count IS the ground truth.
+
+   For the paced blocks there is more than a count: every metronome click
+   is recorded as a cue, so the file carries the expected rep TIMES too.
+   That is what makes "counted late" and "counted twice" measurable
+   rather than just "counted wrong".
+
+   THIS PAGE CONTAINS NO REPETITION COUNTER, ON PURPOSE. If it counted on
+   screen I would tune the counter against what I could see rather than
+   measure it by replay, which is the mistake doc 01 calls "measure at the
+   boundary, not in the middle" wearing a different hat. It records. The
+   counter is written separately and run against the file.
+
+   Two findings from reading vangogh-lab.html that belong here, because
+   they are what the confound blocks are aimed at:
+
+   1. The brake's divisor is base.torso, captured ONCE at calibration and
+      frozen (fallback 0.18). The tracked reference REF_UP / REF_DOWN
+      re-baselines the reference HEIGHT, not the SCALE. So walking toward
+      the phone leaves every later depth inflated by the scale ratio for
+      the rest of the session. Blocks `walk` and `walksquat` are aimed at
+      exactly that.
+
+   2. squatDepth = max(hipDrop, shDrop). A bend at the waist drops the
+      shoulders and leaves the hips, so the MAX lets it through at full
+      value. For a brake that is survivable; for a counter it is a hole.
+      Block `bend10` is aimed at that, and expects a count of zero.
+   ===================================================================== */
+
+/* ---- the block list. This is the ground truth; nothing else is. ------
+   kind:    still | rep | confound | sweep | probe
+   n:       how many repetitions to perform
+   expect:  what a correct counter should return for this block.
+            null means DELIBERATELY AMBIGUOUS - recorded, not asserted.
+   pace:    seconds per repetition for a metronome block, null for free
+   secs:    how long the block runs before it auto-advances
+   Order alternates load so a bail halfway still covers both categories,
+   and so the squatting does not pile up into one fatigued run.        */
+const BLOCKS = [
+  { id:'still1',    kind:'still',    n:0,  expect:0,    pace:null, secs:8,
+    cue:'STAND STILL',          sub:'just stand, arms down',
+    say:'Block one. Stand still.' },
+
+  { id:'slow10',    kind:'rep',      n:10, expect:10,   pace:3.0,  secs:32,
+    cue:'SLOW SQUATS',          sub:'down on the low click, up on the high one',
+    say:'Ten slow squats. Follow the clicks. Down on the low one, up on the high one.' },
+
+  { id:'bend10',    kind:'confound', n:10, expect:0,    pace:2.5,  secs:27,
+    cue:'BEND AT THE WAIST',    sub:'legs straight — do not squat',
+    say:'Ten bends at the waist. Keep your legs straight. This one should count as nothing.' },
+
+  { id:'nat10',     kind:'rep',      n:10, expect:10,   pace:null, secs:30,
+    cue:'TEN SQUATS',           sub:'your own pace, however you normally would',
+    say:'Ten squats at your own pace.' },
+
+  { id:'bob10',     kind:'confound', n:10, expect:0,    pace:1.0,  secs:12,
+    cue:'SMALL BOUNCES',        sub:'bounce on the spot, knees soft',
+    say:'Ten small bounces on the spot. This should count as nothing.' },
+
+  { id:'fast10',    kind:'rep',      n:10, expect:10,   pace:1.3,  secs:15,
+    cue:'FAST SQUATS',          sub:'keep up with the clicks',
+    say:'Ten fast squats. Keep up with the clicks.' },
+
+  { id:'march20',   kind:'confound', n:20, expect:0,    pace:null, secs:20,
+    cue:'MARCH IN PLACE',       sub:'knees up, like the car game',
+    say:'March in place for twenty seconds. This should count as nothing.' },
+
+  { id:'shallow10', kind:'rep',      n:10, expect:10,   pace:2.2,  secs:24,
+    cue:'SHALLOW SQUATS',       sub:'quarter depth — small, but a real squat',
+    say:'Ten shallow squats. Only a quarter of the way down, but do them properly.' },
+
+  { id:'walk',      kind:'confound', n:0,  expect:0,    pace:null, secs:25,
+    cue:'WALK IN AND BACK',     sub:'up to the phone and back, twice. No squats',
+    say:'Walk right up to the phone and back again, twice. No squats at all.' },
+
+  { id:'deep10',    kind:'rep',      n:10, expect:10,   pace:3.2,  secs:34,
+    cue:'DEEP SQUATS',          sub:'as low as is comfortable',
+    say:'Ten deep squats. As low as is comfortable.' },
+
+  { id:'tilt',      kind:'confound', n:0,  expect:0,    pace:null, secs:22,
+    cue:'NUDGE THE PHONE',      sub:'walk over, tilt it, move it, stand back',
+    say:'Walk over and nudge the phone. Tilt it, shift it, then stand back where you were.' },
+
+  { id:'pause10',   kind:'rep',      n:10, expect:10,   pace:4.0,  secs:42,
+    cue:'SQUAT AND HOLD',       sub:'down, hold two counts, up',
+    say:'Ten squats with a hold. Down, hold for two, then up.' },
+
+  { id:'walksquat', kind:'confound', n:4,  expect:4,    pace:null, secs:32,
+    cue:'MOVE, THEN SQUAT',     sub:'2 steps in, 2 squats, 2 steps back, 2 squats',
+    say:'Two steps toward the phone, two squats. Two steps back, two more squats.' },
+
+  { id:'asym10',    kind:'rep',      n:10, expect:10,   pace:null, secs:30,
+    cue:'FAVOUR ONE LEG',       sub:'ten squats leaning your weight left',
+    say:'Ten squats with your weight favouring your left leg.' },
+
+  { id:'floor5',    kind:'confound', n:5,  expect:null, pace:null, secs:26,
+    cue:'PICK IT OFF THE FLOOR',sub:'reach down and pick something up, five times',
+    say:'Pick something up off the floor five times. This one is deliberately ambiguous.' },
+
+  { id:'ladder5',   kind:'sweep',    n:5,  expect:null, pace:null, secs:26,
+    cue:'SHALLOWER EACH TIME',  sub:'five squats, each one less deep than the last',
+    say:'Five squats, each one shallower than the last. The final one is barely a dip. This sets the depth floor.' },
+
+  { id:'sit5',      kind:'confound', n:5,  expect:null, pace:null, secs:26,
+    cue:'CHAIR, FIVE TIMES',    sub:'sit down and stand up — skip if there is no chair',
+    say:'Sit down on a chair and stand up, five times. Skip this if there is no chair.' },
+
+  { id:'probe5',    kind:'probe',    n:5,  expect:5,    pace:null, secs:32,
+    cue:'AS CLOSE AS IT READS',  sub:'step in while the readout holds, then 5 squats',
+    say:'Step in as close as you can while the readout still says your body reads, then do five squats there.' },
+
+  { id:'still2',    kind:'still',    n:0,  expect:0,    pace:null, secs:8,
+    cue:'STAND STILL',          sub:'last one — just stand',
+    say:'Last block. Stand still.' }
+];
+
+/* ---- the signal layer, lifted from sparks.html --------------------- */
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+const VIS_GET = 0.15;      // confidence to acquire a landmark
+const VIS_KEEP = 0.04;     // confidence to keep one already acquired
+const SCALE_WINDOW_MS = 5000;
+const SCALE_Q = 0.85;      // 85th percentile: the tracked body scale
+const POSE_LATENCY_MS = 200;   // ASSUMED, not measured. Recorded so the file
+                               // can be re-judged once the gate's loopback runs.
+
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? VIS_KEEP : VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };     // mirrored, normalised to the frame
+  };
+}
+function makeScale(){
+  const buf = []; let scale = null;
+  return {
+    get(){ return scale; },
+    push(torso, t){
+      if(!torso || torso < 0.02) return scale;
+      buf.push({ t, v:torso });
+      const cut = t - SCALE_WINDOW_MS;
+      while(buf.length && buf[0].t < cut) buf.shift();
+      const vs = buf.map(b => b.v).sort((a,b) => a-b);
+      scale = vs[Math.min(vs.length-1, Math.floor(vs.length * SCALE_Q))];
+      return scale;
+    }
+  };
+}
+function midp(a,b){ return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }; }
+function idist(a,b,ar){ return Math.hypot((b.x-a.x)*ar, b.y-a.y); }
+
+/* One pose becomes one reading. Nothing is guessed: a landmark that is not
+   visible is absent, and anything derived from it is null. */
+function observe(pose, read, ar){
+  const g = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p) g[k] = p; }
+  const o = { ar, g, sh:null, hip:null, kn:null, ank:null, torso:0,
+              above:null, below:null, readable:false };
+  if(g.shA && g.shB) o.sh = midp(g.shA, g.shB);
+  if(g.hipA && g.hipB) o.hip = midp(g.hipA, g.hipB);
+  if(g.knA && g.knB) o.kn = midp(g.knA, g.knB);
+  if(g.ankA && g.ankB) o.ank = midp(g.ankA, g.ankB);
+  if(o.sh && o.hip){
+    o.torso = idist(o.sh, o.hip, ar);
+    o.readable = o.torso > 0.02;
+    if(o.readable){
+      // how many torsos of PICTURE sit above and below the hip. This is the
+      // room measurement: a squat-led game needs head-to-hip plus a descent
+      // and nothing lateral, and this says whether that fits where he stands.
+      o.above = o.hip.y / o.torso;
+      o.below = (1 - o.hip.y) / o.torso;
+    }
+  }
+  return o;
+}
+
+/* ---- the recording -------------------------------------------------
+   Same record shape as sparks.html so replay.mjs and the analysis
+   scripts carry over, plus block and cue markers. Memory only; it
+   becomes a file when a Save button is tapped. Nothing is sent
+   anywhere.                                                          */
+const REC_CAP = 80000;
+const rec = [];
+let recDropped = 0, lostSince = null, lostCount = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'siege-capture', build:BUILD,
+    orientation:(window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    joints:J, visGet:VIS_GET, visKeep:VIS_KEEP,
+    scaleWindowMs:SCALE_WINDOW_MS, scaleQ:SCALE_Q,
+    poseLatencyMs:POSE_LATENCY_MS,
+    coords:'MediaPipe normalised to the camera frame, UNMIRRORED in lm, origin top-left',
+    note:'cap = video.currentTime in seconds on the video clock; ready = performance.now() ms when the estimate returned; clock = cap mapped into the performance clock by the running offset, minus poseLatencyMs',
+    groundTruth:'block records carry id, kind, n and expect. expect is the count a correct counter should return; null means deliberately ambiguous and must not be asserted. cue records carry the metronome clicks, so paced blocks also have expected repetition TIMES.',
+    blocks:BLOCKS });
+}
+
+/* The single clock. video.currentTime is the only timestamp that belongs to
+   the camera rather than the renderer, so everything is aligned to it. */
+let clockOffset = null;
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset*0.9 + off*0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+let clockT = 0;
+
+/* ---- audio: the metronome and the beeps ---------------------------- */
+let actx = null;
+function initAudio(){
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ actx = null; }
+}
+function blip(freq, dur, gain){
+  if(!actx) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+const CLICK_DOWN = () => blip(300, 0.11, 0.34);   // low: go down
+const CLICK_UP   = () => blip(760, 0.09, 0.30);   // high: come up
+const BEEP_IN    = () => blip(520, 0.13, 0.30);
+const BEEP_GO    = () => blip(880, 0.22, 0.34);
+const BEEP_END   = () => blip(392, 0.30, 0.30);
+
+/* Speech carries the instruction, the clicks carry the timing, and the
+   screen carries both. UNTESTED on Hugo's device: if speechSynthesis is
+   missing or silent the beeps and the text still run the session. */
+let speechOK = ('speechSynthesis' in window);
+function say(text){
+  if(!speechOK || !text) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
+    speechSynthesis.speak(u);
+  } catch(e){ speechOK = false; }
+}
+
+/* ---- camera and tracker ------------------------------------------- */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null, stream = null;
+const read = makeReader();
+const scaleTrack = makeScale();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+function dropStream(){
+  try { if(stream) stream.getTracks().forEach(t => t.stop()); } catch(e){}
+  stream = null;
+}
+/* Ask SOFTLY and then work with whatever arrived. Doc 01: exact constraints
+   were tried on Sparks and made it worse - the phone obeyed by cropping its
+   4:3 sensor top and bottom, which is the one dimension a standing body
+   needs. The delivered size goes on screen because two Sparks builds were
+   spent inferring it from screenshots. */
+async function startCamera(){
+  const tall = window.innerHeight > window.innerWidth;
+  const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
+  const s = await navigator.mediaDevices.getUserMedia({
+    video:{ width:{ideal:vW}, height:{ideal:vH}, facingMode:'user' }, audio:false });
+  dropStream(); stream = s;
+  video.srcObject = s;
+  const playing = video.play();
+  if(playing && playing.catch) playing.catch(()=>{});
+  await Promise.race([ playing ? playing.catch(()=>{}) : Promise.resolve(),
+                       new Promise(r => setTimeout(r, 3000)) ]);
+  await waitForFrames(8000);
+}
+function waitForFrames(ms){
+  const t0 = performance.now();
+  return new Promise((res, rej) => {
+    (function look(){
+      if(video.videoWidth && video.videoHeight && video.currentTime > 0) return res();
+      if(performance.now() - t0 > ms) return rej(new Error('The camera did not deliver a frame.'));
+      requestAnimationFrame(look);
+    })();
+  });
+}
+let wake = null;
+async function keepAwake(){
+  try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && !document.getElementById('hud').hidden) keepAwake();
+});
+
+/* ---- canvas ------------------------------------------------------- */
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+/* The picture is normally centred in the whole screen. While the fit screen
+   is up the readout owns the bottom, so the picture is fitted into the top
+   band instead of being half-covered by it. px() reads the same function, so
+   the skeleton follows the picture without a second mapping to keep in step. */
+let fitRegion = null;                      // {y0,y1} as fractions of H, or null
+function videoFit(){
+  const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const y0 = fitRegion ? H*fitRegion.y0 : 0;
+  const av = (fitRegion ? H*fitRegion.y1 : H) - y0;
+  const sc = Math.min(W/vw, av/vh);       // contain: the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:y0 + (av-dh)/2, dw, dh, vw, vh };
+}
+function px(p){ const f = videoFit(); return { x: f.dx + p.x*f.dw, y: f.dy + p.y*f.dh }; }
+function frameAR(){ const vw = video.videoWidth||3, vh = video.videoHeight||4; return vw/vh; }
+
+function drawMirror(alpha){
+  const f = videoFit();
+  ctx.clearRect(0,0,W,H);
+  if(!f.vw) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(f.dx + f.dw, f.dy);       // mirrored, so left really is left
+  ctx.scale(-1, 1);
+  try { ctx.drawImage(video, 0, 0, f.dw, f.dh); } catch(e){}
+  ctx.restore();
+}
+const BONES = [['shA','shB'],['shA','elA'],['elA','wrA'],['shB','elB'],['elB','wrB'],
+               ['shA','hipA'],['shB','hipB'],['hipA','hipB'],
+               ['hipA','knA'],['knA','ankA'],['hipB','knB'],['knB','ankB']];
+function drawBody(o, alpha){
+  if(!o) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.lineWidth = Math.max(2.5, Math.min(W,H)*0.009);
+  ctx.lineCap = 'round'; ctx.strokeStyle = '#ff8a3d';
+  for(const [a,b] of BONES){
+    const pa = o.g[a], pb = o.g[b];
+    if(!pa || !pb) continue;
+    const A = px(pa), B = px(pb);
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  }
+  // hip and shoulder midpoints: the only two things this game scores
+  ctx.fillStyle = '#4cc9f0';
+  for(const m of [o.sh, o.hip]){
+    if(!m) continue;
+    const P = px(m), r = Math.max(4, Math.min(W,H)*0.013);
+    ctx.beginPath(); ctx.arc(P.x, P.y, r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ---- the sequencer -------------------------------------------------
+   Hands free on purpose. He is two or three metres away and cannot read
+   small text or tap a button between blocks, so each block announces
+   itself, counts itself in, runs itself and advances. The only buttons
+   that matter mid-session are SKIP and the saves.                     */
+const ANNOUNCE = 3.4;      // seconds of instruction before the count-in
+const COUNTIN  = 2.4;      // three beeps, then GO
+let state = 'start';       // start | fit | announce | countin | work | done
+let bi = -1;               // which block
+let phaseT = 0;            // seconds into the current phase
+let cueIdx = 0;            // next metronome click in this block
+let blockStartedAt = 0;
+let countBeep = -1;
+let completed = 0, skipped = 0;
+
+function blk(){ return BLOCKS[bi] || null; }
+function cueTimes(b){
+  // down on i*pace, up half a pace later. 2n clicks for n repetitions.
+  if(!b || !b.pace) return [];
+  const out = [];
+  for(let i = 0; i < b.n; i++){
+    out.push({ t: i*b.pace,            kind:'down' });
+    out.push({ t: i*b.pace + b.pace/2, kind:'up'   });
+  }
+  return out;
+}
+let curCues = [];
+
+function enterBlock(i){
+  bi = i;
+  if(bi >= BLOCKS.length){ finish(); return; }
+  const b = blk();
+  curCues = cueTimes(b);
+  cueIdx = 0; phaseT = 0; countBeep = -1;
+  state = 'announce';
+  say(b.say);
+  hud.hBlk.textContent = 'BLOCK ' + (bi+1) + ' / ' + BLOCKS.length + '  ·  ' + b.id;
+  hud.hCue.textContent = b.cue;
+  hud.hSub.textContent = b.sub;
+  hud.hCnt.textContent = b.n ? ('× ' + b.n) : '';
+  hud.hProg.textContent = completed + ' done · ' + skipped + ' skipped';
+}
+function beginWork(){
+  state = 'work'; phaseT = 0;
+  blockStartedAt = performance.now();
+  const b = blk();
+  BEEP_GO();
+  recPush({ k:'block', phase:'start', i:bi, id:b.id, kind:b.kind,
+            n:b.n, expect:b.expect, pace:b.pace, secs:b.secs,
+            t:+performance.now().toFixed(1), clock:+clockT.toFixed(1) });
+}
+function endBlock(why){
+  const b = blk();
+  if(b && state === 'work'){
+    recPush({ k:'block', phase:'end', i:bi, id:b.id, why,
+              t:+performance.now().toFixed(1), clock:+clockT.toFixed(1),
+              elapsed:+((performance.now()-blockStartedAt)/1000).toFixed(2) });
+    if(why === 'done') completed++; else skipped++;
+  } else if(b){
+    recPush({ k:'skip', i:bi, id:b.id, t:+performance.now().toFixed(1) });
+    skipped++;
+  }
+  BEEP_END();
+  enterBlock(bi + 1);
+}
+function finish(){
+  state = 'done';
+  try { speechSynthesis.cancel(); } catch(e){}
+  say('Capture finished. Save the recording and send it over.');
+  hud.wrap.hidden = true;
+  const frames = rec.filter(r => r.k === 'f').length;
+  const dur = (performance.now() - t0run)/1000;
+  ui.endLead.textContent = completed + ' of ' + BLOCKS.length + ' blocks completed'
+    + (skipped ? ', ' + skipped + ' skipped' : '') + '.';
+  ui.endDiag.innerHTML =
+      '<b>frames</b> ' + frames
+    + '  ·  <b>session</b> ' + dur.toFixed(0) + 's'
+    + '  ·  <b>pose fps</b> ' + (frames/Math.max(1,dur)).toFixed(1) + '<br>'
+    + '<b>tracking losses</b> ' + lostCount
+    + '  ·  <b>gaps</b> ' + rec.filter(r=>r.k==='gap').length
+    + (recDropped ? ('  ·  <b class="r">records dropped</b> ' + recDropped) : '') + '<br>'
+    + '<b>camera</b> ' + video.videoWidth + '×' + video.videoHeight
+    + '  ·  <b>orientation</b> ' + ((window.innerHeight>window.innerWidth)?'portrait':'landscape') + '<br>'
+    + '<b>records</b> ' + rec.length;
+  ui.oEnd.hidden = false;
+}
+
+/* ---- the frame loop ------------------------------------------------ */
+let last = 0, t0run = 0, fps = 0, lastFrameAt = 0, cur = null, fresh = false;
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = last ? Math.min(0.1, (now - last)/1000) : 0;
+  last = now;
+  fresh = false;
+
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    if(lastFrameAt && now - lastFrameAt > 120){
+      recPush({ k:'gap', t:+now.toFixed(1), ms:Math.round(now - lastFrameAt) });
+    }
+    lastFrameAt = now; lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true;
+      clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+
+    if(fresh){
+      // all 33 landmarks, UNMIRRORED, exactly as MediaPipe returned them.
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+                        +(p.z||0).toFixed(4),
+                        +(p.visibility === undefined ? 1 : p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+vt.toFixed(4), ready:+performance.now().toFixed(1),
+                clock:+clockT.toFixed(1), b:(state==='work'? bi : -1), lm });
+      if(!pose && lostSince === null){ lostSince = now; lostCount++; recPush({ k:'lost', t:+now.toFixed(1) }); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:+now.toFixed(1), out:Math.round(now-lostSince) }); lostSince = null; }
+      cur = observe(pose, read, frameAR());
+      if(cur.readable) scaleTrack.push(cur.torso, clockT);
+      fps = fps ? fps*0.9 + (1/Math.max(0.001,dt))*0.1 : 1/Math.max(0.001,dt);
+    }
+  }
+
+  // ---- phases
+  fitRegion = (state === 'fit') ? { y0:0.02, y1:0.50 } : null;
+  if(state === 'fit'){
+    drawMirror(0.55); drawBody(cur, 0.95);
+    paintFit();
+    return;
+  }
+  if(state === 'start' || state === 'done'){
+    if(video.videoWidth){ drawMirror(0.35); drawBody(cur, 0.55); }
+    return;
+  }
+
+  phaseT += dt;
+  if(state === 'announce'){
+    hud.hBar.style.width = Math.round(100*phaseT/ANNOUNCE) + '%';
+    if(phaseT >= ANNOUNCE){ state = 'countin'; phaseT = 0; countBeep = -1; }
+  } else if(state === 'countin'){
+    const n = Math.floor(phaseT / (COUNTIN/3));
+    if(n > countBeep && n < 3){ countBeep = n; BEEP_IN(); }
+    hud.hCnt.textContent = String(Math.max(1, 3 - n));
+    hud.hBar.style.width = Math.round(100*phaseT/COUNTIN) + '%';
+    if(phaseT >= COUNTIN){ beginWork(); }
+  } else if(state === 'work'){
+    const b = blk();
+    while(cueIdx < curCues.length && phaseT >= curCues[cueIdx].t){
+      const q = curCues[cueIdx];
+      (q.kind === 'down' ? CLICK_DOWN : CLICK_UP)();
+      recPush({ k:'cue', i:bi, id:b.id, kind:q.kind, rep:Math.floor(cueIdx/2),
+                t:+performance.now().toFixed(1), clock:+clockT.toFixed(1) });
+      cueIdx++;
+    }
+    const total = b.secs;
+    hud.hBar.style.width = Math.round(100*Math.min(1, phaseT/total)) + '%';
+    if(b.pace && b.n){
+      hud.hCnt.textContent = Math.min(b.n, Math.floor(phaseT/b.pace) + 1) + ' / ' + b.n;
+    } else {
+      hud.hCnt.textContent = Math.max(0, Math.ceil(total - phaseT)) + 's';
+    }
+    if(phaseT >= total) endBlock('done');
+  }
+
+  drawMirror(0.5); drawBody(cur, 0.9);
+  hud.hFps.innerHTML = fps.toFixed(0) + ' fps'
+    + (cur && cur.readable ? '' : ' <span class="lost">NO BODY</span>');
+}
+
+/* ---- the fit readout ----------------------------------------------
+   Shows the delivered camera size, because two Sparks builds were spent
+   inferring it from screenshots and the car game had been printing it
+   the whole time. `above` and `below` are the room measurement.      */
+function paintFit(){
+  const f = videoFit();
+  const o = cur;
+  const tr = scaleTrack.get();
+  const vis = k => { const p = o && o.g[k]; return p ? p.v : 0; };
+  const cls = v => v >= VIS_GET ? 'g' : 'r';
+  const n2 = v => (v === null || v === undefined) ? '—' : v.toFixed(2);
+  const n3 = v => (v === null || v === undefined) ? '—' : v.toFixed(3);
+  ui.fitDiag.innerHTML =
+      '<b>cam</b> ' + (f.vw||'?') + '×' + (f.vh||'?')
+    + ' (' + (f.vw ? (f.vw/f.vh).toFixed(2) : '?') + ':1) '
+    + ((f.vw > f.vh) ? 'LANDSCAPE' : 'PORTRAIT') + ' sensor<br>'
+    + '<b>phone</b> ' + window.innerWidth + '×' + window.innerHeight
+    + ' ' + ((window.innerHeight > window.innerWidth) ? 'upright' : 'sideways')
+    + '  ·  <b>' + fps.toFixed(0) + ' fps</b><br>'
+    + '<b>torso</b> <span class="' + (o && o.readable && o.torso <= 0.22 ? 'g' : 'y') + '">'
+    + n3(o && o.readable ? o.torso : null) + '</span>'
+    + '  tracked <span class="' + (tr && tr <= 0.22 ? 'g' : 'y') + '">' + n3(tr) + '</span><br>'
+    + '<b>room</b> ' + n2(o && o.above) + ' torsos above the hip, '
+    + n2(o && o.below) + ' below<br>'
+    + '<b>sees</b> '
+    + 'sh <span class="' + cls(Math.min(vis('shA'),vis('shB'))) + '">' + n2(Math.min(vis('shA'),vis('shB'))) + '</span> '
+    + 'hip <span class="' + cls(Math.min(vis('hipA'),vis('hipB'))) + '">' + n2(Math.min(vis('hipA'),vis('hipB'))) + '</span> '
+    + 'kn <span class="' + cls(Math.min(vis('knA'),vis('knB'))) + '">' + n2(Math.min(vis('knA'),vis('knB'))) + '</span> '
+    + 'ank <span class="' + cls(Math.min(vis('ankA'),vis('ankB'))) + '">' + n2(Math.min(vis('ankA'),vis('ankB'))) + '</span>';
+  /* Green means nothing to do. A body the tracker can see but that is
+     standing too close is NOT green - it was, and a green line reading
+     "a step or two further back would be better" is two instructions at
+     once. Readable and well-placed are separate states and look it. */
+  const seen = !!(o && o.readable);
+  const placed = seen && o.torso <= 0.22;
+  ui.fitReads.className = 'reads ' + (placed ? 'y' : 'n');
+  ui.fitReads.textContent = !seen
+    ? 'SHOULDERS OR HIPS NOT VISIBLE — step back or raise the phone'
+    : placed
+      ? ('BODY READS — torso ' + o.torso.toFixed(3))
+      : ('TOO CLOSE — torso ' + o.torso.toFixed(3) + ', step back until it reads about 0.18');
+}
+
+/* ---- saving --------------------------------------------------------
+   About 10 minutes at ~20 fps is roughly 12,000 frames of 33 landmarks,
+   which is ~8 MB of NDJSON. Gzip takes that to well under 2 MB, which is
+   the difference between a file that attaches to a chat and one that
+   does not. CompressionStream is in Chrome; the plain button is the
+   fallback if anything refuses it.                                   */
+function ndjson(){ return rec.map(o => JSON.stringify(o)).join('\n') + '\n'; }
+function stamp(){ return new Date().toISOString().replace(/[:.]/g,'-').slice(0,19); }
+function drop(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 6000);
+}
+async function saveGz(){
+  const text = ndjson();
+  if(!('CompressionStream' in window)){ saveRaw(); return; }
+  try {
+    const cs = new CompressionStream('gzip');
+    const stream = new Blob([text]).stream().pipeThrough(cs);
+    const buf = await new Response(stream).arrayBuffer();
+    drop(new Blob([buf], { type:'application/gzip' }),
+         'siege-capture-' + stamp() + '.ndjson.gz');
+    note('saved ' + (buf.byteLength/1048576).toFixed(2) + ' MB compressed, from '
+         + (text.length/1048576).toFixed(2) + ' MB of records');
+  } catch(e){ saveRaw(); }
+}
+function saveRaw(){
+  const text = ndjson();
+  drop(new Blob([text], { type:'application/x-ndjson' }),
+       'siege-capture-' + stamp() + '.ndjson');
+  note('saved ' + (text.length/1048576).toFixed(2) + ' MB uncompressed');
+}
+function note(msg){
+  const el = ui.endDiag;
+  if(el && !ui.oEnd.hidden) el.innerHTML += '<br><b class="g">' + msg + '</b>';
+}
+
+/* ---- wiring -------------------------------------------------------- */
+const ui = {
+  oStart:   document.getElementById('oStart'),
+  oFit:     document.getElementById('oFit'),
+  oEnd:     document.getElementById('oEnd'),
+  loadMsg:  document.getElementById('loadMsg'),
+  errMsg:   document.getElementById('errMsg'),
+  fitDiag:  document.getElementById('fitDiag'),
+  fitReads: document.getElementById('fitReads'),
+  endLead:  document.getElementById('endLead'),
+  endDiag:  document.getElementById('endDiag')
+};
+const hud = {
+  wrap: document.getElementById('hud'),
+  hBlk: document.getElementById('hBlk'),
+  hFps: document.getElementById('hFps'),
+  hCue: document.getElementById('hCue'),
+  hSub: document.getElementById('hSub'),
+  hCnt: document.getElementById('hCnt'),
+  hBar: document.getElementById('hBar'),
+  hProg:document.getElementById('hProg')
+};
+
+let starting = false;
+async function begin(){
+  if(starting) return;
+  starting = true;
+  const b = document.getElementById('bStart');
+  b.disabled = true;
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx && actx.state === 'suspended') await actx.resume();
+    say('Camera ready.');          // a real utterance, to unlock speech on this gesture
+    await startCamera();
+    if(!landmarker) await loadTracker();
+    recHeader();
+    ui.loadMsg.hidden = true; ui.oStart.hidden = true; ui.oFit.hidden = false;
+    state = 'fit';
+    keepAwake();
+    resize();
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream();
+    ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    if(err && err.name === 'NotAllowedError') m = 'Camera permission denied. Allow it in the address bar and reload.';
+    if(err && err.name === 'NotFoundError')  m = 'No camera found on this device.';
+    if(err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    if(err && err.name === 'AbortError')     m = 'The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  } finally {
+    starting = false; b.disabled = false;
+  }
+}
+document.getElementById('bStart').addEventListener('click', begin);
+document.getElementById('bGo').addEventListener('click', () => {
+  ui.oFit.hidden = true; hud.wrap.hidden = false;
+  t0run = performance.now();
+  recPush({ k:'capture', phase:'start', t:+performance.now().toFixed(1),
+            video:{ w:video.videoWidth, h:video.videoHeight },
+            orientation:(window.innerHeight>window.innerWidth)?'portrait':'landscape' });
+  enterBlock(0);
+});
+document.getElementById('bSkip').addEventListener('click', () => {
+  if(state === 'announce' || state === 'countin' || state === 'work') endBlock('skipped');
+});
+/* Stop where you are and go straight to the save screen. Whatever blocks
+   were completed are still a usable recording - the block markers say
+   exactly which ones, so a half session is measured rather than guessed. */
+document.getElementById('bStop').addEventListener('click', () => {
+  if(state === 'work'){
+    const b = blk();
+    recPush({ k:'block', phase:'end', i:bi, id:b.id, why:'stopped',
+              t:+performance.now().toFixed(1), clock:+clockT.toFixed(1),
+              elapsed:+((performance.now()-blockStartedAt)/1000).toFixed(2) });
+  }
+  recPush({ k:'capture', phase:'stopped', i:bi, t:+performance.now().toFixed(1) });
+  finish();
+});
+document.getElementById('bRec1').addEventListener('click', saveGz);
+document.getElementById('bRec2').addEventListener('click', saveGz);
+document.getElementById('bRecRaw').addEventListener('click', saveRaw);
+
+/* One constructor, one block list, one reader. A harness that builds its
+   own version of any of these measures a page that does not exist - four
+   times now in this project. Everything a harness needs is exported from
+   here rather than retyped there. */
+window.__SIEGE_CAPTURE__ = {
+  BUILD, BLOCKS, J, VIS_GET, VIS_KEEP, SCALE_WINDOW_MS, SCALE_Q, POSE_LATENCY_MS,
+  makeReader, makeScale, observe, cueTimes, videoFit, px, frameAR, rec,
+  // render hooks, used by the offline harness only
+  __setState(s){ state = s; },
+  __setBlock(i){ enterBlock(i); },
+  __paintFit: paintFit,
+  __frame: frame,
+  __hud: () => hud, __ui: () => ui,
+  __fake(o){ cur = o; }
+};
+</script>
+</body>
+</html>
