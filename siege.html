@@ -105,6 +105,9 @@ button:disabled{opacity:.45}
      there is no other button.</p>
   <p>Stand where your phone can see you from shoulders to hips. You do not need your
      feet in frame. Every session is recorded to this phone and nowhere else.</p>
+  <p class="lead"><b>This is the last thing you tap.</b> From here on, holding a good
+     stance is the input — the gate, the calibration and the replay all start
+     themselves once you are standing in the right place.</p>
   <div class="row"><button id="bStart">START CAMERA</button></div>
   <p id="loadMsg" hidden>Starting the camera and loading the tracker…</p>
   <p id="errMsg" class="warn" hidden></p>
@@ -120,8 +123,9 @@ button:disabled{opacity:.45}
   <div class="diag" id="fitDiag">waiting for the camera…</div>
   <div class="reads n" id="fitReads">—</div>
   <div class="row"><button id="bFit" disabled>CALIBRATE</button></div>
-  <p class="foot" id="fitFoot">This gate blocks. A bout that starts against a body the
-     tracker cannot see would score the room, not the squat.</p>
+  <p class="foot" id="fitFoot">This gate blocks, and it starts itself — hold the
+     stance and it moves on. A bout that starts against a body the tracker cannot
+     see would score the room, not the squat.</p>
 </div>
 
 <div class="ov" id="oCal" hidden>
@@ -146,8 +150,9 @@ button:disabled{opacity:.45}
     <button id="bAgain">PUSH AGAIN</button>
     <button class="ghost" id="bRec">SAVE RECORDING</button>
   </div>
-  <p class="foot">The recording carries every landmark, every counted and rejected rep,
-     and the reason for each rejection.</p>
+  <p class="foot"><b>Squat once to go again</b> — you do not have to walk back to
+     the phone. The recording carries every landmark, every counted and rejected
+     rep, and the reason for each rejection.</p>
 </div>
 
 <script type="module">
@@ -226,6 +231,19 @@ const REF_UP = 0.5, REF_DOWN = 3.5;
 const REF_NEAR = 0.10;
 /* seconds of readable standing before a calibration descent is accepted */
 const CAL_SETTLE = 1.2;
+/* HANDS FREE FROM THE FIT SCREEN ONWARD.
+   The gate asks the player to stand at playing distance. Every transition
+   used to ask them to tap a button on a phone that is now across the room.
+   Those two cannot both be satisfied, and that is a catch-22, not a
+   threshold to loosen: the thresholds were right, the flow was wrong.
+   Doc 01 already records the same shape of mistake — "a screenshot is not
+   a playing position", because the only way to press the shutter is to walk
+   up to the phone. Holding the stance is the input now; the buttons stay
+   for anyone standing close enough to use them. */
+const FIT_HOLD   = 3.0;   // seconds of a good stance before calibration starts
+const CAL_GO     = 3.5;   // seconds after calibration before the siege starts
+/* the end screen takes one squat rather than a held stance — see the note
+   in the 'over' branch of the frame loop. */
 
 /* ---- the squat, as thresholds on the player's OWN range ---- */
 const TUNE = {
@@ -626,10 +644,17 @@ let wave = 0, resolve = RESOLVE_MAX, dmg = 0;
 let phaseT = 0, cleanCount = 0, partialCount = 0, repsThisWave = 0;
 let shake = 0, flash = 0, lastVerdict = null, verdictT = 0;
 let calMax = 0, calPhase = 'wait', calBest = 0, calSettle = 0;
+let holdT = 0, calGoT = 0, lastBeep = -1;
 let fps = 0, lastFrameAt = 0, cur = null, fresh = false, last = 0;
 let t0run = 0, pushPaused = 0;
 const tally = { clean:0, partial:0, rejected:0, unscored:0, reasons:{} };
 
+/* one beep a second while a countdown runs, and a higher one on zero. The
+   player is three metres away; the screen alone is not enough. */
+function countBeep(remain){
+  const sec = Math.ceil(remain);
+  if(sec !== lastBeep){ lastBeep = sec; if(sec > 0) tone(520, 0.12, 0.26, 'sine'); }
+}
 function setCall(call, sub){ hud.hCall.textContent = call; hud.hSub.textContent = sub||''; }
 
 function enterWave(i){
@@ -740,16 +765,32 @@ function frame(now){
   }
 
   fitRegion = (state==='fit') ? {y0:0.02,y1:0.50} : (state==='cal' ? {y0:0.02,y1:0.44} : null);
+  if(flash>0 && state==='over') flash = 0;
 
   if(state==='start'){ if(video.videoWidth){ drawMirror(0.3); drawBody(cur,0.5); } return; }
-  if(state==='fit'){ drawMirror(0.55); drawBody(cur,0.95); paintFit(); return; }
+  if(state==='fit'){ drawMirror(0.55); drawBody(cur,0.95); paintFit(dt); return; }
 
   // the counter runs in every state from calibration onward
   let out = { rep:null, suspended:null, depth:null };
   if(fresh) out = counter.push(cur, clockT, dt, scaleTrack.get());
 
   if(state==='cal'){ drawMirror(0.55); drawBody(cur,0.95); paintCal(out, dt); return; }
-  if(state==='over'){ drawMirror(0.3); drawGate(dmg,0,false); drawBody(cur,0.5); return; }
+  if(state==='over'){
+    drawMirror(0.3); drawGate(dmg,0,false); drawBody(cur,0.5);
+    /* Same problem at the other end: PUSH AGAIN is a button on a phone the
+       player is standing well away from. But a HELD STANCE is wrong here —
+       standing still is exactly what a player does while reading the result,
+       so it would restart the siege out from under them. One squat is the
+       deliberate act, and it cannot fire by accident. */
+    const st = fitState();
+    if(out.rep && (out.rep.verdict==='clean' || out.rep.verdict==='partial')
+       && counter.getPersonal()){
+      tone(760,0.22,0.3,'triangle'); startSiege(); return;
+    }
+    document.getElementById('bAgain').textContent =
+      st.ok ? 'PUSH AGAIN  —  or just squat once' : 'PUSH AGAIN';
+    return;
+  }
 
   phaseT += dt;
   if(flash>0) flash = Math.max(0, flash-dt*2.2);
@@ -813,7 +854,7 @@ function fitState(){
   if(o.above < 0.9) return { ok:false, why:'your head is off the top — tilt the phone down' };
   return { ok:true, why:null };
 }
-function paintFit(){
+function paintFit(dt){
   const f = videoFit(), o = cur, tr = scaleTrack.get();
   const n2=v=>(v==null)?'—':v.toFixed(2), n3=v=>(v==null)?'—':v.toFixed(3);
   const vis=k=>{const p=o&&o.g[k];return p?p.v:0;};
@@ -831,9 +872,19 @@ function paintFit(){
     + 'hip <span class="'+cls(Math.min(vis('hipA'),vis('hipB')))+'">'+n2(Math.min(vis('hipA'),vis('hipB')))+'</span> '
     + '<span style="opacity:.55">kn '+n2(Math.min(vis('knA'),vis('knB')))+' ank '+n2(Math.min(vis('ankA'),vis('ankB')))+' — not scored</span>';
   const st = fitState();
-  ui.fitReads.className = 'reads '+(st.ok?'y':'n');
-  ui.fitReads.textContent = st.ok ? 'READY — you have room to drop' : st.why.toUpperCase();
   ui.bFit.disabled = !st.ok;
+  if(st.ok){
+    holdT += dt;
+    const left = FIT_HOLD - holdT;
+    if(left <= 0){ holdT = 0; lastBeep = -1; tone(760,0.22,0.3,'triangle'); startCal(); return; }
+    countBeep(left);
+    ui.fitReads.className = 'reads y';
+    ui.fitReads.textContent = 'READY — hold it, calibrating in ' + Math.ceil(left);
+  } else {
+    holdT = 0; lastBeep = -1;
+    ui.fitReads.className = 'reads n';
+    ui.fitReads.textContent = st.why.toUpperCase();
+  }
 }
 
 /* ---- calibration. The only place a live depth number is shown. ---- */
@@ -857,6 +908,7 @@ function paintCal(out, dt){
       recPush({ k:'calibrate', depth:+calBest.toFixed(4), t:+performance.now().toFixed(1) });
       tone(660,0.2,0.26,'triangle');
       ui.bCalGo.hidden = false; ui.bCalAgain.hidden = false;
+      calGoT = CAL_GO; lastBeep = -1;
     }
   }
   const bar = v => { const n = Math.max(0, Math.min(1, v/0.8)); return '█'.repeat(Math.round(n*22)).padEnd(22,'·'); };
@@ -873,8 +925,18 @@ function paintCal(out, dt){
               + (CAL_SETTLE-calSettle).toFixed(1) + 's)</span>'
             : '<span style="opacity:.6">squat down, then stand all the way up</span>'));
   if(calPhase==='done'){
-    ui.calLead.textContent = 'Your range is set. Clean heaves need '
-      + (TUNE.Q_CLEAN*100).toFixed(0) + '% of this depth; nothing in the siege asks for more.';
+    /* Another squat during the countdown redoes the calibration. That is the
+       hands-free form of DO IT AGAIN: the player cannot reach the button. */
+    if(d != null && d > TUNE.CAL_MIN){
+      calPhase='down'; calMax=d; calGoT=0; lastBeep=-1;
+      ui.bCalGo.hidden = true; ui.bCalAgain.hidden = true;
+      return;
+    }
+    calGoT -= dt;
+    if(calGoT <= 0){ lastBeep=-1; tone(760,0.22,0.3,'triangle'); startSiege(); return; }
+    countBeep(calGoT);
+    ui.calLead.textContent = 'Range set. The gate goes up in ' + Math.ceil(calGoT)
+      + ' — squat again now to measure it over.';
   }
 }
 function startCal(){
@@ -960,7 +1022,7 @@ function startSiege(){
   ui.oCal.hidden = true; ui.oEnd.hidden = true; hud.wrap.hidden = false;
   resolve = RESOLVE_MAX; dmg = 0; wave = 0;
   tally.clean=0; tally.partial=0; tally.rejected=0; tally.unscored=0; tally.reasons={};
-  t0run = performance.now();
+  t0run = performance.now(); holdT = 0; calGoT = 0; lastBeep = -1;
   hud.hRes.innerHTML = 'RESOLVE <b>'+'◆'.repeat(RESOLVE_MAX)+'</b>';
   recPush({ k:'siege', phase:'start', t:+performance.now().toFixed(1),
             personal:counter.getPersonal(),
