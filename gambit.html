@@ -1,0 +1,1495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#07080f">
+<title>Gambit</title>
+<style>
+  :root{
+    --ink:#07080f; --field:#0e1020; --warm:#f6f1e6; --dim:#8a90ad;
+    --gold:#d9a441; --gold-l:#f0cc85; --cyan:#4fd6e0;
+    --good:#7fc08a; --part:#d9a441; --bad:#d4635a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  /* A LANDSCAPE PHONE IS SHORT — about 350 css pixels with the browser bar.
+     Lifted from Sparks, where a start button below the fold made the game
+     unstartable: the overlay scrolls, and `safe center` keeps the TOP
+     reachable when the content is taller than the box. */
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;justify-content:safe center;padding:24px 22px;
+    text-align:center;gap:14px;overflow-y:auto;overscroll-behavior:contain;
+    background:radial-gradient(120% 90% at 50% 18%,#171a33 0%,var(--ink) 72%);z-index:5}
+  .ov > *{flex-shrink:0}
+  .ov[hidden]{display:none}
+  h1{font-size:clamp(34px,13vw,64px);margin:0;letter-spacing:.16em;font-weight:400}
+  h1 .g{color:var(--gold)}
+  #endScore{font-size:clamp(40px,16vw,74px)}
+  .sub{color:var(--dim);font-size:15px;line-height:1.55;max-width:34ch;margin:0}
+  .how{text-align:left;max-width:34ch;color:var(--warm);font-size:15px;line-height:1.6;
+    margin:0;padding:0;list-style:none}
+  .how li{margin:7px 0;padding-left:20px;position:relative}
+  .how li:before{content:'';position:absolute;left:0;top:.62em;width:8px;height:8px;
+    border-radius:50%;background:var(--gold)}
+  button{font:inherit;font-size:18px;letter-spacing:.06em;padding:15px 34px;border-radius:999px;
+    border:1px solid var(--gold);background:var(--gold);color:#2a1a00;cursor:pointer}
+  button.ghost{background:transparent;color:var(--gold)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:13px;max-width:34ch;line-height:1.5;margin:0}
+  .err{color:var(--bad);font-size:14px;max-width:32ch;line-height:1.5}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 16px;display:flex;
+    justify-content:space-between;align-items:flex-start;font-size:14px;
+    letter-spacing:.08em;color:var(--warm);z-index:3;pointer-events:none;
+    background:linear-gradient(rgba(7,8,15,.74),rgba(7,8,15,0));
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  /* an id selector beats the [hidden] attribute — without this the HUD and
+     the rep bar sit on top of the start and setup screens. Sparks shipped
+     that bug; Gap probably still has it. */
+  #hud[hidden],#reps[hidden],#banner[hidden]{display:none}
+  /* The fit screen must NOT hide the camera: its whole job is to show you
+     where you are standing and which rings fall off the picture. Rendered
+     opaque first, which told the player to step back while showing them a
+     blank panel. */
+  #oFit{background:linear-gradient(rgba(7,8,15,0) 0%,rgba(7,8,15,.45) 38%,rgba(7,8,15,.93) 100%);
+    justify-content:flex-end;gap:9px}
+  #hud .r{text-align:right}
+  #hud b{font-weight:400;color:var(--gold);font-size:22px;display:block}
+  /* NOT vertically centred: the control ring sits dead centre, and
+     rendering showed STEP BACK printed straight across the word BOARD with
+     neither readable. It goes under the body instead, on a plate, because
+     it has to read over a moving picture. */
+  #banner{position:fixed;left:8%;right:8%;bottom:11%;
+    text-align:center;z-index:4;pointer-events:none;
+    background:rgba(7,8,15,.80);border-radius:14px;padding:9px 14px;
+    text-shadow:0 2px 12px rgba(0,0,0,.95)}
+  #banner b{display:block;font-weight:400;font-size:clamp(18px,5.4vh,30px);
+    letter-spacing:.14em;color:var(--gold)}
+  #banner span{display:block;font-size:13px;line-height:1.45;color:#e7e3f0;
+    max-width:42ch;margin:5px auto 0}
+  #reps{position:fixed;left:16px;right:16px;bottom:env(safe-area-inset-bottom,0);
+    margin-bottom:14px;z-index:3;pointer-events:none}
+  #repsBar{height:7px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
+  #repsFill{height:100%;width:0%;background:var(--cyan);transition:width .25s linear}
+  #repsTxt{font-size:11px;letter-spacing:.18em;color:var(--dim);margin-top:6px;text-align:center;
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  .tag{display:inline-block;border:1px solid var(--gold);color:var(--gold);
+    border-radius:999px;padding:3px 12px;font-size:11px;letter-spacing:.16em;margin-bottom:8px}
+  table{border-collapse:collapse;font-size:14px;color:var(--warm)}
+  td{padding:4px 10px}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--gold)}
+  td.v.bad{color:var(--bad)}
+  td.v.good{color:var(--good)}
+  @media (max-height:470px){
+    .ov{padding:10px 18px;gap:7px}
+    h1{font-size:clamp(22px,6.4vh,34px);letter-spacing:.12em}
+    .sub{font-size:13px;line-height:1.4;max-width:56ch}
+    .how{font-size:13px;line-height:1.38;max-width:64ch}
+    .how li{margin:3px 0}
+    button{font-size:16px;padding:11px 28px}
+    .note{font-size:11.5px;line-height:1.35;max-width:62ch}
+    #endScore{font-size:clamp(24px,7.5vh,38px)}
+    .tag{font-size:11px;padding:3px 10px}
+    table{font-size:12px}
+    td{padding:1px 9px}
+    #endNote{font-size:11px;line-height:1.3;max-width:72ch}
+  }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<div id="hud" hidden>
+  <div><span style="color:var(--dim)" id="hStage">&nbsp;</span><b id="hPuz">1 / 6</b>
+       <span style="color:var(--dim)" id="hFloor">&nbsp;</span></div>
+  <div class="r"><span style="color:var(--dim)">SCORE</span><b id="hScore">0</b></div>
+</div>
+<div id="banner" hidden><b id="banTitle"></b><span id="banSub"></span></div>
+<div id="reps" hidden>
+  <div id="repsBar"><div id="repsFill"></div></div>
+  <div id="repsTxt">WORK</div>
+</div>
+
+<div class="ov" id="oRot" hidden>
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Gambit is played sideways. A phone camera is physically landscape:
+  held upright it hands over a picture wider than it is tall and most of the
+  screen goes black. Turned sideways you stand in exactly the same place and
+  fill the picture.</p>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>GAM<span class="g">BIT</span></h1>
+  <p class="sub">Chess puzzles you solve with your head and play with your body.</p>
+  <ul class="how">
+    <li>Study the position. There is no clock — thinking is free.</li>
+    <li>Raise both hands to choose.</li>
+    <li>Reach and hold a ring to pick the piece, then the square.</li>
+    <li>Squat to play the move. Every move costs work, right or wrong.</li>
+  </ul>
+  <div class="row"><button id="bStart">START</button></div>
+  <p class="note" id="loadMsg" hidden>Starting the camera&hellip;</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Nothing is uploaded. The camera stays in the page.</p>
+</div>
+
+<div class="ov" id="oFit" hidden>
+  <span class="tag">WHERE TO STAND</span>
+  <p class="sub" id="fitMsg">Step back until your whole body is in the picture.</p>
+  <p class="note" id="fitCam"></p>
+  <div class="row"><button class="ghost" id="bGo">START ANYWAY</button></div>
+  <p class="note">Green rings fit. This is advice, not a lock.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <span class="tag" id="endTag">ROUND OVER</span>
+  <div id="endScore">0</div>
+  <table><tbody id="endRows"></tbody></table>
+  <div class="row">
+    <button id="bAgain">AGAIN</button>
+    <button class="ghost" id="bRec">SAVE RECORDING</button>
+  </div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/* =====================================================================
+ * GAMBIT — chess puzzles played with the body.
+ *
+ * WHY THIS SHAPE AND NOT THE OBVIOUS ONE
+ *
+ * The obvious design is: draw a board, reach at a square, grab the piece,
+ * carry it. It does not survive this project's own measurements.
+ *
+ * A selectable target needs clear air around it. Two dwell radii is 0.84
+ * torso, and an 8x8 grid spread over the whole reach envelope (2.84 x 2.15
+ * torso) gives squares 0.355 x 0.269 apart — 2.4x too close laterally and
+ * 3.1x vertically for a hand position to belong to exactly one square. That
+ * is before any of the harder problems: the pipeline is 150-250 ms behind,
+ * so a hand hovering between two squares is being judged where it WAS.
+ *
+ * So the body does not point at the board. It points at a short list. The
+ * chess stays whole — every legal move is reachable in two choices — and
+ * the thing the body is asked to do is something it can actually do.
+ *
+ * THE WORKOUT IS THE SQUAT, NOT THE REACH. Thinking is free and unhurried;
+ * playing a move costs a set of squats, whether the move was right or
+ * wrong. Exercise is the price of moving, never the punishment for being
+ * wrong — a game that makes you pay in squats for a bad idea teaches you
+ * to stop having ideas.
+ *
+ * LATENCY. Nothing here asks the player to react. Selection is a dwell,
+ * the squat is a complete cycle, and the board never moves on its own.
+ * This is the most latency-tolerant game in the project by some distance.
+ * ===================================================================== */
+
+/* ===================== SCORER_START ===================== */
+
+/* ---- the chess core -------------------------------------------------
+   No castling, no en passant: the puzzle set is authored to avoid both
+   and the harness asserts it. Promotion is offered as all four pieces. */
+const FILES = 'abcdefgh';
+const sqName = i => FILES[i % 8] + (8 - ((i / 8) | 0));
+const isW = p => p && p === p.toUpperCase();
+const sideOf = p => isW(p) ? 'w' : 'b';
+
+function parseFEN(fen){
+  const parts = fen.trim().split(/\s+/);
+  const b = new Array(64).fill('');
+  let i = 0;
+  for(const ch of parts[0]){
+    if(ch === '/') continue;
+    if(ch >= '1' && ch <= '8') i += +ch; else b[i++] = ch;
+  }
+  if(i !== 64) throw new Error('bad FEN: ' + fen);
+  return { b, turn: parts[1] || 'w' };
+}
+const RAYS = { R:[[-1,0],[1,0],[0,-1],[0,1]], B:[[-1,-1],[-1,1],[1,-1],[1,1]] };
+RAYS.Q = RAYS.R.concat(RAYS.B);
+const JUMPS = { N:[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]], K:RAYS.Q };
+
+function pushPawn(out, from, to, turn){
+  const last = turn === 'w' ? 0 : 7;
+  if(((to / 8) | 0) === last) for(const q of ['Q','R','B','N'])
+    out.push({ from, to, promo: turn === 'w' ? q : q.toLowerCase() });
+  else out.push({ from, to });
+}
+function pseudo(st){
+  const { b, turn } = st, out = [];
+  for(let i = 0; i < 64; i++){
+    const p = b[i];
+    if(!p || sideOf(p) !== turn) continue;
+    const r = (i / 8) | 0, f = i % 8, up = turn === 'w' ? -1 : 1, t = p.toUpperCase();
+    if(t === 'P'){
+      const one = i + up * 8;
+      if(one >= 0 && one < 64 && !b[one]){
+        pushPawn(out, i, one, turn);
+        const home = turn === 'w' ? 6 : 1, two = i + up * 16;
+        if(r === home && !b[two]) out.push({ from:i, to:two });
+      }
+      for(const df of [-1, 1]){
+        const nf = f + df, nr = r + up;
+        if(nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
+        const j = nr * 8 + nf;
+        if(b[j] && sideOf(b[j]) !== turn) pushPawn(out, i, j, turn);
+      }
+    } else if(JUMPS[t]){
+      for(const [dr, df] of JUMPS[t]){
+        const nr = r + dr, nf = f + df;
+        if(nr < 0 || nr > 7 || nf < 0 || nf > 7) continue;
+        const j = nr * 8 + nf;
+        if(!b[j] || sideOf(b[j]) !== turn) out.push({ from:i, to:j });
+      }
+    } else if(RAYS[t]){
+      for(const [dr, df] of RAYS[t]){
+        let nr = r + dr, nf = f + df;
+        while(nr >= 0 && nr < 8 && nf >= 0 && nf < 8){
+          const j = nr * 8 + nf;
+          if(!b[j]) out.push({ from:i, to:j });
+          else { if(sideOf(b[j]) !== turn) out.push({ from:i, to:j }); break; }
+          nr += dr; nf += df;
+        }
+      }
+    }
+  }
+  return out;
+}
+function applyMove(st, m){
+  const b = st.b.slice();
+  b[m.to] = m.promo || b[m.from];
+  b[m.from] = '';
+  return { b, turn: st.turn === 'w' ? 'b' : 'w' };
+}
+function attacked(b, i, by){
+  const r = (i / 8) | 0, f = i % 8;
+  for(const [dr, df] of JUMPS.N){
+    const nr = r + dr, nf = f + df;
+    if(nr < 0 || nr > 7 || nf < 0 || nf > 7) continue;
+    const p = b[nr * 8 + nf];
+    if(p && p.toUpperCase() === 'N' && sideOf(p) === by) return true;
+  }
+  for(const [dr, df] of JUMPS.K){
+    const nr = r + dr, nf = f + df;
+    if(nr < 0 || nr > 7 || nf < 0 || nf > 7) continue;
+    const p = b[nr * 8 + nf];
+    if(p && p.toUpperCase() === 'K' && sideOf(p) === by) return true;
+  }
+  const pup = by === 'w' ? 1 : -1;
+  for(const df of [-1, 1]){
+    const nr = r + pup, nf = f + df;
+    if(nr < 0 || nr > 7 || nf < 0 || nf > 7) continue;
+    const p = b[nr * 8 + nf];
+    if(p && p.toUpperCase() === 'P' && sideOf(p) === by) return true;
+  }
+  for(const [key, set] of [['R', RAYS.R], ['B', RAYS.B]]){
+    for(const [dr, df] of set){
+      let nr = r + dr, nf = f + df;
+      while(nr >= 0 && nr < 8 && nf >= 0 && nf < 8){
+        const p = b[nr * 8 + nf];
+        if(p){ const t = p.toUpperCase();
+          if(sideOf(p) === by && (t === key || t === 'Q')) return true;
+          break; }
+        nr += dr; nf += df;
+      }
+    }
+  }
+  return false;
+}
+function kingAt(b, side){
+  const k = side === 'w' ? 'K' : 'k';
+  for(let i = 0; i < 64; i++) if(b[i] === k) return i;
+  return -1;
+}
+function inCheck(st, side){
+  const k = kingAt(st.b, side);
+  return k >= 0 && attacked(st.b, k, side === 'w' ? 'b' : 'w');
+}
+function legal(st){ return pseudo(st).filter(m => !inCheck(applyMove(st, m), st.turn)); }
+function isMate(st){ return legal(st).length === 0 && inCheck(st, st.turn); }
+function isStale(st){ return legal(st).length === 0 && !inCheck(st, st.turn); }
+
+const VAL = { P:100, N:320, B:330, R:500, Q:900, K:0 };
+function material(b, side){
+  let s = 0;
+  for(const p of b) if(p && sideOf(p) === side) s += VAL[p.toUpperCase()];
+  return s;
+}
+const MATE_SCORE = 100000;
+/* Negamax with a material leaf. It runs ONLY at the moment a move resolves,
+   which is already a pause in play, never inside the frame loop. */
+function search(st, depth){
+  const ms = legal(st);
+  if(!ms.length) return { score: inCheck(st, st.turn) ? -MATE_SCORE - depth : 0, move:null };
+  if(depth === 0) return { score: material(st.b, st.turn) -
+      material(st.b, st.turn === 'w' ? 'b' : 'w'), move: ms[0] };
+  let best = -Infinity, bm = null;
+  for(const m of ms){
+    const s = -search(applyMove(st, m), depth - 1).score;
+    if(s > best){ best = s; bm = m; }
+  }
+  return { score: best, move: bm };
+}
+const NAMES = { P:'Pawn', N:'Knight', B:'Bishop', R:'Rook', Q:'Queen', K:'King' };
+function san(st, m){
+  const p = st.b[m.from], t = p.toUpperCase(), cap = !!st.b[m.to];
+  const after = applyMove(st, m);
+  const suf = isMate(after) ? '#' : (inCheck(after, after.turn) ? '+' : '');
+  if(t === 'P'){
+    const base = cap ? FILES[m.from % 8] + 'x' + sqName(m.to) : sqName(m.to);
+    return base + (m.promo ? '=' + m.promo.toUpperCase() : '') + suf;
+  }
+  const rivals = legal(st).filter(o => o.to === m.to && o.from !== m.from && st.b[o.from] === p);
+  let dis = '';
+  if(rivals.length) dis = rivals.some(o => (o.from % 8) === (m.from % 8))
+    ? String(8 - ((m.from / 8) | 0)) : FILES[m.from % 8];
+  return t + dis + (cap ? 'x' : '') + sqName(m.to) + suf;
+}
+
+/* ---- the puzzles ----------------------------------------------------
+   Every one of these was put through the engine before it went in the
+   file: legal position, side to move not already in check, not already
+   mate or stalemate, and the listed number of mating moves CONFIRMED by
+   enumeration rather than by eye. Four hand-derived positions were thrown
+   away at that step — two were stalemate before a move was made and two
+   had four solutions where I had assumed one. */
+const PUZZLES = [
+  { id:'lawn',  fen:'7k/8/8/8/8/8/5R2/6RK w', dose:2, goal:'mate in 1',
+    name:'THE LADDER', hint:'Two rooks. One of them has nowhere to be but the h-file.' },
+  { id:'back',  fen:'6k1/5ppp/8/8/8/8/6PP/R5K1 w', dose:2, goal:'mate in 1',
+    name:'BACK RANK', hint:'His own pawns are the walls of the room.' },
+  { id:'corr',  fen:'7k/6pp/8/8/8/8/5PPP/Q5K1 w', dose:3, goal:'mate in 1',
+    name:'THE CORRIDOR', hint:'The queen only needs to arrive on the right rank.' },
+  { id:'lift',  fen:'6k1/5ppp/8/8/8/5N2/5PPP/3Q2K1 w', dose:3, goal:'mate in 1',
+    name:'THE LIFT', hint:'Nothing defends the back rank.' },
+  { id:'anast', fen:'5r2/4N1pk/8/3R4/8/8/8/6K1 w', dose:4, goal:'mate in 1',
+    name:'ANASTASIA', hint:'The knight already covers both squares he would run to.' },
+  { id:'smoth', fen:'6rk/6pp/8/6N1/8/8/8/6K1 w', dose:4, goal:'mate in 1',
+    name:'SMOTHERED', hint:'He is boxed in by his own men. One square is enough.' },
+];
+
+/* Is this move still winning? The puzzle is solved by ANY move that meets
+   the goal, not by one memorised key — several of these positions have a
+   single solution and one has two, and there is no reason to tell a player
+   that a mate is the wrong mate. */
+function moveSolves(st, m, goal){
+  const a = applyMove(st, m);
+  if(goal === 'mate in 1') return isMate(a);
+  if(goal === 'mate in 2'){
+    if(isMate(a)) return true;
+    if(isStale(a)) return false;
+    return search(a, 2).score <= -MATE_SCORE + 10;
+  }
+  return false;
+}
+/* What black does about it. Used only to SHOW the refutation after a wrong
+   move, so the player learns the position rather than just losing a point. */
+function refute(st, m){
+  const a = applyMove(st, m);
+  if(isMate(a)) return null;
+  if(isStale(a)) return { stale:true };
+  const r = search(a, 1);
+  return r.move ? { san: san(a, r.move), move:r.move } : null;
+}
+
+/* ---- the body ------------------------------------------------------- */
+const TUNE = {
+  VIS_GET: 0.15,        // confidence to acquire a landmark
+  VIS_KEEP: 0.04,       // confidence to keep one already acquired
+  SEL_R: 0.42,          // torso units: dwell radius of a selection ring
+  DWELL_MS: 520,        // how long a hand holds a ring to choose it
+  RELEASE_R: 0.60,      // hysteresis: leave the ring at this radius, not SEL_R
+  HANDS_UP_MS: 600,     // both wrists above both shoulders to advance
+  SCALE_WINDOW_MS: 5000, SCALE_Q: 0.85,
+  REF_WINDOW_MS: 5000,  REF_Q: 0.15,
+  DOWN_IN: 0.26,        // torso below standing to enter a repetition
+  UP_OUT: 0.10,         // and back above this to complete one
+  MIN_DOWN_MS: 180, MIN_CYCLE_MS: 650, MIN_OBS: 4, MAX_GAP_MS: 260,
+  MARGIN: 0.02, BELOW_HIP: 1.00,
+};
+/* The nominal body the zone layout was validated against. Declared ONCE,
+   here, and the harness asserts its own copy agrees — doc 01: two copies
+   of a constant are two constants. */
+const REST_HAND = { x:0.46, y:-0.32 };
+const ARM = { shX:0.40, shY:1.00, reach:1.44 };
+
+/* THE EIGHT RINGS. Body frame: torso units from the hip centre, +x screen
+   right, +y UP. Chosen against four invariants, all measured, none by eye:
+     min separation      1.014  (needs > 2 x SEL_R = 0.84)
+     furthest reach      1.412  (the arm is 1.44)
+     nearest resting hand 0.779 (needs > SEL_R, or a ring selects itself
+                                 while the player stands there doing nothing)
+     stance limit        0.2767 torso, vertical-bound
+   H is the control ring and never carries a candidate. */
+const ZONES = [
+  { id:'A', bx:-1.25, by: 1.85 },
+  { id:'B', bx: 0.00, by: 2.05 },
+  { id:'C', bx: 1.25, by: 1.85 },
+  { id:'D', bx:-1.42, by: 0.85 },
+  { id:'E', bx: 1.42, by: 0.85 },
+  { id:'F', bx:-1.22, by:-0.15 },
+  { id:'G', bx: 1.22, by:-0.15 },
+  { id:'H', bx: 0.00, by: 0.90 },
+];
+/* H carries MORE when the candidates do not fit, and BACK when they do.
+   Giving MORE a ring of its own cost a whole slot on every page: a rook
+   with 14 squares came out as three pages of six, and the move that
+   actually mates was on the third. Seven a page makes that two. Back is
+   never lost, because arms out means back in every state. */
+const CTRL = 'H';
+const PAGE_SLOTS = ['A','B','C','D','E','F','G'];      // 7 candidates a page
+const MORE_SLOT  = 'H';
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+const midp = (a,b) => ({ x:(a.x+b.x)/2, y:(a.y+b.y)/2 });
+const idist = (a,b,ar) => Math.hypot((b.x-a.x)*ar, b.y-a.y);
+
+/* Hysteresis on visibility, lifted from Gap through Sparks unchanged: one
+   threshold for both acquiring and holding makes tracking strobe between
+   seen and not seen, which reads as a broken game rather than a dim room. */
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    if(v < (latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET)){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };            // mirrored, normalised to the frame
+  };
+}
+/* A high quantile over a trailing window, never a running maximum — a max
+   ratchets onto every noise peak and never comes back down. Sparks paid for
+   that one; this is the same estimator with the same window. */
+function quantTrack(windowMs, q){
+  const buf = [];
+  let v = null;
+  return { get(){ return v; },
+    push(x, t){
+      if(!(x > 0)) return v;
+      buf.push({ t, v:x });
+      while(buf.length && buf[0].t < t - windowMs) buf.shift();
+      const s = buf.map(b => b.v).sort((a,b) => a-b);
+      v = s[Math.min(s.length-1, Math.floor(s.length*q))];
+      return v;
+    }, reset(){ buf.length = 0; v = null; } };
+}
+function observe(pose, read, ar, scale, standRef, t){
+  const g = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p) g[k] = p; }
+  const o = { ar, hip:null, sh:null, torso:0, scale:0, readable:false,
+              wrA:g.wrA||null, wrB:g.wrB||null, shA:g.shA||null, shB:g.shB||null };
+  if(g.shA && g.shB && g.hipA && g.hipB){
+    o.sh = midp(g.shA, g.shB); o.hip = midp(g.hipA, g.hipB);
+    o.torso = idist(o.sh, o.hip, ar);
+  }
+  if(!o.torso || o.torso < 0.02) return o;
+  /* o.torso stays the RAW projection — the stance gate wants that. o.scale
+     is the tracked unit everything is MEASURED in, because the projected
+     torso is the true torso times cos(pitch) and a squat is exactly when
+     the pitch arrives. */
+  o.scale = scale ? scale.push(o.torso, t) : o.torso;
+  o.ref = standRef ? standRef.push(o.hip.y, t) : o.hip.y;
+  o.readable = !!(o.hip && o.sh);
+  o.hands = !!(o.wrA || o.wrB);
+  return o;
+}
+/* A ring's position in the camera frame, from the body it is placed against.
+   Placed scale free, so the reach is the same physical task for every body
+   and at every distance. */
+function zoneAt(z, o){
+  if(!o || !o.scale) return null;
+  return { x: o.hip.x + z.bx * o.scale / o.ar, y: o.hip.y - z.by * o.scale };
+}
+function onScreenAt(at, o, frac){
+  if(!at || !o || !o.scale) return 'nobody';
+  const m = TUNE.SEL_R * o.scale * (frac === undefined ? 1 : frac);
+  const mx = m / o.ar;
+  if(at.y - m  < TUNE.MARGIN)     return 'above';
+  if(at.y + m  > 1 - TUNE.MARGIN) return 'below';
+  if(at.x - mx < TUNE.MARGIN)     return 'left';
+  if(at.x + mx > 1 - TUNE.MARGIN) return 'right';
+  return null;
+}
+/* How far back to stand, COMPUTED from the ring layout rather than typed.
+   Gambit does not score feet — the squat reads hips against a tracked
+   standing reference, exactly as the racing game's brake does, and doc 14
+   established ankles are used nowhere in Sparks' scoring either. So the
+   1.74-torso feet reserve Sparks carries is replaced by BELOW_HIP: enough
+   room that the knees stay in the picture and the hip landmark is never
+   the tracker's guess about a body falling off the bottom edge.
+   That is worth 0.2767 against Sparks' 0.2280 — the player may stand
+   about 18% closer. */
+function stanceLimits(ar){
+  ar = ar || 4/3;
+  let byHi = -Infinity, byLo = Infinity, bxMax = 0;
+  for(const z of ZONES){ byHi = Math.max(byHi, z.by); byLo = Math.min(byLo, z.by);
+                         bxMax = Math.max(bxMax, Math.abs(z.bx)); }
+  const above = byHi + TUNE.SEL_R;
+  const below = Math.max(TUNE.BELOW_HIP, TUNE.SEL_R - byLo);
+  const tMaxV = (1 - 2*TUNE.MARGIN) / (above + below);
+  const tMaxH = (0.5 - TUNE.MARGIN) * ar / (bxMax + TUNE.SEL_R);
+  return { tMax: Math.min(tMaxV, tMaxH), tMaxV, tMaxH, byHi, byLo, bxMax, above, below };
+}
+function stanceOk(o){
+  if(!o || !o.readable || !o.torso) return { ok:false, why:'nobody' };
+  const L = stanceLimits(o.ar);
+  if(o.torso > L.tMax) return { ok:false, why:'close', torso:o.torso, tMax:L.tMax };
+  for(const z of ZONES){
+    const off = onScreenAt(zoneAt(z, o), o);
+    if(off) return { ok:false, why:'room', torso:o.torso, id:z.id, edge:off, tMax:L.tMax };
+  }
+  return { ok:true, torso:o.torso, tMax:L.tMax };
+}
+function backAdvice(mult){
+  if(!(mult > 1)) return 'you have room';
+  if(mult < 1.12) return 'a small step back';
+  if(mult < 1.3)  return 'about a quarter further back';
+  if(mult < 1.5)  return 'about a third further back';
+  if(mult < 1.8)  return 'about half again as far back';
+  return 'about twice as far back';
+}
+function backMult(o){
+  if(!o || !o.scale) return 0;
+  return o.scale / stanceLimits(o.ar).tMax;
+}
+
+/* ---- dwell selection -------------------------------------------------
+   A hand inside a ring for DWELL_MS chooses it. Not a swing: there is
+   nothing here to react to and nothing to measure an arc against, so the
+   amplitude machinery Sparks needs would only be a tax. What this DOES
+   need is hysteresis — leaving at RELEASE_R rather than SEL_R — or a hand
+   resting on the boundary flickers in and out and the dwell never fills.
+
+   A ring whose hand is not visible does not advance and does not reset to
+   a wrong answer: it simply holds, and the banner says the camera has lost
+   you. UNSCORED is not a player failure here either. */
+/* ONE HOLD, ONE CHOICE. The rings sit at fixed body-frame positions, so
+   after a ring is chosen the NEXT question's rings appear in the same
+   places — and a hand that simply stayed where it was began filling the
+   ring underneath it immediately. Measured in the smoke test: a single
+   1.0 s hold chose the piece AND a square for it, in one movement, and
+   every component test had passed. So a chosen ring is LOCKED until the
+   hand leaves it. Moving on to another ring clears it on the way. */
+function makeDwell(){
+  let on = null, since = 0, lastSeen = 0, locked = null;
+  const inside = (zid, o, hands, r) => {
+    const z = ZONES.find(z => z.id === zid); if(!z) return false;
+    const at = zoneAt(z, o); if(!at) return false;
+    for(const h of hands)
+      if(Math.hypot((h.x - at.x) * o.ar, h.y - at.y) / o.scale <= r) return true;
+    return false;
+  };
+  return {
+    get(){ return on ? { id:on, held:lastSeen - since } : null; },
+    locked(){ return locked; },
+    /* reset() deliberately KEEPS the lock: it is called on the state change
+       that a selection causes, which is exactly when the lock is needed. */
+    reset(){ on = null; since = 0; },
+    /* returns a zone id when the dwell completes */
+    push(o, slots, t){
+      lastSeen = t;
+      if(!o || !o.readable || !o.scale || !o.hands){ return null; }
+      const hands = [o.wrA, o.wrB].filter(Boolean);
+      if(locked){
+        if(inside(locked, o, hands, TUNE.RELEASE_R)){ on = null; return null; }
+        locked = null;
+      }
+      let best = null, bestD = Infinity;
+      for(const z of ZONES){
+        if(!slots[z.id]) continue;
+        const at = zoneAt(z, o);
+        if(!at) continue;
+        for(const h of hands){
+          const d = Math.hypot((h.x - at.x) * o.ar, h.y - at.y) / o.scale;
+          if(d < bestD){ bestD = d; best = z.id; }
+        }
+      }
+      const keep = (best === on) ? TUNE.RELEASE_R : TUNE.SEL_R;
+      if(!best || bestD > keep){ on = null; return null; }
+      if(best !== on){ on = best; since = t; return null; }
+      if(t - since >= TUNE.DWELL_MS){ const id = on; on = null; locked = id; return id; }
+      return null;
+    }
+  };
+}
+/* ---- the repetition counter ------------------------------------------
+   Depth is (hip below the tracked standing reference) / tracked body scale.
+   Both references are trailing quantiles, not running extremes, and not the
+   calibration pose: the racing game's brake stuck on permanently because
+   base.hipY was frozen at calibration, and its marching braked the car
+   because a 0.12-torso hip bob reached 0.71 of a squat.
+
+   DOWN_IN 0.26 was swept, not chosen. At 0.24 a shallow pumping cheat at
+   0.26 torso and 700 ms a cycle scored 43 repetitions a minute against 83
+   attempts; at 0.26 it scores none, while a deep squat and a half squat
+   both still count every one. At 0.28 the half squat starts to be refused.
+   A repetition whose down phase was thinly watched is UNSCORED — not
+   counted, and never charged to the player. */
+function makeCounter(){
+  let down = false, enterT = 0, maxD = 0, obs = 0, lastT = null, gap = 0, lastRep = -1e9;
+  return {
+    state(){ return { down, maxD }; },
+    reset(){ down = false; maxD = 0; obs = 0; gap = 0; lastT = null; lastRep = -1e9; },
+    lost(){ down = false; maxD = 0; obs = 0; gap = 0; lastT = null; },
+    push(depth, t){
+      if(lastT !== null) gap = Math.max(gap, t - lastT);
+      lastT = t;
+      if(!down){
+        if(depth >= TUNE.DOWN_IN){ down = true; enterT = t; maxD = depth; obs = 1; gap = 0; }
+        return null;
+      }
+      maxD = Math.max(maxD, depth); obs++;
+      if(depth > TUNE.UP_OUT) return null;
+      const dur = t - enterT, g = gap, n = obs, d = maxD;
+      down = false; maxD = 0; obs = 0; gap = 0;
+      if(dur < TUNE.MIN_DOWN_MS)          return { v:'short' };
+      if(t - lastRep < TUNE.MIN_CYCLE_MS) return { v:'fast' };
+      if(n < TUNE.MIN_OBS || g > TUNE.MAX_GAP_MS) return { v:'unscored' };
+      lastRep = t;
+      return { v:'rep', depth:d };
+    }
+  };
+}
+/* ===================== SCORER_END ===================== */
+
+/* ================= the game ================= */
+const BUILD = 'gambit-m1';
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+function resize(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+/* window, NOT the canvas: c.clientWidth is 0 until the first layout, so a
+   page opened already sideways evaluated 0 > 0 and stuck on TURN YOUR PHONE
+   with no resize event ever coming to correct it. Sparks paid for that. */
+function landscapeOK(){ return window.innerWidth > window.innerHeight; }
+function checkRotation(){ if(ui && ui.oRot) ui.oRot.hidden = landscapeOK(); }
+addEventListener('resize', () => { resize(); checkRotation(); });
+addEventListener('orientationchange', () => { resize(); checkRotation(); });
+resize();
+
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+function px(p){ const f = videoFit(); return { x:f.dx + p.x*f.dw, y:f.dy + p.y*f.dh }; }
+function frameAR(){ const vw = video.videoWidth||4, vh = video.videoHeight||3; return vw/vh; }
+
+const ui = {
+  oRot:document.getElementById('oRot'), oStart:document.getElementById('oStart'),
+  oFit:document.getElementById('oFit'), oEnd:document.getElementById('oEnd'),
+  hud:document.getElementById('hud'), hStage:document.getElementById('hStage'),
+  hFloor:document.getElementById('hFloor'),
+  hPuz:document.getElementById('hPuz'), hScore:document.getElementById('hScore'),
+  banner:document.getElementById('banner'), banTitle:document.getElementById('banTitle'),
+  banSub:document.getElementById('banSub'),
+  reps:document.getElementById('reps'), repsFill:document.getElementById('repsFill'),
+  repsTxt:document.getElementById('repsTxt'),
+  loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
+  fitMsg:document.getElementById('fitMsg'), fitCam:document.getElementById('fitCam'),
+  endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
+  endTag:document.getElementById('endTag'), endNote:document.getElementById('endNote'),
+};
+
+/* ---- the recording ---- */
+const REC_CAP = 40000; const rec = []; let recDropped = 0, lostSince = null;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'gambit', build:BUILD,
+    orientation:(window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'capture = video.currentTime (s, camera clock); ready = performance.now() (ms) when the estimate returned; clock = capture mapped into the performance clock minus POSE_LATENCY_MS',
+    zones:ZONES, puzzles:PUZZLES.map(p=>({id:p.id,fen:p.fen,dose:p.dose,goal:p.goal})),
+    tune:TUNE, restHand:REST_HAND, arm:ARM, stance:stanceLimits(4/3) });
+}
+/* ASSUMED, not measured. The loopback in doc 13 is still unbuilt. It
+   matters less here than anywhere else in the project — nothing in Gambit
+   is scored against an event time — but it is written into every recording
+   so a session can be re-judged once the real figure exists. */
+let POSE_LATENCY_MS = 200;
+let clockOffset = null;
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset*0.9 + off*0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+function nowClock(){ return performance.now(); }
+
+/* ---- run state ---- */
+let state = 'idle';
+let scaleTrack = quantTrack(TUNE.SCALE_WINDOW_MS, TUNE.SCALE_Q);
+let standRef   = quantTrack(TUNE.REF_WINDOW_MS, TUNE.REF_Q);
+const dwell = makeDwell();
+const counter = makeCounter();
+let lastObs = null, wake = null;
+let puzIdx = 0, score = 0, repsDone = 0, repsOwed = 0, unscoredReps = 0;
+let tries = 0, solved = 0, skipped = 0, results = [];
+let pos = null, puz = null, slots = {}, page = 0, cands = [], pickFrom = -1;
+let staged = null, repsNeeded = 0, repsGot = 0;
+let handsUpSince = 0, flash = 0, resolveUntil = 0, resolveInfo = null;
+let fitOk = false, fitSince = 0, fitWhy = 'legs', offSince = 0;
+
+/* ---- audio: a few synthesised cues, no files, no licences ---- */
+let actx = null, bus = null;
+function initAudio(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return;
+  actx = new AC();
+  bus = actx.createGain(); bus.gain.value = 0.5; bus.connect(actx.destination);
+}
+function blip(freq, dur, peak, type){
+  if(!actx) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type || 'triangle'; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(peak, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(bus || actx.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+const sfxHover   = () => blip(520, 0.07, 0.10, 'sine');
+const sfxPick    = () => { blip(660, 0.11, 0.18); setTimeout(()=>blip(880,0.13,0.16), 70); };
+const sfxRep     = () => blip(300, 0.12, 0.22, 'square');
+const sfxSolved  = () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>blip(f,0.30,0.18),i*110)); };
+const sfxWrong   = () => { blip(150, 0.34, 0.20, 'sawtooth'); setTimeout(()=>blip(112,0.40,0.16,'sawtooth'),120); };
+const sfxBack    = () => blip(360, 0.09, 0.12, 'sine');
+
+/* ---- drawing the board ----------------------------------------------
+   The pieces are drawn as paths rather than set as Unicode chess glyphs.
+   A glyph that renders in this harness and not on the phone — or the other
+   way round — is exactly the kind of difference a render pass cannot see,
+   and the shapes are simple enough that there is no reason to depend on a
+   font being installed. */
+function piecePath(t, x, y, s, light){
+  /* Rendering caught this: a dark piece at #1a1c2e on a dark square at
+     #1b1e33 is the same colour, so black pawns and white pawns read alike.
+     Both pieces now carry a rim in the opposite tone, and the squares moved
+     to a pair that neither piece disappears into. */
+  const body = light ? '#fbf7ef' : '#14161f';
+  const line = light ? '#2a2b3d' : '#efe8da';
+  ctx.save(); ctx.translate(x, y); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.fillStyle = body; ctx.strokeStyle = line; ctx.lineWidth = Math.max(1, s*0.055);
+  const base = () => { ctx.beginPath(); ctx.ellipse(0, s*0.40, s*0.33, s*0.10, 0, 0, 7);
+                       ctx.fill(); ctx.stroke(); };
+  if(t === 'P'){
+    ctx.beginPath(); ctx.moveTo(-s*0.22, s*0.34); ctx.quadraticCurveTo(-s*0.10, s*0.02, -s*0.11, -s*0.06);
+    ctx.lineTo(s*0.11, -s*0.06); ctx.quadraticCurveTo(s*0.10, s*0.02, s*0.22, s*0.34);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, -s*0.18, s*0.15, 0, 7); ctx.fill(); ctx.stroke();
+  } else if(t === 'R'){
+    ctx.beginPath();
+    ctx.moveTo(-s*0.28, -s*0.34); ctx.lineTo(-s*0.28, -s*0.18); ctx.lineTo(-s*0.16, -s*0.18);
+    ctx.lineTo(-s*0.16, -s*0.28); ctx.lineTo(-s*0.06, -s*0.28); ctx.lineTo(-s*0.06, -s*0.18);
+    ctx.lineTo( s*0.06, -s*0.18); ctx.lineTo( s*0.06, -s*0.28); ctx.lineTo( s*0.16, -s*0.28);
+    ctx.lineTo( s*0.16, -s*0.18); ctx.lineTo( s*0.28, -s*0.18); ctx.lineTo( s*0.28, -s*0.34);
+    ctx.lineTo(-s*0.28, -s*0.34); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-s*0.20, -s*0.18); ctx.lineTo(-s*0.15, s*0.26);
+    ctx.lineTo( s*0.15, s*0.26); ctx.lineTo( s*0.20, -s*0.18); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  } else if(t === 'N'){
+    ctx.beginPath();
+    ctx.moveTo(-s*0.18, s*0.30); ctx.lineTo(-s*0.20, -s*0.02);
+    ctx.lineTo(-s*0.30, -s*0.10); ctx.lineTo(-s*0.14, -s*0.34);
+    ctx.lineTo( s*0.02, -s*0.38); ctx.lineTo( s*0.10, -s*0.26);
+    ctx.lineTo( s*0.24, -s*0.06); ctx.lineTo( s*0.20, s*0.30);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(-s*0.04, -s*0.22, s*0.035, 0, 7);
+    ctx.fillStyle = line; ctx.fill();
+  } else if(t === 'B'){
+    ctx.beginPath();
+    ctx.moveTo(0, -s*0.40); ctx.quadraticCurveTo(s*0.26, -s*0.10, s*0.17, s*0.12);
+    ctx.lineTo(-s*0.17, s*0.12); ctx.quadraticCurveTo(-s*0.26, -s*0.10, 0, -s*0.40);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-s*0.05, -s*0.16); ctx.lineTo(s*0.09, -s*0.02); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-s*0.20, s*0.12); ctx.lineTo(-s*0.16, s*0.28);
+    ctx.lineTo(s*0.16, s*0.28); ctx.lineTo(s*0.20, s*0.12); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  } else if(t === 'Q' || t === 'K'){
+    const top = t === 'K' ? -s*0.30 : -s*0.26;
+    ctx.beginPath();
+    ctx.moveTo(-s*0.30, top); ctx.lineTo(-s*0.20, -s*0.04);
+    ctx.lineTo(-s*0.10, top + s*0.08); ctx.lineTo(0, -s*0.04);
+    ctx.lineTo( s*0.10, top + s*0.08); ctx.lineTo( s*0.20, -s*0.04);
+    ctx.lineTo( s*0.30, top);
+    ctx.lineTo( s*0.22, s*0.28); ctx.lineTo(-s*0.22, s*0.28);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if(t === 'Q'){
+      for(const dx of [-0.30, -0.10, 0.10, 0.30]){
+        ctx.beginPath(); ctx.arc(s*dx, top, s*0.055, 0, 7); ctx.fill(); ctx.stroke();
+      }
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(0, top - s*0.22); ctx.lineTo(0, top - s*0.02);
+      ctx.moveTo(-s*0.09, top - s*0.13); ctx.lineTo(s*0.09, top - s*0.13);
+      ctx.lineWidth = Math.max(1.5, s*0.07); ctx.strokeStyle = line; ctx.stroke();
+    }
+  }
+  base();
+  ctx.restore();
+}
+/* The board. mark: {from,to} squares to highlight. */
+function drawBoard(b, x0, y0, S, mark, lastMove){
+  const cell = S/8;
+  ctx.save();
+  ctx.fillStyle = '#0b0d1a';
+  ctx.fillRect(x0 - cell*0.22, y0 - cell*0.22, S + cell*0.44, S + cell*0.44);
+  ctx.strokeStyle = 'rgba(217,164,65,.55)'; ctx.lineWidth = Math.max(1, cell*0.05);
+  ctx.strokeRect(x0 - cell*0.22, y0 - cell*0.22, S + cell*0.44, S + cell*0.44);
+  for(let r = 0; r < 8; r++) for(let f = 0; f < 8; f++){
+    const i = r*8 + f, lx = x0 + f*cell, ly = y0 + r*cell;
+    ctx.fillStyle = ((r + f) % 2 === 0) ? '#b0a894' : '#6e6756';
+    ctx.fillRect(lx, ly, cell, cell);
+    if(lastMove && (i === lastMove.from || i === lastMove.to)){
+      ctx.fillStyle = 'rgba(217,164,65,.28)'; ctx.fillRect(lx, ly, cell, cell);
+    }
+    if(mark && mark.indexOf(i) >= 0){
+      ctx.fillStyle = 'rgba(79,214,224,.30)'; ctx.fillRect(lx, ly, cell, cell);
+      ctx.strokeStyle = 'rgba(79,214,224,.85)'; ctx.lineWidth = Math.max(1.5, cell*0.07);
+      ctx.strokeRect(lx + cell*0.06, ly + cell*0.06, cell*0.88, cell*0.88);
+    }
+  }
+  /* coordinates, small, outside the squares — a player naming a destination
+     ring "h2" has to be able to find h2 */
+  ctx.fillStyle = 'rgba(190,186,200,.95)';
+  ctx.font = Math.round(cell*0.26) + 'px Georgia, serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for(let f = 0; f < 8; f++) ctx.fillText(FILES[f], x0 + (f+0.5)*cell, y0 + S + cell*0.02);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for(let r = 0; r < 8; r++) ctx.fillText(String(8-r), x0 - cell*0.28, y0 + (r+0.5)*cell);
+  for(let i = 0; i < 64; i++){
+    const p = b[i]; if(!p) continue;
+    piecePath(p.toUpperCase(), x0 + ((i%8)+0.5)*cell, y0 + (((i/8)|0)+0.5)*cell,
+              cell*0.76, isW(p));
+  }
+  ctx.restore();
+}
+/* The board is sized against the band LEFT OVER by the header and footer,
+   not against the whole screen. Sized against the screen it ran under both:
+   the hint sat across rank 8 and the footer across rank 1, on a landscape
+   phone only 392 css pixels tall. The 1.08 leaves room for the file letters
+   printed under the last rank. */
+const BAND_TOP = 0.19, BAND_BOT = 0.875, COORD_ROOM = 1.08;
+function boardBox(){
+  const top = H*BAND_TOP, band = H*BAND_BOT - top;
+  const S = Math.min(band/COORD_ROOM, W*0.50);
+  return { S, x0:(W - S)/2, y0: top + (band - S*COORD_ROOM)/2 };
+}
+function drawMirror(dim){
+  const f = videoFit();
+  ctx.save(); ctx.translate(W,0); ctx.scale(-1,1);
+  try { ctx.drawImage(video, W-f.dx-f.dw, f.dy, f.dw, f.dh); } catch(e){}
+  ctx.restore();
+  ctx.fillStyle = 'rgba(7,8,15,'+dim+')'; ctx.fillRect(0,0,W,H);
+}
+const BONES = [[J.shA,J.elA],[J.elA,J.wrA],[J.shB,J.elB],[J.elB,J.wrB],
+               [J.shA,J.shB],[J.shA,J.hipA],[J.shB,J.hipB],[J.hipA,J.hipB],
+               [J.hipA,J.knA],[J.knA,J.ankA],[J.hipB,J.knB],[J.knB,J.ankB]];
+function drawPlayer(alpha){
+  if(!pose) return;
+  const P = {}; let any = false;
+  for(const k in J){ const p = read(pose, J[k]); if(p){ P[J[k]] = px(p); any = true; } }
+  if(!any) return;
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle = 'rgba(246,241,230,'+alpha+')';
+  ctx.lineWidth = Math.max(5, Math.min(W,H)*0.015);
+  for(const [a,b] of BONES) if(P[a] && P[b]){
+    ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); }
+  const n = P[J.nose];
+  if(n){ ctx.fillStyle='rgba(246,241,230,'+alpha+')';
+    ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(8, Math.min(W,H)*0.022), 0, 7); ctx.fill(); }
+  for(const k of [J.wrA, J.wrB]) if(P[k]){
+    ctx.fillStyle = 'rgba(79,214,224,'+alpha+')';
+    ctx.beginPath(); ctx.arc(P[k].x, P[k].y, Math.max(7, Math.min(W,H)*0.019), 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+/* A selection ring, with its label and its dwell arc. */
+/* ONE definition of how big a ring is on screen, and it is the radius that
+   actually selects. The first version drew it at 0.52 of that, so a hand
+   well outside the visible circle still chose it — the drawn thing and the
+   scored thing disagreeing, which is this project's oldest bug. */
+function zoneRpx(o){ return TUNE.SEL_R * o.scale * videoFit().dh; }
+function drawZone(z, o, label, sub, held, isCtrl){
+  const at = zoneAt(z, o); if(!at) return;
+  const p = px(at);
+  const r = zoneRpx(o);
+  const col = isCtrl ? '79,214,224' : '217,164,65';
+  ctx.save();
+  ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7);
+  ctx.fillStyle = 'rgba(11,13,26,.60)'; ctx.fill();
+  ctx.lineWidth = Math.max(2, r*0.10); ctx.strokeStyle = 'rgba('+col+',.55)'; ctx.stroke();
+  if(held > 0){
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, -Math.PI/2, -Math.PI/2 + Math.PI*2*Math.min(1, held));
+    ctx.lineWidth = Math.max(3, r*0.16); ctx.strokeStyle = 'rgba('+col+',1)'; ctx.stroke();
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(246,241,230,.97)';
+  ctx.font = Math.round(r*0.46) + 'px Georgia, serif';
+  ctx.fillText(label, p.x, p.y - (sub ? r*0.16 : 0));
+  if(sub){
+    ctx.fillStyle = 'rgba(138,144,173,.95)';
+    ctx.font = Math.round(r*0.24) + 'px Georgia, serif';
+    ctx.fillText(sub, p.x, p.y + r*0.34);
+  }
+  ctx.restore();
+}
+function headline(txt, sub){
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(7,8,15,.55)'; ctx.fillRect(0, 0, W, H*0.17);
+  ctx.fillStyle = 'rgba(217,164,65,.98)';
+  ctx.font = Math.round(Math.min(W,H)*0.072) + 'px Georgia, serif';
+  ctx.fillText(txt, W/2, H*0.035);
+  if(sub){
+    ctx.fillStyle = 'rgba(231,227,240,.92)';
+    ctx.font = Math.round(Math.min(W,H)*0.040) + 'px Georgia, serif';
+    ctx.fillText(sub, W/2, H*0.035 + Math.min(W,H)*0.082);
+  }
+  ctx.restore();
+}
+
+/* ---- gestures --------------------------------------------------------
+   Two gross, unmistakable shapes. Nothing here is a reaction: both are
+   held for the better part of a second, which is four to five times the
+   whole pipeline delay, so the 150-250 ms costs nothing at all. */
+function handsUp(o){
+  if(!o || !o.wrA || !o.wrB || !o.shA || !o.shB || !o.scale) return false;
+  return (o.wrA.y < o.shA.y - 0.12*o.scale) && (o.wrB.y < o.shB.y - 0.12*o.scale);
+}
+function tPose(o){
+  if(!o || !o.wrA || !o.wrB || !o.shA || !o.shB || !o.scale) return false;
+  const out = (w, s, sign) => {
+    const dx = (w.x - s.x) * o.ar / o.scale;
+    const dy = Math.abs(w.y - s.y) / o.scale;
+    return (sign > 0 ? dx > 0.95 : dx < -0.95) && dy < 0.45;
+  };
+  /* A is the player's left, which the mirrored picture puts on the LEFT of
+     the screen, so its wrist goes to smaller x. */
+  return out(o.wrA, o.shA, -1) && out(o.wrB, o.shB, +1);
+}
+let upSince = 0, tSince = 0;
+function gestures(o, t){
+  const g = { up:false, t:false };
+  if(handsUp(o)){ if(!upSince) upSince = t; if(t - upSince >= TUNE.HANDS_UP_MS) g.up = true; }
+  else upSince = 0;
+  if(tPose(o)){ if(!tSince) tSince = t; if(t - tSince >= 900) g.t = true; }
+  else tSince = 0;
+  return g;
+}
+function clearGestures(){ upSince = 0; tSince = 0; }
+
+/* ---- slots ----------------------------------------------------------- */
+/* WHICH RING holds which candidate is rotated by a hash of the position.
+   Without it the mating move landed in the SAME ring in 4 of the 6 puzzles
+   — not because of the ordering but because a mate is systematically at one
+   end of the board — and a player would learn to try that ring first, which
+   is the game answering its own question. Measured across all 135 candidate
+   placements in the set the rotation gives 13.3-14.8% per ring against a
+   14.3% ideal. The page composition is untouched, so it costs no paging. */
+function hash32(str){
+  let h = 2166136261 >>> 0;
+  for(let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h;
+}
+function buildSlots(){
+  slots = {};
+  const per = PAGE_SLOTS.length;
+  const pages = Math.max(1, Math.ceil(cands.length / per));
+  page = ((page % pages) + pages) % pages;
+  const start = page * per;
+  const rot = hash32(puz.fen + ':' + pickFrom + ':' + page) % per;
+  for(let k = 0; k < per; k++){
+    const ci = start + k;
+    if(ci >= cands.length) break;
+    slots[PAGE_SLOTS[(k + rot) % per]] = { kind:'cand', i:ci };
+  }
+  slots[CTRL] = pages > 1 ? { kind:'more', pages, page } : { kind:'ctrl' };
+  return pages;
+}
+function candLabel(k){
+  const cd = cands[k];
+  return state === 'pickPiece'
+    ? { label: sqName(cd.sq), sub: NAMES[pos.b[cd.sq].toUpperCase()] }
+    : { label: sqName(cd.to), sub: pos.b[cd.to] ? 'takes ' + NAMES[pos.b[cd.to].toUpperCase()]
+                                                : (cd.promo ? 'promotes' : '') };
+}
+
+/* ---- the round ------------------------------------------------------- */
+function startRound(){
+  puzIdx = 0; score = 0; repsDone = 0; repsOwed = 0; unscoredReps = 0;
+  solved = 0; skipped = 0; results = [];
+  scaleTrack.reset(); standRef.reset(); counter.reset(); dwell.reset();
+  ui.hud.hidden = false; ui.reps.hidden = true; ui.oEnd.hidden = true;
+  ui.hScore.textContent = '0';
+  recPush({ k:'round_start', t:nowClock(), puzzles:PUZZLES.length });
+  loadPuzzle();
+}
+function loadPuzzle(){
+  if(puzIdx >= PUZZLES.length){ endRound(); return; }
+  puz = PUZZLES[puzIdx];
+  pos = parseFEN(puz.fen);
+  tries = 0; pickFrom = -1; staged = null; page = 0;
+  repsOwed += puz.dose;                       // owed for being PRESENTED, not for being solved
+  ui.hPuz.textContent = (puzIdx+1) + ' / ' + PUZZLES.length;
+  updateFloor();
+  recPush({ k:'puzzle', t:nowClock(), i:puzIdx, id:puz.id, fen:puz.fen, dose:puz.dose });
+  toStudy();
+}
+/* The work floor is the whole point of the game being a workout, so it is
+   on screen the whole time rather than revealed at the end — but on the rep
+   BAR it crossed the board in every other state, so it lives in the HUD. */
+function updateFloor(){ ui.hFloor.textContent = 'SQUATS ' + repsDone + ' / ' + repsOwed; }
+function toStudy(){ state = 'study'; clearGestures(); dwell.reset();
+  ui.reps.hidden = true; ui.hStage.textContent = 'STUDY'; }
+function toPickPiece(){
+  const seen = {};
+  cands = [];
+  for(const m of legal(pos)) if(!seen[m.from]){ seen[m.from] = 1; cands.push({ sq:m.from }); }
+  cands.sort((a,b) => a.sq - b.sq);
+  page = 0; state = 'pickPiece'; clearGestures(); dwell.reset(); buildSlots();
+  ui.reps.hidden = true;
+  ui.hStage.textContent = 'PIECE';
+}
+function toPickSquare(from){
+  pickFrom = from;
+  cands = legal(pos).filter(m => m.from === from);
+  /* one entry per destination: a promotion offers four moves to one square
+     and four rings saying h8 would be four rings saying the same thing */
+  const seen = {}; const out = [];
+  for(const m of cands){ if(seen[m.to]) continue; seen[m.to] = 1; out.push(m); }
+  /* Board reading order — rank 8 first, a to h — because that is how the
+     board itself reads and it is what pages best. Measured against two
+     other rules: by direction-then-run the solution needed paging in 3 of 6
+     puzzles and reached page 3; by nearest-first, 4 of 6. */
+  cands = out.sort((a,b) => a.to - b.to);
+  page = 0; state = 'pickSquare'; clearGestures(); dwell.reset(); buildSlots();
+  ui.reps.hidden = true;
+  ui.hStage.textContent = 'SQUARE';
+}
+function toWork(move){
+  staged = move; repsGot = 0; repsNeeded = puz.dose;
+  counter.reset(); state = 'work'; clearGestures(); ui.reps.hidden = false;
+  ui.hStage.textContent = 'WORK';
+  ui.repsTxt.textContent = 'SQUAT TO PLAY  0 / ' + repsNeeded;
+  ui.repsFill.style.width = '0%';
+  recPush({ k:'staged', t:nowClock(), id:puz.id, san:san(pos, staged),
+            from:sqName(staged.from), to:sqName(staged.to), dose:repsNeeded });
+}
+function resolveMove(){
+  tries++;
+  const good = moveSolves(pos, staged, puz.goal);
+  const label = san(pos, staged);
+  const after = applyMove(pos, staged);
+  const ref = good ? null : refute(pos, staged);
+  resolveInfo = { good, label, after, ref, from:staged.from, to:staged.to };
+  recPush({ k:'move', t:nowClock(), id:puz.id, san:label, good, tries,
+            refute: ref && ref.san ? ref.san : null });
+  if(good){
+    const pts = tries === 1 ? 1000 : (tries === 2 ? 600 : 300);
+    score += pts; solved++;
+    results.push({ id:puz.id, name:puz.name, tries, pts });
+    ui.hScore.textContent = String(score);
+    sfxSolved();
+  } else sfxWrong();
+  state = 'resolve'; ui.reps.hidden = true; ui.hStage.textContent = good ? 'SOLVED' : 'AGAIN';
+  resolveUntil = performance.now() + (good ? 2800 : 3400);
+  flash = 1;
+}
+function afterResolve(){
+  if(resolveInfo && resolveInfo.good){ puzIdx++; loadPuzzle(); }
+  else { pickFrom = -1; staged = null; page = 0; toStudy(); }
+  resolveInfo = null;
+}
+function skipPuzzle(){
+  skipped++;
+  results.push({ id:puz.id, name:puz.name, tries, pts:0, skipped:true });
+  recPush({ k:'skipped', t:nowClock(), id:puz.id, tries });
+  sfxBack();
+  puzIdx++; loadPuzzle();
+}
+function endRound(){
+  state = 'over';
+  ui.hud.hidden = true; ui.reps.hidden = true; ui.banner.hidden = true;
+  const floorOk = repsDone >= repsOwed;
+  ui.endScore.textContent = String(score);
+  ui.endTag.textContent = floorOk ? 'ROUND CLEARED' : 'ROUND OVER — WORK SHORT';
+  const row = (k, v, cls) => '<tr><td class="k">'+k+'</td><td class="v'+(cls?' '+cls:'')+'">'+v+'</td></tr>';
+  ui.endRows.innerHTML =
+    row('solved', solved + ' of ' + PUZZLES.length, solved === PUZZLES.length ? 'good' : '') +
+    row('first try', results.filter(r=>!r.skipped && r.tries===1).length, '') +
+    (skipped ? row('skipped', skipped, 'bad') : '') +
+    row('squats', repsDone + ' of ' + repsOwed + ' owed', floorOk ? 'good' : 'bad') +
+    (unscoredReps ? row('unscored', unscoredReps, '') : '');
+  ui.endNote.textContent = floorOk
+    ? 'The work floor counts a dose for every puzzle PRESENTED, not every puzzle solved — skipping one still owes it.'
+    : 'Short on the floor. Every puzzle owes its squats whether you play it or skip it.';
+  recPush({ k:'round_end', t:nowClock(), score, solved, skipped,
+            reps:repsDone, owed:repsOwed, unscored:unscoredReps, floorOk, results });
+  ui.oEnd.hidden = false;
+}
+
+/* ---- the stance gate, running the whole time -------------------------
+   Doc 01: a gate that only runs at the start stops being a gate. Sparks'
+   fit check ran only in state 'fit', so a player who drifted toward the
+   phone kept playing while the game scored against hips the tracker was
+   guessing. Here it runs every frame of every state, and when it trips it
+   says so and HOLDS selection rather than ending the round or taking
+   anything away. */
+function gateBanner(o, t){
+  const st = stanceOk(o);
+  if(st.ok){ offSince = 0; ui.banner.hidden = true; return true; }
+  if(!offSince) offSince = t;
+  if(t - offSince < 900){ return true; }          // a flicker is not a failure
+  ui.banner.hidden = false;
+  ui.banTitle.textContent = st.why === 'nobody' ? 'CANNOT SEE YOU' : 'STEP BACK';
+  ui.banSub.textContent = st.why === 'nobody'
+    ? 'Nothing is being scored while the camera has lost you.'
+    : 'The rings need room around you — ' + backAdvice(backMult(o)) + '.';
+  return false;
+}
+
+/* ---- the loop ---- */
+let lastFrameAt = 0, lastRaf = 0;
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = lastRaf ? Math.min(0.05, (now - lastRaf)/1000) : 0.016;
+  lastRaf = now;
+  if(video.readyState < 2 || !landmarker) return;
+
+  let fresh = false, clockT = now;
+  if(video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    if(lastFrameAt && now - lastFrameAt > 120) recPush({ k:'gap', t:now, ms:Math.round(now-lastFrameAt) });
+    lastFrameAt = now; lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true; clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+    if(fresh){
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4), +(p.z||0).toFixed(4),
+                                        +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+vt.toFixed(4), ready:+performance.now().toFixed(1),
+                clock:+clockT.toFixed(1), st:state, lm });
+      if(!pose && lostSince === null){ lostSince = now; recPush({ k:'lost', t:now }); counter.lost(); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:now, out:Math.round(now-lostSince) }); lostSince = null; }
+    }
+  }
+  if(fresh && pose) lastObs = observe(pose, read, frameAR(), scaleTrack, standRef, clockT);
+  else if(fresh) lastObs = null;
+  const o = lastObs;
+
+  if(state === 'fit'){
+    drawMirror(0.45); drawPlayer(0.9);
+    if(o && o.scale) for(const z of ZONES){
+      const at = zoneAt(z, o); if(!at) continue;
+      const p = px(at), r = zoneRpx(o);
+      const off = onScreenAt(at, o);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7);
+      ctx.lineWidth = Math.max(2, r*0.09);
+      ctx.strokeStyle = off ? 'rgba(212,99,90,.85)' : 'rgba(127,192,138,.85)';
+      ctx.stroke();
+    }
+    const ok = checkFit(now);
+    ui.fitMsg.textContent = fitMessage();
+    ui.fitCam.textContent = 'cam ' + (video.videoWidth||0) + 'x' + (video.videoHeight||0) +
+      (landscapeOK() ? ' LANDSCAPE' : ' PORTRAIT') +
+      (o && o.torso ? ' · torso ' + o.torso.toFixed(3) + ' of ' + stanceLimits(o.ar).tMax.toFixed(3) : '');
+    if(ok){ ui.oFit.hidden = true; startRound(); }
+    return;
+  }
+  if(state === 'idle'){ return; }
+  if(state === 'over'){ drawMirror(0.80); return; }
+
+  const g = gestures(o, now);
+  const seen = gateBanner(o, now);
+
+  /* the repetition counter runs only while work is owed */
+  if(state === 'work' && fresh && o && o.readable && o.scale && o.ref !== undefined){
+    const depth = (o.hip.y - o.ref) / o.scale;
+    const v = counter.push(depth, clockT);
+    if(v && v.v === 'rep'){
+      repsGot++; repsDone++; sfxRep(); updateFloor();
+      recPush({ k:'rep', t:clockT, id:puz.id, n:repsGot, depth:+v.depth.toFixed(3) });
+      ui.repsTxt.textContent = 'SQUAT TO PLAY  ' + repsGot + ' / ' + repsNeeded;
+      ui.repsFill.style.width = Math.round(100*repsGot/repsNeeded) + '%';
+      if(repsGot >= repsNeeded) resolveMove();
+    } else if(v && v.v === 'unscored'){
+      unscoredReps++;
+      recPush({ k:'rep_unscored', t:clockT, id:puz.id });
+    }
+  } else if(state !== 'work') counter.lost();
+
+  /* ---- draw ---- */
+  if(state === 'study' || state === 'resolve'){
+    drawMirror(0.86);
+    const bb = boardBox();
+    const r = resolveInfo;
+    const board = (state === 'resolve') ? r.after.b : pos.b;
+    const mark = (state === 'study' && pickFrom >= 0)
+      ? legal(pos).filter(m => m.from === pickFrom).map(m => m.to) : null;
+    const lastMove = (state === 'resolve') ? { from:r.from, to:r.to } : null;
+    drawBoard(board, bb.x0, bb.y0, bb.S, mark, lastMove);
+    if(state === 'study'){
+      headline(puz.name, puz.goal.toUpperCase() + ' · ' + puz.hint);
+      footline('RAISE BOTH HANDS TO CHOOSE' + (pickFrom >= 0 ? ' A SQUARE' : '') +
+               '   ·   ARMS OUT TO SKIP');
+    } else {
+      headline(r.good ? r.label + '  —  SOLVED' : r.label + '  —  NOT YET',
+        r.good ? 'That is mate.'
+               : (r.ref && r.ref.san ? 'He answers ' + r.ref.san + ' and walks out.'
+                                     : (r.ref && r.ref.stale ? 'Stalemate — he has no move and is not in check.'
+                                                             : 'He gets out of it.')));
+      if(!r.good) footline('THE POSITION IS BACK AS IT WAS. TRY AGAIN.');
+    }
+  } else {
+    drawMirror(0.52); drawPlayer(0.62);
+    if(state === 'pickPiece' || state === 'pickSquare'){
+      const sel = (o && seen) ? dwell.push(o, slots, now) : null;
+      const cur = dwell.get();
+      if(o && o.scale) for(const z of ZONES){
+        const s = slots[z.id]; if(!s) continue;
+        const held = (cur && cur.id === z.id) ? cur.held / TUNE.DWELL_MS : 0;
+        if(s.kind === 'cand'){ const L = candLabel(s.i); drawZone(z, o, L.label, L.sub, held, false); }
+        else if(s.kind === 'more') drawZone(z, o, 'MORE', (s.page+1)+'/'+s.pages, held, true);
+        else drawZone(z, o, state === 'pickPiece' ? 'BOARD' : 'BACK', '', held, true);
+      }
+      if(sel) onSelect(sel);
+      const piece = pickFrom >= 0 ? pos.b[pickFrom] : null;
+      headline(state === 'pickPiece' ? 'CHOOSE A PIECE' : 'WHERE TO?',
+        (state === 'pickPiece' ? 'Hold a ring with either hand'
+          : NAMES[piece ? piece.toUpperCase() : 'P'] + ' on ' + sqName(pickFrom))
+        + '  \u00b7  ARMS OUT TO GO BACK');
+    } else if(state === 'work'){
+      const label = san(pos, staged);
+      headline(sqName(staged.from) + ' – ' + sqName(staged.to),
+        repsNeeded + ' SQUAT' + (repsNeeded > 1 ? 'S' : '') + ' TO PLAY IT  ·  ' +
+        repsGot + ' DONE  ·  ARMS OUT TO CANCEL');
+      drawDepth(o);
+    }
+  }
+  if(flash > 0){
+    flash = Math.max(0, flash - dt*1.6);
+    ctx.fillStyle = (resolveInfo && resolveInfo.good ? 'rgba(127,192,138,' : 'rgba(212,99,90,') +
+                    (flash*0.30) + ')';
+    ctx.fillRect(0,0,W,H);
+  }
+
+  /* ---- gestures act last, so a selection drawn this frame is not undone ---- */
+  if(state === 'study' && seen){
+    if(g.up){ clearGestures(); sfxBack(); pickFrom >= 0 ? toPickSquare(pickFrom) : toPickPiece(); }
+    else if(g.t){ clearGestures(); skipPuzzle(); }
+  } else if((state === 'pickPiece' || state === 'pickSquare') && seen && g.t){
+    clearGestures(); sfxBack();
+    if(state === 'pickPiece') toStudy(); else { pickFrom = -1; toPickPiece(); }
+  } else if(state === 'work' && seen && g.t){
+    clearGestures(); sfxBack(); staged = null; counter.reset(); toStudy();
+  } else if(state === 'resolve' && now >= resolveUntil) afterResolve();
+}
+function onSelect(id){
+  const s = slots[id]; if(!s) return;
+  if(s.kind === 'more'){ page++; buildSlots(); sfxHover(); return; }
+  if(s.kind === 'ctrl'){
+    sfxBack();
+    if(state === 'pickPiece') toStudy();
+    else { pickFrom = -1; toPickPiece(); }
+    return;
+  }
+  sfxPick();
+  if(state === 'pickPiece') toPickSquare(cands[s.i].sq);
+  else toWork(cands[s.i]);
+}
+function footline(txt){
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillStyle = 'rgba(7,8,15,.55)'; ctx.fillRect(0, H*0.88, W, H*0.12);
+  ctx.fillStyle = 'rgba(217,164,65,.92)';
+  ctx.font = Math.round(Math.min(W,H)*0.038) + 'px Georgia, serif';
+  ctx.fillText(txt, W/2, H*0.975);
+  ctx.restore();
+}
+/* The depth gauge. It shows the tracked thresholds, not a guess: the bar
+   fills to DOWN_IN and the mark above it is where the repetition completes,
+   so a player who is not going deep enough can see that rather than wonder. */
+function drawDepth(o){
+  const bw = Math.min(W*0.18, 110), bh = H*0.46;
+  const x = W - bw - Math.min(W,H)*0.06, y = (H - bh)/2 + H*0.03;
+  ctx.save();
+  ctx.fillStyle = 'rgba(11,13,26,.66)'; ctx.fillRect(x, y, bw, bh);
+  ctx.strokeStyle = 'rgba(217,164,65,.5)'; ctx.lineWidth = 2; ctx.strokeRect(x, y, bw, bh);
+  let depth = 0, ok = false;
+  if(o && o.readable && o.scale && o.ref !== undefined){ depth = (o.hip.y - o.ref)/o.scale; ok = true; }
+  const span = 0.55;
+  const f = Math.max(0, Math.min(1, depth/span));
+  ctx.fillStyle = depth >= TUNE.DOWN_IN ? 'rgba(79,214,224,.80)' : 'rgba(217,164,65,.55)';
+  ctx.fillRect(x+3, y + bh*(1-f) + 3, bw-6, bh*f - 6 > 0 ? bh*f - 6 : 0);
+  const my = y + bh*(1 - TUNE.DOWN_IN/span);
+  ctx.strokeStyle = 'rgba(246,241,230,.95)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(x, my); ctx.lineTo(x+bw, my); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillStyle = 'rgba(246,241,230,.95)';
+  ctx.font = Math.round(Math.min(W,H)*0.030) + 'px Georgia, serif';
+  ctx.fillText('DEPTH', x + bw/2, y - 6);
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = ok ? 'rgba(138,144,173,.95)' : 'rgba(212,99,90,.95)';
+  ctx.fillText(ok ? repsGot + ' / ' + repsNeeded : 'NO BODY', x + bw/2, y + bh + 6);
+  ctx.restore();
+}
+
+/* ---- the fit gate ---- */
+function checkFit(now){
+  const kn = read(pose, J.knA) || read(pose, J.knB);
+  let ok = !!kn;
+  fitWhy = 'legs';
+  if(ok){
+    const st = stanceOk(lastObs);
+    ok = st.ok; fitWhy = st.ok ? 'ok' : st.why;
+  }
+  if(ok !== fitOk){ fitOk = ok; fitSince = now; }
+  return ok && (now - fitSince) > 600;
+}
+function fitMessage(){
+  const how = backAdvice(backMult(lastObs));
+  switch(fitWhy){
+    case 'ok':    return 'Good. Starting…';
+    case 'legs':  return 'Step back until your knees are in the picture.';
+    case 'close': return 'Step back — ' + how + '. The rings need room around you.';
+    case 'room':  return 'Step back — ' + how + '. The rings need room around you.';
+    default:      return 'Step back until your whole body is in the picture.';
+  }
+}
+
+/* ---- starting up ---- */
+async function keepAwake(){
+  try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state !== 'idle') keepAwake();
+});
+function dropStream(){
+  const s = video.srcObject;
+  if(s){ try { s.getTracks().forEach(t => t.stop()); } catch(e){} }
+  video.srcObject = null;
+}
+function waitForFrames(ms){
+  return new Promise((res, rej) => {
+    if(video.readyState >= 2) return res();
+    let done = false;
+    const ok = () => { if(done) return; done = true; clean(); res(); };
+    const giveUp = () => { if(done) return; done = true; clean();
+      rej(new Error('The camera turned on but sent no picture. Close any other app using it, then try again.')); };
+    const t = setTimeout(giveUp, ms || 10000);
+    function clean(){ clearTimeout(t);
+      video.removeEventListener('loadeddata', ok); video.removeEventListener('playing', ok); }
+    video.addEventListener('loadeddata', ok); video.addEventListener('playing', ok);
+  });
+}
+let starting = false;
+async function begin(){
+  if(starting || state !== 'idle') return;
+  if(!landscapeOK()){ checkRotation(); return; }
+  try {
+    const el = document.documentElement;
+    const go = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(go && !document.fullscreenElement){
+      const p = go.call(el, { navigationUI:'hide' });
+      if(p && p.catch) p.catch(()=>{});
+    }
+  } catch(e){}
+  starting = true;
+  const btn = document.getElementById('bStart'); if(btn) btn.disabled = true;
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx && actx.state === 'suspended') await actx.resume();
+    /* ASK SOFTLY. Doc 01: asking with exact constraints got the phone to
+       obey by cropping its 4:3 sensor top and bottom, which is strictly
+       less vertical field of view and made Sparks unplayable. Ask for an
+       ideal, then read what actually arrived and work with it. */
+    const s = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:960}, height:{ideal:720}, facingMode:'user' }, audio:false });
+    dropStream();
+    video.srcObject = s;
+    const playing = video.play();
+    if(playing && playing.catch) playing.catch(()=>{});
+    await Promise.race([ playing ? playing.catch(()=>{}) : Promise.resolve(),
+                         new Promise(r => setTimeout(r, 3000)) ]);
+    await waitForFrames(8000);
+    if(!landmarker) await loadTracker();
+    recHeader();
+    ui.loadMsg.hidden = true; ui.oStart.hidden = true; ui.oFit.hidden = false;
+    state = 'fit'; keepAwake();
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream();
+    ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    if(err && err.name === 'NotAllowedError') m = 'Camera permission denied. Allow it in the address bar and reload.';
+    if(err && err.name === 'NotFoundError')   m = 'No camera found on this device.';
+    if(err && err.name === 'NotReadableError')m = 'Another app is using the camera. Close it and try again.';
+    if(err && err.name === 'AbortError')      m = 'The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  } finally {
+    starting = false;
+    const b2 = document.getElementById('bStart'); if(b2) b2.disabled = false;
+  }
+}
+document.getElementById('bStart').addEventListener('click', begin);
+checkRotation();
+/* The override is always enabled. A player the camera cannot frame must
+   still be able to start; the gate is advice, not a lock. */
+document.getElementById('bGo').addEventListener('click', () => { ui.oFit.hidden = true; startRound(); });
+document.getElementById('bAgain').addEventListener('click', () => { ui.oEnd.hidden = true; startRound(); });
+document.getElementById('bRec').addEventListener('click', () => {
+  const lines = rec.map(o => JSON.stringify(o)).join('\n');
+  const blob = new Blob([lines], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'gambit-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+});
+
+/* One export, so the harness measures the game rather than a copy of it.
+   Four separate times in this project a harness built its own objects and
+   returned confident numbers about a game that did not exist. */
+window.__GAMBIT__ = { TUNE, ZONES, CTRL, PAGE_SLOTS, MORE_SLOT, REST_HAND, ARM, PUZZLES, J,
+  parseFEN, legal, applyMove, isMate, isStale, inCheck, san, sqName, search, MATE_SCORE,
+  moveSolves, refute, NAMES, makeReader, observe, quantTrack, zoneAt, onScreenAt,
+  stanceLimits, stanceOk, makeDwell, makeCounter, handsUp, tPose, rec,
+  state:() => state, BUILD };
+</script>
+</body>
+</html>
