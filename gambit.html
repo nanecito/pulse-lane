@@ -57,6 +57,14 @@
      blank panel. */
   #oFit{background:linear-gradient(rgba(7,8,15,0) 0%,rgba(7,8,15,.45) 38%,rgba(7,8,15,.93) 100%);
     justify-content:flex-end;gap:9px}
+  /* ABOVE every other overlay. Every .ov is position:fixed inset:0 with an
+     opaque background and z-index 5, so the LAST one in the document wins —
+     and oRot is the first. In portrait it was correctly un-hidden and then
+     painted over by the start screen, so the player saw START, tapped it,
+     and begin() returned silently because the phone was not sideways. A
+     dead button that says nothing. Sparks carries z-index 9 here for
+     exactly this reason and I did not copy it. */
+  #oRot{z-index:9}
   #hud .r{text-align:right}
   #hud b{font-weight:400;color:var(--gold);font-size:22px;display:block}
   /* NOT vertically centred: the control ring sits dead centre, and
