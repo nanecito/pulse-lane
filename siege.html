@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>The Long Siege</title>
+<style>
+:root{
+  --bg:#0b0d10; --ink:#f2ece1; --muted:#8b8f98; --line:#232832;
+  --hot:#ff8a3d; --ok:#51d08a; --bad:#ff5d5d; --cyan:#4cc9f0; --stone:#6d6356;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font:16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  overflow:hidden;overscroll-behavior:none}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.ov{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;
+  align-items:center;padding:18px;text-align:center;gap:12px;z-index:5;
+  background:rgba(11,13,16,.93)}
+.ov[hidden]{display:none}
+h1{font-size:22px;margin:0;letter-spacing:.04em}
+h1 span{color:var(--hot)}
+p{margin:0;max-width:30em;color:var(--muted);font-size:14px}
+p.lead{color:var(--ink);font-size:15px}
+button{font:600 16px/1 inherit;color:#0b0d10;background:var(--hot);border:0;
+  border-radius:10px;padding:15px 26px;cursor:pointer;letter-spacing:.02em}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);
+  padding:11px 18px;font-weight:500;font-size:14px}
+button:disabled{opacity:.45}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.diag{font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);
+  border:1px solid var(--line);border-radius:10px;padding:10px 13px;text-align:left;
+  min-width:min(340px,92vw);max-width:92vw}
+.diag b{color:var(--ink);font-weight:600}
+.diag .g{color:var(--ok)} .diag .r{color:var(--bad)} .diag .y{color:var(--hot)}
+.reads{font:600 15px/1.3 inherit;letter-spacing:.02em}
+.reads.y{color:var(--ok)} .reads.n{color:var(--hot)}
+.warn{color:var(--hot);font-size:13px;max-width:30em}
+.foot{font-size:11px;color:#5d626c;max-width:33em}
+/* ---- setup fit screen keeps the top of the screen clear for the picture ---- */
+#oFit{justify-content:flex-end;gap:9px;
+  background:linear-gradient(to bottom,rgba(11,13,16,0) 0%,rgba(11,13,16,0) 48%,
+             rgba(11,13,16,.78) 58%,rgba(11,13,16,.95) 70%)}
+#oFit h1{font-size:18px} #oFit p{font-size:13px}
+#oCal{justify-content:flex-end;gap:9px;
+  background:linear-gradient(to bottom,rgba(11,13,16,0) 0%,rgba(11,13,16,0) 42%,
+             rgba(11,13,16,.80) 56%,rgba(11,13,16,.95) 70%)}
+/* ---- the bout HUD. Plates top and bottom; the middle is the picture. ---- */
+#hud{position:fixed;inset:0;z-index:4;pointer-events:none;display:flex;
+  flex-direction:column;justify-content:space-between}
+#hud[hidden]{display:none}
+.hdr{display:flex;flex-direction:column;align-items:center;gap:8px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  width:100%;padding:12px 14px}
+.wave{font:12px/1 ui-monospace,monospace;color:var(--muted);letter-spacing:.09em}
+.fps{font:12px/1 ui-monospace,monospace;color:var(--muted);text-align:right}
+.fps .lost{color:var(--bad);font-weight:700}
+.plate{align-self:center;max-width:min(94vw,780px);text-align:center;
+  background:rgba(8,10,13,.76);border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;padding:9px 18px;backdrop-filter:blur(4px)}
+.call{font:800 clamp(22px,6.4vw,46px)/1.06 inherit;letter-spacing:-.01em;margin:0}
+.sub{font:600 clamp(12px,3.3vw,18px)/1.3 inherit;color:var(--hot);margin-top:3px}
+.btmwrap{display:flex;flex-direction:column;align-items:center;gap:9px;padding:0 14px 18px}
+.btmrow{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;width:100%}
+.reps{font:800 clamp(22px,6vw,44px)/1 ui-monospace,monospace;color:var(--cyan);margin:0}
+.repsp{padding:5px 14px;min-width:4.6em}
+.rgt{display:flex;flex-direction:column;align-items:flex-end;gap:7px}
+.resolve{font:12px/1.3 ui-monospace,monospace;color:var(--muted);white-space:nowrap}
+.resolve b{color:var(--bad)}
+.bar{position:fixed;left:0;right:0;bottom:0;height:6px;background:#1a1f28}
+.bar i{display:block;height:100%;background:var(--hot);width:0%}
+.btmrow button{pointer-events:auto}
+#oEnd .diag{max-height:44vh;overflow:auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" hidden>
+  <div class="hdr">
+    <div class="top">
+      <div class="wave" id="hWave">—</div>
+      <div class="fps" id="hFps">—</div>
+    </div>
+    <div class="plate">
+      <p class="call" id="hCall">—</p>
+      <div class="sub" id="hSub"></div>
+    </div>
+  </div>
+  <div class="btmwrap">
+    <div class="btmrow">
+      <div class="plate repsp"><div class="reps" id="hReps">0</div></div>
+      <div class="rgt">
+        <div class="resolve" id="hRes"></div>
+        <div class="row"><button class="ghost" id="bQuit">END &amp; SAVE</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="bar"><i id="hBar"></i></div>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>THE LONG <span>SIEGE</span></h1>
+  <p class="lead">One gate. Four pushes. Your squats are the battering ram —
+     there is no other button.</p>
+  <p>Stand where your phone can see you from shoulders to hips. You do not need your
+     feet in frame. Every session is recorded to this phone and nowhere else.</p>
+  <div class="row"><button id="bStart">START CAMERA</button></div>
+  <p id="loadMsg" hidden>Starting the camera and loading the tracker…</p>
+  <p id="errMsg" class="warn" hidden></p>
+  <p class="foot"><b>The rep counter has never been validated against a real body.</b>
+     If the counts feel wrong, that is the first thing to fix — tap END &amp; SAVE and
+     send the file.</p>
+</div>
+
+<div class="ov" id="oFit" hidden>
+  <h1>FIND YOUR MARK</h1>
+  <p class="lead">Step back until your shoulders and hips read, with room below the hip
+     to drop into a squat. Knees and ankles are not scored.</p>
+  <div class="diag" id="fitDiag">waiting for the camera…</div>
+  <div class="reads n" id="fitReads">—</div>
+  <div class="row"><button id="bFit" disabled>CALIBRATE</button></div>
+  <p class="foot" id="fitFoot">This gate blocks. A bout that starts against a body the
+     tracker cannot see would score the room, not the squat.</p>
+</div>
+
+<div class="ov" id="oCal" hidden>
+  <h1>ONE SQUAT, <span>YOUR DEPTH</span></h1>
+  <p class="lead" id="calLead">Do one slow squat, as deep as is comfortable, then stand
+     up. That sets your range — nothing later asks you to go deeper than this.</p>
+  <div class="diag" id="calDiag">—</div>
+  <div class="row">
+    <button id="bCalGo" hidden>HOLD THE GATE</button>
+    <button class="ghost" id="bCalAgain" hidden>DO IT AGAIN</button>
+  </div>
+  <p class="foot">Depth is shown here and only here. During a push the game shows
+     counted reps, never a live depth bar — a bar that follows your body is a quarter
+     of a second behind it, and reads as the game cheating.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <h1 id="endTitle">—</h1>
+  <p class="lead" id="endLead">—</p>
+  <div class="diag" id="endDiag">—</div>
+  <div class="row">
+    <button id="bAgain">PUSH AGAIN</button>
+    <button class="ghost" id="bRec">SAVE RECORDING</button>
+  </div>
+  <p class="foot">The recording carries every landmark, every counted and rejected rep,
+     and the reason for each rejection.</p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+const BUILD = 'siege-1';
+
+/* =====================================================================
+   THE LONG SIEGE — one encounter, one verb.
+
+   What this is: an enemy with a visible wind-up, squats that stagger it,
+   and a way to lose. Nothing else. No progression, no skill tree, no
+   inventory. Doc 15's named failure mode is the RPG scaffolding eating
+   the schedule, and the budget rule set in advance was: if the encounter
+   needs a fifth noun to make sense, stop rather than add a sixth.
+
+   WHAT IS LIFTED, AND WHAT IS FIXED
+
+   From vangogh-lab.html (the racing game, the one that works):
+     - the tracked standing reference with its asymmetric constants,
+       REF_UP 0.5 s to accept a taller stance and REF_DOWN 3.5 s to
+       forgive a lower one. That IS the re-baseline rule.
+     - hips and shoulders only. No knee or ankle dependency anywhere.
+       Doc 14: his ankles were visible in 0.0% of frames at one standing
+       distance and 96% at another. A squat game must not need them.
+
+   From sparks.html:
+     - the tracked body scale: the 85th percentile of torso over a 5 s
+       window. The instantaneous torso is the true torso times cos(pitch),
+       so it shrinks exactly when the player leans into the hardest rep.
+
+   THREE THINGS THE RACING GAME DOES THAT A COUNTER MUST NOT
+
+   1. It divides by base.torso, CAPTURED ONCE AT CALIBRATION and frozen
+      (fallback 0.18). REF_UP/REF_DOWN re-baseline the reference HEIGHT;
+      nothing re-baselines the SCALE. Walk toward the phone and every
+      later depth is inflated by the scale ratio for the rest of the
+      session. Here the divisor is the tracked scale, and a scale that
+      moves more than SCALE_DRIFT suspends counting and says so.
+
+   2. squatDepth = max(hipDrop, shDrop). A bend at the waist drops the
+      shoulders and leaves the hips, and the MAX lets it through at full
+      value. Survivable for a brake. A hole in a counter. Here depth is
+      hipDrop ALONE, and the shoulder term is repurposed: shDrop - hipDrop
+      is forward lean, which is a form signal rather than a nuisance.
+
+   3. SQUAT_DEPTH 0.26 is a brake tap, not a squat. The source comment is
+      explicit that a quarter-torso dip is "still a small movement" and
+      that it was raised from 0.17 because a 0.12-torso march bob reached
+      0.71 of a squat. Lifted unchanged it would put the rep floor at a
+      shallow dip. Here there is no global depth constant at all: the
+      player's own comfortable squat is measured at setup and every
+      threshold is a fraction of it.
+
+   FALSE POSITIVES ARE WORSE THAN FALSE NEGATIVES, AND THE THRESHOLDS SAY SO.
+   Failing to count a rep frustrates. Inventing one destroys the premise
+   that the exercise is the combat verb. So D_IN sits high, the cycle has
+   a minimum duration, and a cycle whose landmarks went missing is
+   UNSCORED rather than counted. All of it errs toward missing a rep.
+
+   NONE OF THIS IS VALIDATED. No labelled squat recording exists yet.
+   Every threshold below is a starting value chosen to be measured, not a
+   tuned one. siege-capture.html is what produces the data to measure them.
+   ===================================================================== */
+
+/* ---- the signal layer, lifted ---- */
+const J = { nose:0, shA:11, shB:12, hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+const VIS_GET = 0.15, VIS_KEEP = 0.04;
+const SCALE_WINDOW_MS = 5000, SCALE_Q = 0.85;
+const POSE_LATENCY_MS = 200;       // ASSUMED. Still unmeasured; the gate's loopback
+                                   // is unbuilt. Recorded in every session file.
+/* the tracked standing reference, from the racing game */
+const REF_UP = 0.5, REF_DOWN = 3.5;
+/* how close to the reference the hip must be for the reference to follow it
+   downward at all. Beyond this the player is descending, not slumping. */
+const REF_NEAR = 0.10;
+/* seconds of readable standing before a calibration descent is accepted */
+const CAL_SETTLE = 1.2;
+
+/* ---- the squat, as thresholds on the player's OWN range ---- */
+const TUNE = {
+  D_IN:        0.38,   // fraction of personal depth to enter a rep
+  D_OUT:       0.20,   // and to leave it. Schmitt: D_OUT < D_IN
+  Q_CLEAN:     0.72,   // fraction of personal depth for a clean rep
+  Q_PARTIAL:   0.38,   // below this it is not a rep at all
+  MIN_CYCLE:   0.60,   // seconds. A faster cycle is a bounce, not a squat
+  MAX_CYCLE:   8.0,    // seconds. Longer and the rep is abandoned
+  MIN_SEEN:    0.75,   // fraction of the cycle the hips must have been visible
+  LEAN_BAD:    0.55,   // (shDrop-hipDrop)/hipDrop above this is a waist bend
+  SCALE_DRIFT: 0.12,   // fractional scale change that suspends counting
+  CAL_MIN:     0.10    // a calibration squat shallower than this is refused
+};
+
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? VIS_KEEP : VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };
+  };
+}
+function makeScale(){
+  const buf = []; let scale = null;
+  return {
+    get(){ return scale; },
+    reset(){ buf.length = 0; scale = null; },
+    push(torso, t){
+      if(!torso || torso < 0.02) return scale;
+      buf.push({ t, v:torso });
+      const cut = t - SCALE_WINDOW_MS;
+      while(buf.length && buf[0].t < cut) buf.shift();
+      const vs = buf.map(b => b.v).sort((a,b) => a-b);
+      scale = vs[Math.min(vs.length-1, Math.floor(vs.length * SCALE_Q))];
+      return scale;
+    }
+  };
+}
+function midp(a,b){ return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }; }
+function idist(a,b,ar){ return Math.hypot((b.x-a.x)*ar, b.y-a.y); }
+
+function observe(pose, read, ar){
+  const g = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p) g[k] = p; }
+  const o = { ar, g, sh:null, hip:null, torso:0, above:null, below:null, readable:false };
+  if(g.shA && g.shB) o.sh = midp(g.shA, g.shB);
+  if(g.hipA && g.hipB) o.hip = midp(g.hipA, g.hipB);
+  if(o.sh && o.hip){
+    o.torso = idist(o.sh, o.hip, ar);
+    o.readable = o.torso > 0.02;
+    if(o.readable){ o.above = o.hip.y / o.torso; o.below = (1 - o.hip.y) / o.torso; }
+  }
+  return o;
+}
+
+/* ---- THE COUNTER ----------------------------------------------------
+   One constructor. The game and every harness build their counter
+   through this, because four separate times in this project a harness
+   measured a game that did not exist.
+
+   It counts on the RETURN, not at the bottom: the return is the proof
+   the cycle completed, and it is the half a bob cannot fake.          */
+function makeCounter(){
+  let hipRef = null;          // tracked standing hip height, in frame units
+  let shRef  = null;          // and the shoulder's own reference. The racing
+                              // game tracks both; measuring shoulder drop
+                              // against the HIP reference makes the lean term
+                              // a constant offset and the waist-bend gate dead.
+  let state = 'up';
+  let cyc = null;             // the rep in flight
+  let suspended = null;       // reason string, or null
+  let refScale = null;        // scale when the bout opened
+  let personal = null;        // the player's own full-depth squat, in scale units
+
+  function setPersonal(d){ personal = d; }
+  function getPersonal(){ return personal; }
+
+  function reset(){ hipRef = null; shRef = null; state = 'up'; cyc = null; suspended = null; refScale = null; }
+  function armBout(scale){ refScale = scale; suspended = null; state = 'up'; cyc = null; }
+
+  /* o: an observation. t: capture-domain ms. dt: seconds since last frame. */
+  function push(o, t, dt, scale){
+    const out = { rep:null, suspended:null, depth:null };
+
+    // the signal is only as good as the body: an unreadable frame freezes
+    // everything rather than guessing a hip.
+    if(!o || !o.readable || !scale){
+      if(cyc) cyc.missed++;
+      if(cyc) cyc.frames++;
+      out.suspended = suspended = 'no body';
+      return out;
+    }
+
+    // a divisor that moves is a divisor that lies. Suspend rather than
+    // count against a body that has changed size mid-bout.
+    if(refScale){
+      const drift = Math.abs(scale - refScale) / refScale;
+      if(drift > TUNE.SCALE_DRIFT){
+        cyc = null; state = 'up';
+        out.suspended = suspended = 'moved';
+        return out;
+      }
+    }
+    suspended = null;
+
+    const hipDrop = hipRef === null ? 0 : (o.hip.y - hipRef) / scale;
+    const shDrop  = shRef  === null ? 0 : (o.sh.y  - shRef ) / scale;
+    const depth = Math.max(0, hipDrop);           // HIP ONLY. Never max(hip, sh).
+    out.depth = depth;
+
+    /* The reference follows the body UP quickly and DOWN slowly. The racing
+       game lets it follow in both directions at all times, which is right
+       for a brake tap and wrong here in two places.
+
+       Across ten squats in a row it would creep down into the player's own
+       squat. Worse, during CALIBRATION — where the state machine is not yet
+       running, so a "while state is up" guard would not fire — a 1.5 s
+       descent closes about 1 - exp(-1.5/3.5) = 35% of the gap, and the one
+       squat the whole game is scaled against would be measured a third too
+       shallow.
+
+       So: rising is always accepted, but the reference only follows DOWN
+       while the hip is near it. Once the player is descending, the mark
+       they are being measured against stops moving. */
+    if(hipRef === null){ hipRef = o.hip.y; shRef = o.sh.y; }
+    else {
+      const follow = (ref, y) => {
+        if(y < ref) return ref + (y - ref) * Math.min(1, dt / REF_UP);
+        if(state === 'up' && depth < REF_NEAR) return ref + (y - ref) * Math.min(1, dt / REF_DOWN);
+        return ref;
+      };
+      hipRef = follow(hipRef, o.hip.y);
+      shRef  = follow(shRef,  o.sh.y);
+    }
+
+    if(!personal) return out;     // nothing to compare against yet
+    const dIn = personal * TUNE.D_IN, dOut = personal * TUNE.D_OUT;
+
+    if(state === 'up'){
+      if(depth >= dIn){
+        state = 'down';
+        cyc = { t0:t, maxDepth:depth, maxLean:0, frames:1, missed:0 };
+      }
+    } else {
+      cyc.frames++;
+      if(depth > cyc.maxDepth) cyc.maxDepth = depth;
+      const lean = depth > 0.02 ? (shDrop - hipDrop) / depth : 0;
+      if(lean > cyc.maxLean) cyc.maxLean = lean;
+
+      const dur = (t - cyc.t0) / 1000;
+      if(dur > TUNE.MAX_CYCLE){ cyc = null; state = 'up'; return out; }
+
+      if(depth <= dOut){
+        // the cycle closed. Judge it.
+        const seen = cyc.frames ? (cyc.frames - cyc.missed) / cyc.frames : 0;
+        const q = cyc.maxDepth / personal;
+        let verdict, why = null;
+        if(seen < TUNE.MIN_SEEN){ verdict = 'unscored'; why = 'lost sight of you'; }
+        else if(dur < TUNE.MIN_CYCLE){ verdict = 'rejected'; why = 'too fast to be a squat'; }
+        else if(cyc.maxLean > TUNE.LEAN_BAD){ verdict = 'rejected'; why = 'bent at the waist'; }
+        else if(q < TUNE.Q_PARTIAL){ verdict = 'rejected'; why = 'not deep enough'; }
+        else if(q < TUNE.Q_CLEAN){ verdict = 'partial'; }
+        else { verdict = 'clean'; }
+        out.rep = { verdict, why, q:+q.toFixed(3), depth:+cyc.maxDepth.toFixed(4),
+                    dur:+dur.toFixed(2), lean:+cyc.maxLean.toFixed(3),
+                    seen:+seen.toFixed(2), t:+t.toFixed(1) };
+        cyc = null; state = 'up';
+      }
+    }
+    return out;
+  }
+  return { push, reset, armBout, setPersonal, getPersonal,
+           get state(){ return state; }, get ref(){ return hipRef; }, get shref(){ return shRef; },
+           get suspended(){ return suspended; } };
+}
+
+/* ---- the recording. Same shape as sparks.html and siege-capture.html,
+   so replay.mjs and the analysis scripts carry over unchanged.      */
+const REC_CAP = 60000;
+const rec = [];
+let recDropped = 0, lostSince = null, lostCount = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'siege', build:BUILD,
+    orientation:(window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    joints:J, visGet:VIS_GET, visKeep:VIS_KEEP, refUp:REF_UP, refDown:REF_DOWN, refNear:REF_NEAR,
+    scaleWindowMs:SCALE_WINDOW_MS, scaleQ:SCALE_Q, poseLatencyMs:POSE_LATENCY_MS,
+    tune:TUNE, waves:WAVES,
+    coords:'MediaPipe normalised to the camera frame, UNMIRRORED in lm, origin top-left',
+    note:'cap = video.currentTime seconds; ready = performance.now() ms at return; clock = cap mapped into the performance clock minus poseLatencyMs. depth is hip drop below the tracked standing reference, divided by the TRACKED body scale.',
+    unvalidated:'The rep counter has never been checked against a labelled recording. Every value in tune is a starting point to be measured, not a tuned one.' });
+}
+let clockOffset = null, clockT = 0;
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset*0.9 + off*0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+
+/* ---- audio: synthesised, no borrowed sound ---- */
+let actx = null;
+function initAudio(){ try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ actx=null; } }
+function tone(f, dur, gain, type){
+  if(!actx) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type||'sine'; o.frequency.setValueAtTime(f, t);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+dur+0.02);
+}
+function thud(){ if(!actx) return; tone(92, 0.26, 0.45, 'triangle'); tone(140, 0.12, 0.2, 'square'); }
+function crack(){ tone(320, 0.18, 0.22, 'square'); tone(640, 0.09, 0.12, 'square'); }
+function clang(){ tone(220, 0.5, 0.3, 'sawtooth'); tone(331, 0.42, 0.18, 'sawtooth'); }
+function windup(){ tone(150, 0.6, 0.16, 'sawtooth'); }
+function fanfare(){ [392,494,587,784].forEach((f,i)=>setTimeout(()=>tone(f,0.5,0.26,'triangle'), i*130)); }
+function defeat(){ [294,247,196].forEach((f,i)=>setTimeout(()=>tone(f,0.7,0.26,'sawtooth'), i*200)); }
+
+/* ---- camera and tracker ---- */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null, stream = null;
+const read = makeReader();
+const scaleTrack = makeScale();
+const counter = makeCounter();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+function dropStream(){ try { if(stream) stream.getTracks().forEach(t=>t.stop()); } catch(e){} stream=null; }
+/* Ask softly and work with what arrives. Doc 01: exact constraints were tried
+   on Sparks and made it worse — the phone obeyed by cropping its 4:3 sensor
+   top and bottom, which is the one dimension a standing body needs. */
+async function startCamera(){
+  const tall = window.innerHeight > window.innerWidth;
+  const s = await navigator.mediaDevices.getUserMedia({
+    video:{ width:{ideal: tall?720:960}, height:{ideal: tall?960:720}, facingMode:'user' },
+    audio:false });
+  dropStream(); stream = s; video.srcObject = s;
+  const p = video.play(); if(p && p.catch) p.catch(()=>{});
+  await Promise.race([ p ? p.catch(()=>{}) : Promise.resolve(), new Promise(r=>setTimeout(r,3000)) ]);
+  await waitForFrames(8000);
+}
+function waitForFrames(ms){
+  const t0 = performance.now();
+  return new Promise((res, rej)=>{ (function look(){
+    if(video.videoWidth && video.videoHeight && video.currentTime > 0) return res();
+    if(performance.now() - t0 > ms) return rej(new Error('The camera did not deliver a frame.'));
+    requestAnimationFrame(look);
+  })(); });
+}
+let wake = null;
+async function keepAwake(){ try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){} }
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible' && !document.getElementById('hud').hidden) keepAwake();
+});
+
+/* ---- canvas ---- */
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){
+  DPR = Math.min(2, devicePixelRatio||1);
+  W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize); resize();
+
+let fitRegion = null;
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw||!vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const y0 = fitRegion ? H*fitRegion.y0 : 0;
+  const av = (fitRegion ? H*fitRegion.y1 : H) - y0;
+  const sc = Math.min(W/vw, av/vh);
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:y0+(av-dh)/2, dw, dh, vw, vh };
+}
+function px(p){ const f = videoFit(); return { x: f.dx + p.x*f.dw, y: f.dy + p.y*f.dh }; }
+function frameAR(){ const vw=video.videoWidth||3, vh=video.videoHeight||4; return vw/vh; }
+
+function drawMirror(alpha){
+  const f = videoFit();
+  ctx.clearRect(0,0,W,H);
+  if(!f.vw) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.translate(f.dx+f.dw, f.dy); ctx.scale(-1,1);
+  try { ctx.drawImage(video, 0, 0, f.dw, f.dh); } catch(e){}
+  ctx.restore();
+}
+const BONES = [['shA','shB'],['shA','hipA'],['shB','hipB'],['hipA','hipB'],
+               ['hipA','knA'],['knA','ankA'],['hipB','knB'],['knB','ankB']];
+function drawBody(o, alpha){
+  if(!o) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.lineWidth = Math.max(2.5, Math.min(W,H)*0.009); ctx.lineCap='round';
+  ctx.strokeStyle = '#ff8a3d';
+  for(const [a,b] of BONES){
+    const pa=o.g[a], pb=o.g[b]; if(!pa||!pb) continue;
+    const A=px(pa), B=px(pb);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+  }
+  ctx.fillStyle = '#4cc9f0';
+  for(const m of [o.sh, o.hip]){
+    if(!m) continue;
+    const P=px(m), r=Math.max(4, Math.min(W,H)*0.013);
+    ctx.beginPath(); ctx.arc(P.x,P.y,r,0,Math.PI*2); ctx.fill();
+  }
+  // the tracked standing reference, drawn as the line the hip must drop below.
+  // Shown only outside a push — see the note on the calibration screen.
+  ctx.restore();
+}
+
+/* ---- the gate. Drawn, never borrowed. ---- */
+function drawGate(dmg, shakeAmt, flash){
+  /* The gate is fitted into the band the HUD leaves free, not placed at a
+     fixed offset. On a sideways phone the screen is ~412 px tall and the
+     instruction plate ate the top of the gate; rendering caught it. */
+    const wide = W > H;
+  const topSafe = (wide ? 0.34 : 0.21) * H;      // header + instruction plate
+  const botSafe = (wide ? 0.20 : 0.16) * H;      // count, buttons, progress bar
+  const band = Math.max(60, H - topSafe - botSafe);
+  const gw0 = Math.min(W*0.82, band/0.66), gh = gw0*0.66, gw = gw0;
+  const gx = (W-gw)/2, gy = topSafe + (band-gh)/2;
+  ctx.save();
+  if(shakeAmt>0){ const m=shakeAmt*Math.min(W,H)*0.014;
+    ctx.translate((Math.random()-0.5)*m, (Math.random()-0.5)*m); }
+  // stone surround
+  ctx.fillStyle = '#2b2721';
+  ctx.fillRect(gx-gw*0.10, gy-gh*0.10, gw*1.20, gh*1.18);
+  const rows = 6, cols = 9;
+  ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 2;
+  for(let r=0;r<rows;r++) for(let col=0;col<cols;col++){
+    const bw = gw*1.20/cols, bh = gh*1.18/rows;
+    const ox = (r%2) ? bw*0.5 : 0;
+    ctx.fillStyle = (r*7+col*3)%4===0 ? '#39332b' : '#322d26';
+    ctx.fillRect(gx-gw*0.10+col*bw-ox, gy-gh*0.10+r*bh, bw-2, bh-2);
+  }
+  // the gate itself
+  const grad = ctx.createLinearGradient(gx, gy, gx, gy+gh);
+  grad.addColorStop(0,'#6b4a2a'); grad.addColorStop(1,'#432d19');
+  ctx.fillStyle = grad; ctx.fillRect(gx, gy, gw, gh);
+  ctx.strokeStyle = '#2a1c10'; ctx.lineWidth = 3;
+  for(let i=1;i<7;i++){ const x=gx+gw*i/7; ctx.beginPath(); ctx.moveTo(x,gy); ctx.lineTo(x,gy+gh); ctx.stroke(); }
+  ctx.fillStyle = '#58524a';
+  ctx.fillRect(gx, gy+gh*0.22, gw, gh*0.07);
+  ctx.fillRect(gx, gy+gh*0.70, gw, gh*0.07);
+  // cracks: one more branch per point of damage dealt
+  ctx.strokeStyle = flash ? '#ffd9a8' : '#15100a';
+  ctx.lineWidth = Math.max(2, gw*0.008); ctx.lineCap='round';
+  let seed = 1337;
+  const rnd = () => (seed = (seed*1103515245+12345) & 0x7fffffff) / 0x7fffffff;
+  for(let i=0;i<dmg;i++){
+    let x = gx+gw*(0.15+0.7*rnd()), y = gy+gh*(0.15+0.7*rnd());
+    ctx.beginPath(); ctx.moveTo(x,y);
+    for(let s=0;s<4;s++){ x += (rnd()-0.5)*gw*0.22; y += (rnd()-0.5)*gh*0.3; ctx.lineTo(x,y); }
+    ctx.stroke();
+  }
+  ctx.restore();
+  return { gx, gy, gw, gh };
+}
+
+/* ---- the encounter. Four pushes at one gate. ----------------------
+   No progression, no inventory, no skill tree, no levels. The budget
+   was set before building: if this needs a fifth noun to make sense,
+   stop rather than add a sixth. It did not.                          */
+const WAVES = [
+  { name:'THE OUTER BAR',  quota:5,  secs:40, windup:3.2,
+    call:'THE CREW BRACES THE GATE', sub:'five clean heaves before they set the bar' },
+  { name:'THE IRON BRACE', quota:7,  secs:45, windup:3.0,
+    call:'THEY WEDGE AN IRON BRACE', sub:'seven — the bar is holding' },
+  { name:'THE INNER BEAM', quota:8,  secs:48, windup:2.8,
+    call:'THE INNER BEAM DROPS',     sub:'eight. Deeper is not required, only honest' },
+  { name:'THE LAST HINGE', quota:10, secs:52, windup:2.6,
+    call:'THE LAST HINGE HOLDS',     sub:'ten and the gate goes down' }
+];
+const RESOLVE_MAX = 3;
+
+let state = 'start';   // start | fit | cal | brace | push | resolve | over
+let wave = 0, resolve = RESOLVE_MAX, dmg = 0;
+let phaseT = 0, cleanCount = 0, partialCount = 0, repsThisWave = 0;
+let shake = 0, flash = 0, lastVerdict = null, verdictT = 0;
+let calMax = 0, calPhase = 'wait', calBest = 0, calSettle = 0;
+let fps = 0, lastFrameAt = 0, cur = null, fresh = false, last = 0;
+let t0run = 0, pushPaused = 0;
+const tally = { clean:0, partial:0, rejected:0, unscored:0, reasons:{} };
+
+function setCall(call, sub){ hud.hCall.textContent = call; hud.hSub.textContent = sub||''; }
+
+function enterWave(i){
+  wave = i;
+  if(wave >= WAVES.length){ finish(true); return; }
+  const w = WAVES[wave];
+  state = 'brace'; phaseT = 0;
+  cleanCount = 0; partialCount = 0; repsThisWave = 0; pushPaused = 0;
+  counter.armBout(scaleTrack.get());
+  windup();
+  setCall(w.call, w.sub);
+  hud.hWave.textContent = 'PUSH ' + (wave+1) + ' / ' + WAVES.length + '  ·  ' + w.name;
+  hud.hReps.textContent = '0 / ' + w.quota;
+  recPush({ k:'wave', phase:'brace', i:wave, id:w.name, quota:w.quota, secs:w.secs,
+            t:+performance.now().toFixed(1), clock:+clockT.toFixed(1) });
+}
+function beginPush(){
+  const w = WAVES[wave];
+  state = 'push'; phaseT = 0;
+  counter.armBout(scaleTrack.get());
+  thud();
+  setCall('HEAVE', 'squat — every honest rep lands');
+  recPush({ k:'wave', phase:'push', i:wave, t:+performance.now().toFixed(1), clock:+clockT.toFixed(1) });
+}
+function endPush(){
+  const w = WAVES[wave];
+  const credit = cleanCount + partialCount*0.5;
+  const won = credit >= w.quota;
+  state = 'resolve'; phaseT = 0;
+  recPush({ k:'wave', phase:'end', i:wave, won, clean:cleanCount, partial:partialCount,
+            credit:+credit.toFixed(1), quota:w.quota, paused:+pushPaused.toFixed(1),
+            t:+performance.now().toFixed(1) });
+  if(won){
+    dmg += 3; flash = 1; shake = 1; crack();
+    setCall('THE GATE GIVES', 'timber splits — they fall back');
+  } else {
+    resolve--; shake = 1; clang();
+    setCall('THEY HOLD', 'the crew sets the brace — you lose ground');
+  }
+  hud.hRes.innerHTML = 'RESOLVE <b>' + '◆'.repeat(Math.max(0,resolve)) + '</b>'
+                     + '◇'.repeat(RESOLVE_MAX - Math.max(0,resolve));
+}
+function finish(won){
+  state = 'over';
+  hud.wrap.hidden = true;
+  (won ? fanfare : defeat)();
+  const dur = (performance.now() - t0run)/1000;
+  const frames = rec.filter(r=>r.k==='f').length;
+  ui.endTitle.innerHTML = won ? 'THE GATE IS <span>DOWN</span>' : 'THE GATE <span>HOLDS</span>';
+  ui.endLead.textContent = won
+    ? 'Four pushes, ' + tally.clean + ' clean heaves. It came down.'
+    : 'You ran out of resolve at push ' + (wave+1) + ' of ' + WAVES.length + '.';
+  const rs = Object.entries(tally.reasons).sort((a,b)=>b[1]-a[1])
+    .map(([k,v])=>k+' ×'+v).join(' · ') || 'none';
+  ui.endDiag.innerHTML =
+      '<b>clean</b> ' + tally.clean + '  ·  <b>partial</b> ' + tally.partial
+    + '  ·  <b>rejected</b> ' + tally.rejected + '  ·  <b>unscored</b> ' + tally.unscored + '<br>'
+    + '<b>why rejected</b> ' + rs + '<br>'
+    + '<b>your depth</b> ' + (counter.getPersonal()||0).toFixed(3) + ' torso'
+    + '  ·  <b>clean needs</b> ' + (TUNE.Q_CLEAN*100).toFixed(0) + '% of it<br>'
+    + '<b>session</b> ' + dur.toFixed(0) + 's  ·  <b>pose fps</b> ' + (frames/Math.max(1,dur)).toFixed(1)
+    + '  ·  <b>tracking losses</b> ' + lostCount + '<br>'
+    + '<b>frames</b> ' + frames + '  ·  <b>records</b> ' + rec.length
+    + (recDropped ? '  ·  <b class="r">dropped</b> '+recDropped : '');
+  recPush({ k:'over', won, wave, resolve, tally, t:+performance.now().toFixed(1) });
+  ui.oEnd.hidden = false;
+}
+
+function onRep(r){
+  recPush({ k:'rep', i:wave, ...r });
+  lastVerdict = r; verdictT = 0;
+  if(r.verdict === 'clean'){ tally.clean++; cleanCount++; dmg++; flash=0.6; crack(); }
+  else if(r.verdict === 'partial'){ tally.partial++; partialCount++; dmg++; flash=0.35; tone(260,0.12,0.18,'square'); }
+  else if(r.verdict === 'unscored'){ tally.unscored++; }
+  else { tally.rejected++; if(r.why) tally.reasons[r.why] = (tally.reasons[r.why]||0)+1; }
+  repsThisWave++;
+  const w = WAVES[wave];
+  const credit = cleanCount + partialCount*0.5;
+  hud.hReps.textContent = (Number.isInteger(credit)?credit:credit.toFixed(1)) + ' / ' + w.quota;
+}
+
+/* ---- the frame loop ---- */
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = last ? Math.min(0.1,(now-last)/1000) : 0;
+  last = now; fresh = false;
+
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    if(lastFrameAt && now-lastFrameAt > 120) recPush({ k:'gap', t:+now.toFixed(1), ms:Math.round(now-lastFrameAt) });
+    lastFrameAt = now; lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true; clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+    if(fresh){
+      const lm = pose ? pose.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4),+(p.z||0).toFixed(4),
+                  +(p.visibility===undefined?1:p.visibility).toFixed(3)]) : null;
+      recPush({ k:'f', cap:+vt.toFixed(4), ready:+performance.now().toFixed(1),
+                clock:+clockT.toFixed(1), st:state, w:(state==='push'?wave:-1), lm });
+      if(!pose && lostSince===null){ lostSince=now; lostCount++; recPush({k:'lost',t:+now.toFixed(1)}); }
+      if(pose && lostSince!==null){ recPush({k:'found',t:+now.toFixed(1),out:Math.round(now-lostSince)}); lostSince=null; }
+      cur = observe(pose, read, frameAR());
+      if(cur.readable) scaleTrack.push(cur.torso, clockT);
+      fps = fps ? fps*0.9 + (1/Math.max(0.001,dt))*0.1 : 1/Math.max(0.001,dt);
+    }
+  }
+
+  fitRegion = (state==='fit') ? {y0:0.02,y1:0.50} : (state==='cal' ? {y0:0.02,y1:0.44} : null);
+
+  if(state==='start'){ if(video.videoWidth){ drawMirror(0.3); drawBody(cur,0.5); } return; }
+  if(state==='fit'){ drawMirror(0.55); drawBody(cur,0.95); paintFit(); return; }
+
+  // the counter runs in every state from calibration onward
+  let out = { rep:null, suspended:null, depth:null };
+  if(fresh) out = counter.push(cur, clockT, dt, scaleTrack.get());
+
+  if(state==='cal'){ drawMirror(0.55); drawBody(cur,0.95); paintCal(out, dt); return; }
+  if(state==='over'){ drawMirror(0.3); drawGate(dmg,0,false); drawBody(cur,0.5); return; }
+
+  phaseT += dt;
+  if(flash>0) flash = Math.max(0, flash-dt*2.2);
+  if(shake>0) shake = Math.max(0, shake-dt*2.4);
+  if(lastVerdict){ verdictT += dt; if(verdictT>1.8) lastVerdict=null; }
+
+  if(state==='brace'){
+    hud.hBar.style.width = Math.round(100*phaseT/WAVES[wave].windup)+'%';
+    if(phaseT >= WAVES[wave].windup) beginPush();
+  } else if(state==='push'){
+    const w = WAVES[wave];
+    /* UNSCORED IS NEVER A PLAYER FAILURE, and here that has teeth: the push
+       clock only runs while the body is visible. A camera that loses the
+       player cannot run out their window and cost them a point of resolve. */
+    if(out.suspended){ phaseT -= dt; pushPaused += dt; }
+    if(out.rep) onRep(out.rep);
+    hud.hBar.style.width = Math.round(100*Math.min(1,phaseT/w.secs))+'%';
+    if(out.suspended){
+      setCall(out.suspended==='moved' ? 'BACK TO YOUR MARK' : 'CANNOT SEE YOU',
+              out.suspended==='moved' ? 'you have moved — the clock is held'
+                                      : 'the clock is held until you are in frame');
+    } else if(lastVerdict && lastVerdict.verdict!=='clean'){
+      setCall(lastVerdict.verdict==='partial' ? 'HALF A HEAVE' :
+              lastVerdict.verdict==='unscored' ? 'DIDN’T SEE THAT ONE' : 'NOT COUNTED',
+              lastVerdict.why || 'shallower than your own range');
+    } else setCall('HEAVE','squat — every honest rep lands');
+    const credit = cleanCount + partialCount*0.5;
+    if(credit >= w.quota || phaseT >= w.secs) endPush();
+  } else if(state==='resolve'){
+    hud.hBar.style.width = '100%';
+    if(phaseT > 2.4){
+      if(resolve <= 0) finish(false);
+      else enterWave(wave+1);
+    }
+  }
+
+  drawMirror(0.34);
+  drawGate(dmg, shake, flash>0.15);
+  drawBody(cur, 0.85);
+  hud.hFps.innerHTML = fps.toFixed(0)+' fps'
+    + (cur && cur.readable ? '' : ' <span class="lost">NO BODY</span>');
+}
+
+/* ---- the fit gate. THIS ONE BLOCKS. --------------------------------
+   Doc 14: Sparks' gate was advisory with an always-on override, a run
+   started past it placed targets with no on-screen test at all, and 20
+   of 35 were drawn above the top edge of the picture. The player
+   declined 100% of the ones he could not see. Advisory was the bug.
+
+   What it asks for is deliberately smaller than Sparks: shoulders and
+   hips readable, and enough picture below the hip for the hip to drop a
+   full squat and stay in frame. No ankles. No lateral room at all,
+   because nothing in this game reaches sideways. That is why a squat
+   game fits a room a reaching game cannot.                            */
+const NEED_BELOW = 0.55;   // torsos of picture below the hip, for the drop
+function fitState(){
+  const o = cur;
+  if(!o || !o.readable) return { ok:false, why:'shoulders or hips not visible' };
+  if(o.torso > 0.30) return { ok:false, why:'too close — step back' };
+  if(o.below < NEED_BELOW) return { ok:false, why:'no room below your hip — raise the phone or step back' };
+  if(o.above < 0.9) return { ok:false, why:'your head is off the top — tilt the phone down' };
+  return { ok:true, why:null };
+}
+function paintFit(){
+  const f = videoFit(), o = cur, tr = scaleTrack.get();
+  const n2=v=>(v==null)?'—':v.toFixed(2), n3=v=>(v==null)?'—':v.toFixed(3);
+  const vis=k=>{const p=o&&o.g[k];return p?p.v:0;};
+  const cls=v=>v>=VIS_GET?'g':'r';
+  ui.fitDiag.innerHTML =
+      '<b>cam</b> '+(f.vw||'?')+'×'+(f.vh||'?')+' ('+(f.vw?(f.vw/f.vh).toFixed(2):'?')+':1) '
+    + ((f.vw>f.vh)?'LANDSCAPE':'PORTRAIT')+' sensor<br>'
+    + '<b>phone</b> '+window.innerWidth+'×'+window.innerHeight+' '
+    + ((window.innerHeight>window.innerWidth)?'upright':'sideways')
+    + '  ·  <b>'+fps.toFixed(0)+' fps</b><br>'
+    + '<b>torso</b> '+n3(o&&o.readable?o.torso:null)+'  tracked '+n3(tr)+'<br>'
+    + '<b>room</b> '+n2(o&&o.above)+' above the hip, '+n2(o&&o.below)+' below'
+    + '  (needs '+NEED_BELOW.toFixed(2)+')<br>'
+    + '<b>sees</b> sh <span class="'+cls(Math.min(vis('shA'),vis('shB')))+'">'+n2(Math.min(vis('shA'),vis('shB')))+'</span> '
+    + 'hip <span class="'+cls(Math.min(vis('hipA'),vis('hipB')))+'">'+n2(Math.min(vis('hipA'),vis('hipB')))+'</span> '
+    + '<span style="opacity:.55">kn '+n2(Math.min(vis('knA'),vis('knB')))+' ank '+n2(Math.min(vis('ankA'),vis('ankB')))+' — not scored</span>';
+  const st = fitState();
+  ui.fitReads.className = 'reads '+(st.ok?'y':'n');
+  ui.fitReads.textContent = st.ok ? 'READY — you have room to drop' : st.why.toUpperCase();
+  ui.bFit.disabled = !st.ok;
+}
+
+/* ---- calibration. The only place a live depth number is shown. ---- */
+function paintCal(out, dt){
+  const d = out.depth;
+  /* Count seconds of READABLE standing, not seconds with a fresh pose. The
+     render loop runs at 60 fps against a ~30 fps camera, so half the ticks
+     carry no new estimate; penalising those as if the body were missing kept
+     the settle timer permanently negative and calibration never completed. */
+  if(calPhase==='wait'){
+    calSettle += (cur && cur.readable) ? dt : -dt*2;
+    calSettle = Math.max(0, calSettle);
+  }
+  const p = counter.getPersonal();
+  if(calPhase==='wait' && calSettle >= CAL_SETTLE && d!=null && d > TUNE.CAL_MIN){ calPhase='down'; calMax=d; }
+  else if(calPhase==='down'){
+    if(d > calMax) calMax = d;
+    if(d!=null && d < TUNE.CAL_MIN*0.5){
+      calPhase='done'; calBest = calMax;
+      counter.setPersonal(calBest);
+      recPush({ k:'calibrate', depth:+calBest.toFixed(4), t:+performance.now().toFixed(1) });
+      tone(660,0.2,0.26,'triangle');
+      ui.bCalGo.hidden = false; ui.bCalAgain.hidden = false;
+    }
+  }
+  const bar = v => { const n = Math.max(0, Math.min(1, v/0.8)); return '█'.repeat(Math.round(n*22)).padEnd(22,'·'); };
+  ui.calDiag.innerHTML =
+      '<b>depth now</b> '+(d==null?'—':d.toFixed(3))+' torso<br>'
+    + '<span class="y">'+bar(d||0)+'</span><br>'
+    + '<b>deepest this attempt</b> '+calMax.toFixed(3)
+    + (calPhase==='done' ? '  <span class="g">✓ set</span>' : '')+'<br>'
+    + (calPhase==='done'
+        ? '<b>clean needs</b> '+(calBest*TUNE.Q_CLEAN).toFixed(3)
+          +'  ·  <b>counts at all</b> '+(calBest*TUNE.Q_PARTIAL).toFixed(3)
+        : (calSettle < CAL_SETTLE
+            ? '<span class="y">hold still \u2014 settling the scale ('
+              + (CAL_SETTLE-calSettle).toFixed(1) + 's)</span>'
+            : '<span style="opacity:.6">squat down, then stand all the way up</span>'));
+  if(calPhase==='done'){
+    ui.calLead.textContent = 'Your range is set. Clean heaves need '
+      + (TUNE.Q_CLEAN*100).toFixed(0) + '% of this depth; nothing in the siege asks for more.';
+  }
+}
+function startCal(){
+  /* The tracked body scale is an 85th percentile over a 5 s window, so for up
+     to five seconds after the player steps back it still holds frames from
+     where they were standing before. The fit screen showed exactly that:
+     torso 0.180 instantaneous against 0.340 tracked. Calibration is the one
+     measurement every later threshold is a fraction of, so it starts from a
+     cleared window and will not accept a descent until the window has been
+     refilled by a second of standing still. */
+  state='cal'; calPhase='wait'; calMax=0; calBest=0; calSettle=0;
+  scaleTrack.reset();
+  counter.reset(); counter.setPersonal(null);
+  ui.oFit.hidden = true; ui.oCal.hidden = false;
+  ui.bCalGo.hidden = true; ui.bCalAgain.hidden = true;
+  ui.calLead.textContent = 'Do one slow squat, as deep as is comfortable, then stand up. That sets your range — nothing later asks you to go deeper than this.';
+}
+
+/* ---- saving ---- */
+function ndjson(){ return rec.map(o=>JSON.stringify(o)).join('\n')+'\n'; }
+function stamp(){ return new Date().toISOString().replace(/[:.]/g,'-').slice(0,19); }
+function drop(blob,name){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),6000);
+}
+async function save(){
+  const text = ndjson();
+  if('CompressionStream' in window){
+    try {
+      const cs = new CompressionStream('gzip');
+      const buf = await new Response(new Blob([text]).stream().pipeThrough(cs)).arrayBuffer();
+      drop(new Blob([buf],{type:'application/gzip'}), 'siege-'+stamp()+'.ndjson.gz');
+      return;
+    } catch(e){}
+  }
+  drop(new Blob([text],{type:'application/x-ndjson'}), 'siege-'+stamp()+'.ndjson');
+}
+
+/* ---- wiring ---- */
+const ui = {
+  oStart:document.getElementById('oStart'), oFit:document.getElementById('oFit'),
+  oCal:document.getElementById('oCal'), oEnd:document.getElementById('oEnd'),
+  loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
+  fitDiag:document.getElementById('fitDiag'), fitReads:document.getElementById('fitReads'),
+  bFit:document.getElementById('bFit'), calDiag:document.getElementById('calDiag'),
+  calLead:document.getElementById('calLead'), bCalGo:document.getElementById('bCalGo'),
+  bCalAgain:document.getElementById('bCalAgain'),
+  endTitle:document.getElementById('endTitle'), endLead:document.getElementById('endLead'),
+  endDiag:document.getElementById('endDiag')
+};
+const hud = {
+  wrap:document.getElementById('hud'), hWave:document.getElementById('hWave'),
+  hFps:document.getElementById('hFps'), hCall:document.getElementById('hCall'),
+  hSub:document.getElementById('hSub'), hReps:document.getElementById('hReps'),
+  hBar:document.getElementById('hBar'), hRes:document.getElementById('hRes')
+};
+
+let starting = false;
+async function begin(){
+  if(starting) return; starting = true;
+  const b = document.getElementById('bStart'); b.disabled = true;
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx && actx.state==='suspended') await actx.resume();
+    await startCamera();
+    if(!landmarker) await loadTracker();
+    recHeader();
+    ui.loadMsg.hidden = true; ui.oStart.hidden = true; ui.oFit.hidden = false;
+    state = 'fit'; keepAwake(); resize();
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream(); ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: '+(err&&err.message?err.message:err);
+    if(err&&err.name==='NotAllowedError') m='Camera permission denied. Allow it in the address bar and reload.';
+    if(err&&err.name==='NotFoundError') m='No camera found on this device.';
+    if(err&&err.name==='NotReadableError') m='Another app is using the camera. Close it and try again.';
+    if(err&&err.name==='AbortError') m='The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  } finally { starting = false; b.disabled = false; }
+}
+function startSiege(){
+  ui.oCal.hidden = true; ui.oEnd.hidden = true; hud.wrap.hidden = false;
+  resolve = RESOLVE_MAX; dmg = 0; wave = 0;
+  tally.clean=0; tally.partial=0; tally.rejected=0; tally.unscored=0; tally.reasons={};
+  t0run = performance.now();
+  hud.hRes.innerHTML = 'RESOLVE <b>'+'◆'.repeat(RESOLVE_MAX)+'</b>';
+  recPush({ k:'siege', phase:'start', t:+performance.now().toFixed(1),
+            personal:counter.getPersonal(),
+            orientation:(window.innerHeight>window.innerWidth)?'portrait':'landscape' });
+  enterWave(0);
+}
+document.getElementById('bStart').addEventListener('click', begin);
+ui.bFit.addEventListener('click', startCal);
+ui.bCalGo.addEventListener('click', startSiege);
+ui.bCalAgain.addEventListener('click', startCal);
+document.getElementById('bAgain').addEventListener('click', () => {
+  if(counter.getPersonal()) startSiege(); else startCal();
+});
+document.getElementById('bQuit').addEventListener('click', () => {
+  recPush({ k:'siege', phase:'quit', wave, t:+performance.now().toFixed(1) });
+  finish(false);
+});
+document.getElementById('bRec').addEventListener('click', save);
+
+/* One constructor for the counter, one wave list, one reader — the game and
+   every harness go through these rather than building their own. */
+window.__SIEGE__ = {
+  BUILD, TUNE, WAVES, J, VIS_GET, VIS_KEEP, SCALE_WINDOW_MS, SCALE_Q,
+  REF_UP, REF_DOWN, REF_NEAR, CAL_SETTLE, POSE_LATENCY_MS, NEED_BELOW,
+  makeReader, makeScale, makeCounter, observe, fitState, videoFit, px, frameAR, rec,
+  __set(s){ state = s; }, __wave(i){ enterWave(i); }, __push(){ beginPush(); },
+  __fake(o){ cur = o; }, __dmg(d){ dmg = d; }, __resolve(r){ resolve = r; },
+  __counter: counter, __frame: frame, __hud: () => hud, __ui: () => ui
+};
+</script>
+</body>
+</html>
