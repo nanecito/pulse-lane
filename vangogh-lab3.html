@@ -280,7 +280,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 39;          // bump on every deploy; shown on the start card
+const BUILD = 40;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -1119,7 +1119,7 @@ let pxPrev = 0, pxVel = 0, yawSm = 0;
 let limbPrev = {}, jumpT = 0, jumpOff = 0, jumped = false, jumpRun = 0;
 let rumble = 0, offRuns = 0, wasOff = false;
 let quizOpen=false, quizArt=null, quizOpts=null, quizRight=0, quizHold=0, quizSide=0, quizDone=false;
-let quizStage='title', quizScore=0, quizBusy=false, quizToken=0;
+let quizStage='title', quizScore=0, quizBusy=false, quizToken=0, quizGot={title:false, artist:false}, lastFin=0;
 let studyFresh=true;
 let brakeArmed=false, kcal=0;
 const seenLatch = {kn:false, an:false};
@@ -1550,7 +1550,7 @@ function endRace(){
   const rec = finished && (prev===0 || finishTime < prev);
   if(rec && finishTime >= BEST_FLOOR) writeLS(bestKey(), finishTime.toFixed(2));
   const n = bumpStreak();
-  const fin = rankNow();
+  const fin = rankNow(); lastFin = fin;
   document.getElementById('endTitle').textContent =
     !finished ? 'Time up' : (rec ? 'Fastest yet' : 'Chequered flag');
   const who = cars.slice().sort(function(a,b){ return b.dist-a.dist; })[0];
@@ -1609,10 +1609,15 @@ function endRace(){
       // never the title in text: that would give the first question away
       g.fillStyle='#1B2238'; g.fillRect(0,0,cv.width,cv.height);
     }
-    quizScore = 0; quizToken++;
+    quizScore = 0; quizGot = {title:false, artist:false}; quizToken++;
     quizAsk('title');
     wrap.hidden=false; quizOpen=true;
-  } else { wrap.hidden=true; }
+  } else {
+    wrap.hidden=true;
+    // no painting to ask about: the wrap-up is just where you finished
+    if(finished){ const pl=['first','second','third','fourth','fifth','sixth'][Math.max(0,fin-1)] || ('number '+fin);
+      try { sayNow((fin===1?'Congratulations! ':'')+'You finished '+pl+'.'); } catch(e){} }
+  }
   ui.hud.hidden=true; ui.oEnd.hidden=false;
   startFlag();
   letSleep();
@@ -1880,10 +1885,10 @@ function update(dt, reading, now){
       const braked = cBrake/cFrames >= 0.18;
       if(clean >= CORNER_CLEAN && held >= 0.30){
         boost = Math.max(boost, braked ? CORNER_BOOST : LINE_BOOST);
-        showCall(braked?'GOOD CORNER':'GOOD LINE','', 'good', braked?'Good corner.':'Good line.'); callTimer=1.1;
+        /* build 40: no words for a corner, the boost and the chime say it */
         blip(braked?820:700,0.22,0.3);
       } else if(clean < 0.6){
-        showCall('RAN WIDE','', 'ready', 'Ran wide.'); callTimer=1.0;
+        /* build 40: no RAN WIDE */
         blip(190,0.24,0.26,'sawtooth');
       }
       curCorner=null; cFrames=0;
@@ -1939,16 +1944,13 @@ function update(dt, reading, now){
     if(chName){
       ui.chaser.hidden=false;
       ui.chaser.textContent = chName + '  ' + Math.round(chGap) + 'm';
-      ui.chaser.className = 'chaser' + (chGap < CHASER_WARN ? ' near' : '');
+      ui.chaser.className = 'chaser';     // build 40: never red, never spoken
       /* Build 38: this pill turning red is the most likely "little red square"
          Hugo kept seeing and could not read from his mark - a rival within
          CHASER_WARN metres behind you. Now it is said aloud (at most every
          CHASER_SAY seconds) and logged. */
-      if(chGap < CHASER_WARN && chaserArmed){ chaserArmed=false; blip(150,0.22,0.22,'sawtooth');
-        recPush({ k:'chaser', t:+performance.now().toFixed(1), name:chName, gap:Math.round(chGap) });
-        const tn = performance.now()/1000;
-        if(tn - chaserSaid > CHASER_SAY && !legsWarned){ chaserSaid = tn;
-          sayNow(chName.charAt(0)+chName.slice(1).toLowerCase()+' is right behind you.'); } }
+      if(chGap < CHASER_WARN && chaserArmed){ chaserArmed=false;
+        recPush({ k:'chaser', t:+performance.now().toFixed(1), name:chName, gap:Math.round(chGap) }); }
       if(chGap > CHASER_WARN*1.8) chaserArmed=true;
     } else { ui.chaser.hidden=true; chaserArmed=true; }
   }
@@ -2677,7 +2679,8 @@ function drawCornerSign(){
 const GUIDE = {
   head:[0.500,0.150], lsh:[0.398,0.300], rsh:[0.602,0.300],
   lel:[0.330,0.400],  rel:[0.670,0.400],
-  lwr:[0.408,0.330],  rwr:[0.592,0.330],
+  // build 40: a wider grip, so the wheel between the marks is bigger
+  lwr:[0.345,0.360],  rwr:[0.655,0.360],
   lhip:[0.446,0.550], rhip:[0.554,0.550],
   lkn:[0.446,0.745],  rkn:[0.554,0.745],
   lank:[0.446,0.935], rank:[0.554,0.935]
@@ -2715,28 +2718,33 @@ function fitGuide(F, dt){
   };
 }
 function drawGuide(F, fit, legsLit){
+  // build 40: just you, in a few clean lines - no outline to stand into
+  if(!pose) return;
   const U = fit ? fit.U : Math.min(F.dw,F.dh)*0.25;
-  const X = fit ? fit.X : (g => F.dx + GUIDE[g][0]*F.dw);
-  const Y = fit ? fit.Y : (g => F.dy + GUIDE[g][1]*F.dh);
-  ctx.save();
-  ctx.lineWidth=Math.max(2,U*0.052); ctx.lineCap='round'; ctx.lineJoin='round';
-  ctx.setLineDash([Math.max(5,U*0.112), Math.max(5,U*0.088)]);
-  const seg=(a,b,lit)=>{ ctx.strokeStyle = lit ? 'rgba(127,224,160,0.80)' : 'rgba(242,246,255,0.34)';
-    ctx.beginPath(); ctx.moveTo(X(a),Y(a)); ctx.lineTo(X(b),Y(b)); ctx.stroke(); };
-  ctx.strokeStyle='rgba(242,246,255,0.34)';
-  ctx.beginPath(); ctx.arc(X('head'),Y('head'),U*0.32,0,Math.PI*2); ctx.stroke();
-  seg('lsh','rsh'); seg('lsh','lel'); seg('lel','lwr'); seg('rsh','rel'); seg('rel','rwr');
-  seg('lsh','lhip'); seg('rsh','rhip'); seg('lhip','rhip');
-  // the legs light up when the camera can actually see them, which is the
-  // only thing standing further back was ever for
-  seg('lhip','lkn',legsLit); seg('lkn','lank',legsLit);
-  seg('rhip','rkn',legsLit); seg('rkn','rank',legsLit);
-  ctx.setLineDash([]); ctx.restore();
+  const J = i => { const q = joint(i); return (q && q.v > 0.3) ? q : null; };
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round';
+  const line = (a, b, col) => { const p = J(a), q = J(b); if(!p || !q) return;
+    ctx.strokeStyle='rgba(12,17,34,0.55)'; ctx.lineWidth=Math.max(6,U*0.075);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    ctx.strokeStyle=col; ctx.lineWidth=Math.max(3,U*0.040);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); };
+  const body = 'rgba(246,235,203,0.92)', legs = legsLit ? 'rgba(127,224,160,0.95)' : 'rgba(246,235,203,0.45)';
+  line(11,12,body); line(11,13,body); line(13,15,body); line(12,14,body); line(14,16,body);
+  line(11,23,body); line(12,24,body); line(23,24,body);
+  line(23,25,legs); line(25,27,legs); line(24,26,legs); line(26,28,legs);
+  const n = J(0); if(n){ ctx.fillStyle=body; ctx.beginPath(); ctx.arc(n.x,n.y,Math.max(5,U*0.09),0,Math.PI*2); ctx.fill(); }
+  ctx.restore();
 }
 function videoFit(){
   const vw = video.videoWidth||0, vh = video.videoHeight||0;
   if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
-  const sc = Math.min(W/vw, H/vh);           // contain: show the whole frame, bars and all
+  /* Build 40: fill the screen HEIGHT and crop the sides. His phone hands a
+     960x720 LANDSCAPE picture to a portrait screen; shown whole it sat in a
+     406x305 band and the body, wheel and marks were all drawn tiny. Head to
+     feet is the part that matters; the sides only ever show the room, and the
+     voice centres you before your hands can lock. Joints are mapped through
+     this same fit, so marks and body stay aligned. */
+  const sc = H/vh;
   const dw = vw*sc, dh = vh*sc;
   return { dx:(W-dw)/2, dy:(H-dh)/2, dw:dw, dh:dh, vw:vw, vh:vh };
 }
@@ -2752,7 +2760,17 @@ function joint(i){
    latched through tracking flicker and only lets go if the wrist is visibly
    away for long enough. At 150-250 ms you cannot ask someone to hold two
    things steady at once and judge it; you can ask them to arrive twice. */
-const GRIP_FILL = 0.45;   // s a hand must sit on its mark before it locks
+/* BUILD 40 - Hugo: the hands lock "pretty much in any position" and too fast,
+   the wheel is too small, and the screen has too many lines. Now the voice
+   first guides you onto your spot (coach(): distance, left/right, legs in
+   view, standing up) and only once you have held it for PLACE_HOLD can a hand
+   fill and lock - more slowly than before. Leave the spot for PLACE_LOSE and
+   the hands let go. The dashed body outline and the dotted wrist-to-mark
+   lines are replaced by a plain stick figure of you. */
+const PLACE_HOLD = 0.8;   // s on your spot before the hands can lock
+const PLACE_LOSE = 1.0;   // s off it before locked hands let go
+let placeT = 0, placeOff = 0, placed = false;
+const GRIP_FILL = 0.9;    // s a hand must sit on its mark before it locks (was 0.45)
 const GRIP_BOTH = 0.40;   // s both hands held before the race starts
 const GRIP_FREE = 0.70;   // s visibly away before a locked hand lets go
 let grip = null;
@@ -2916,7 +2934,10 @@ function coach(r){
   if(r.torso < FIT_TORSO_LO) return {k:'near', big:'Come closer',           say:'Come a bit closer.',     ok:false};
   if(hp.x < 0.5 - FIT_X)     return {k:'rgt',  big:'To your right',         say:'A little to your right.',ok:false};
   if(hp.x > 0.5 + FIT_X)     return {k:'lft',  big:'To your left',          say:'A little to your left.', ok:false};
-  if(!legsSeen)              return {k:'legs', big:'Whole legs in frame',   say:'I need to see your legs.', ok:false};
+  // legsSeen is only computed once a calibration exists, so before the first
+  // race it is always false: look at the knees and ankles directly (build 40)
+  const legsInView = legsSeen || !!(pt(L.lkn,VIS_GET) || pt(L.rkn,VIS_GET) || pt(L.lank,VIS_GET) || pt(L.rank,VIS_GET));
+  if(!legsInView)            return {k:'legs', big:'Whole legs in frame',   say:'I need to see your legs.', ok:false};
   if(squatDepth >= 0.35)     return {k:'tall', big:'Stand up straight',     say:'Stand up straight.',     ok:false};
   return {k:'ok', big:'Locked in', say:'Locked in. Here we go.', ok:true};
 }
@@ -2979,7 +3000,8 @@ function enterCalibrate(){
   ui.calHint.textContent  = 'Walk back into the picture';
   ui.calSub.textContent   = 'Hold the wheel with both hands to start';
   ui.oEnd.hidden = true; ui.oStudy.hidden = true; ui.oCal.hidden = false;
-  state = 'calibrate'; coachKey = ''; hipRef = null; shRef = null; squatDepth = 0; markT = 0; markTorso = null; keepAwake();
+  state = 'calibrate'; coachKey = ''; hipRef = null; shRef = null; squatDepth = 0; markT = 0; markTorso = null;
+  placeT = 0; placeOff = 0; placed = false; keepAwake();
   sayNow('Walk back until I can see all of you.');
 }
 
@@ -3088,7 +3110,9 @@ function calibrate(r,dt){
 
   // the two hand marks, on the shape as fitted to this body
   const U = fit ? fit.U : Math.min(F.dw,F.dh)*0.25;
-  const tol = U*0.46;
+  // build 40: was U*0.46 with a 1.55x taller ellipse - hands hanging at your
+  // waist counted as on the wheel. Now they have to be up on the marks.
+  const tol = U*0.30;
   const state = [];
   for(const c of CHECKS){
     const tx = fit ? fit.X(c.g) : F.dx+GUIDE[c.g][0]*F.dw;
@@ -3096,16 +3120,23 @@ function calibrate(r,dt){
     const j = joint(c.i);
     // an ellipse, taller than it is wide: side-to-side is what tells the two
     // marks apart, height is the part nobody can judge
-    const d = j ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.55)) : 99;
+    const d = j ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.25)) : 99;
     const near = !!(j && j.v>0.12 && d < 1 && fit);
     state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d});
   }
 
+  // first your spot: the voice talks you onto it, and only then can you grip
+  const pos = coach(r);
+  if(pos.ok){ placeT += dt; placeOff = 0; if(placeT >= PLACE_HOLD && !placed){ placed = true; } }
+  else { placeT = 0; if(placed){ placeOff += dt; if(placeOff >= PLACE_LOSE){ placed = false; placeOff = 0; } } }
+  if(!placed){
+    for(const g of [grip.L, grip.R]){ g.lock = false; g.fill = Math.max(0, g.fill - dt*2); g.off = 0; }
+  }
   // each hand arrives on its own mark and latches there, one at a time
   for(let k=0;k<2;k++){
     const g = k ? grip.R : grip.L, st = state[k];
     const lost = !(st.j && st.j.v>0.12);   // no wrist in view: no information, so change nothing
-    if(lost) continue;
+    if(lost || !placed) continue;
     if(st.near){
       g.off=0;
       if(!g.lock){
@@ -3134,26 +3165,13 @@ function calibrate(r,dt){
   for(let k=0;k<state.length;k++){
     const st = state[k];
     const g = k ? grip.R : grip.L;
-    drawHandMark(st.tx, st.ty, U*0.136, g.fill/GRIP_FILL, g.lock, k?-1:1);
-    // where that limb actually is, so you can see which way to move
-    const settled = (k?grip.R:grip.L).lock;
-    if(st.j && st.j.v>0.12 && !settled){
-      ctx.save(); ctx.lineCap='round'; ctx.setLineDash([Math.max(6,U*0.080), Math.max(5,U*0.072)]);
-      ctx.strokeStyle='rgba(12,17,34,0.75)'; ctx.lineWidth=Math.max(4,U*0.056);
-      ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
-      ctx.strokeStyle='rgba(246,235,203,0.80)'; ctx.lineWidth=Math.max(2,U*0.028);
-      ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle='rgba(12,17,34,0.85)';
-      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.104, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle='rgba(246,235,203,0.96)';
-      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.080, 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-    }
+    drawHandMark(st.tx, st.ty, U*0.11, g.fill/GRIP_FILL, g.lock, k?-1:1);
+    // (build 40: no dotted line from your wrist - the stick figure shows where it is)
   }
 
   let title, hint;
   if(!pose || !fit){    title='Finding you';     hint='Step into the picture'; }
+  else if(!placed){     title=pos.ok ? 'Hold there' : pos.big;   hint='Find your spot first'; }
   else if(!hands){      title='Take the wheel';
                         hint=(grip.L.lock||grip.R.lock) ? 'Good &mdash; now the other hand'
                                                         : 'A hand on each mark, one at a time'; }
@@ -3162,8 +3180,8 @@ function calibrate(r,dt){
   ui.calTitle.innerHTML = title;
   ui.calHint.innerHTML = hint;
   // the same words out loud, so none of this has to be read from the mark
-  if(!pose || !fit){ const c = coach(r); sayKeyed(c.k, c.say); }
-  else if(!hands)  sayKeyed('wheel', 'Now take the wheel. A hand on each mark.');
+  if(!pose || !fit || !placed){ if(!pos.ok) sayKeyed(pos.k, pos.say); }
+  else if(!hands)  sayKeyed('wheel', 'That is your spot. Now take the wheel, a hand on each mark.');
   else             sayKeyed('hold',  'Hold it.');
   ui.calSub.innerHTML = kneesSeen ? 'Legs tracked &mdash; march to drive'
                         : (anklesSeen ? 'Feet tracked &mdash; march to drive'
@@ -3238,9 +3256,15 @@ function quizRead(dt){ /* answered by tapping since build 38 */ }
    of gold and blue stars over the end screen, a rising four-note fanfare and
    a spoken line. Otherwise: no fanfare, an encouraging line out loud. */
 function quizCelebrate(score){
-  const say = score === 2 ? 'Brilliant! You finished the race and remembered the painting.'
-            : score === 1 ? 'So close. One of two. Next time you will have them both.'
-                          : 'The painting got away this time. Take a longer look before the next race.';
+  /* build 40: ONE spoken wrap-up after the painting - where you finished,
+     and which half of the painting you kept. */
+  const place = ['first','second','third','fourth','fifth','sixth'][Math.max(0,lastFin-1)] || ('number '+lastFin);
+  const cheer = (lastFin === 1 || score === 2) ? 'Congratulations! ' : '';
+  const art = score === 2 ? 'and you remembered the painting and the painter.'
+            : quizGot.title ? 'You got the painting, but not the painter. Next time, both.'
+            : quizGot.artist ? 'You got the painter, but not the painting. Next time, both.'
+            : 'The painting got away this time. Take a longer look before the next race.';
+  const say = cheer + 'You finished ' + place + (score === 2 ? ', ' : '. ') + art;
   try { sayNow(say); } catch(e){}
   if(score !== 2) return;
   [523, 659, 784, 1047].forEach((f,i)=> setTimeout(()=>{ try { blip(f, 0.22, 0.30, 'triangle'); } catch(e){} }, 120 + i*140));
@@ -3276,7 +3300,7 @@ function quizAnswer(i){
   const O = QOPT();
   O.forEach(el=>{ el.className='quizOpt'; });
   const right = (i === quizRight);
-  if(right) quizScore++;
+  if(right){ quizScore++; quizGot[quizStage] = true; }
   O[i].classList.add(right ? 'right' : 'wrong');
   if(!right) O[quizRight].classList.add('right');
   blip(right?880:190, right?0.26:0.3, 0.3, right?'triangle':'sawtooth');
