@@ -1,0 +1,3354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Starry Night Circuit LAB3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&display=swap">
+<style>
+:root{
+  --ink:#070E22; --dusk:#16306B; --fg:#F2F6FF; --muted:#93A4C2;
+  --lime:#F2C84B; --amber:#E8A33D; --red:#C84B2E; --cyan:#7FB2D9;
+  --display:"Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--ink);color:var(--fg);font-family:var(--display)}
+body{touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100%;height:100%}
+.hud{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;
+     padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.spd{font-size:clamp(40px,9vw,92px);font-weight:700;font-variant-numeric:tabular-nums;line-height:.9;color:var(--lime);
+     text-shadow:0 4px 22px rgba(0,0,0,.85)}
+.spd small{display:block;font-size:clamp(10px,1.3vw,14px);letter-spacing:.22em;color:var(--muted);font-weight:600}
+.rt{text-align:right}
+.rt .big{font-size:clamp(20px,4vw,40px);font-weight:700;font-variant-numeric:tabular-nums;text-shadow:0 4px 22px rgba(0,0,0,.85)}
+.rt .lbl{font-size:clamp(9px,1.2vw,13px);letter-spacing:.2em;color:var(--muted)}
+.bottom{display:flex;flex-direction:column;gap:8px;align-items:center}
+.cad{width:100%;max-width:640px;height:clamp(14px,2.2vw,26px);border-radius:999px;background:rgba(242,246,255,.12);
+     border:1px solid rgba(242,246,255,.22);overflow:hidden;position:relative}
+.cad i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--cyan),var(--lime));transition:width .14s linear}
+.cad b{position:absolute;left:55%;top:0;bottom:0;width:2px;background:rgba(242,246,255,.55)}
+.chaser{font-size:clamp(11px,1.5vw,15px);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--fg);background:rgba(12,18,40,.72);border:1px solid rgba(246,235,203,.35);
+  border-radius:999px;padding:4px 13px;margin-bottom:7px}
+.chaser.near{color:var(--ink);background:var(--red);border-color:var(--red);font-weight:700}
+.foot{font-size:clamp(11px,1.5vw,16px);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+/* how hard you are braking, right under the effort bar: the two things your
+   body is doing, side by side */
+.brake{width:100%;max-width:640px;height:clamp(8px,1.3vw,14px);border-radius:999px;
+  background:rgba(242,246,255,.10);overflow:hidden;margin-top:5px}
+.brake i{display:block;height:100%;width:0%;background:var(--amber);transition:width .07s linear}
+.brake i.full{background:var(--red)}
+.foot.warn{color:var(--amber)}
+
+.diag{font-size:clamp(9px,1.1vw,12px);letter-spacing:.06em;color:var(--muted);opacity:.7;font-variant-numeric:tabular-nums}
+.call{position:fixed;left:0;right:0;top:34%;text-align:center;pointer-events:none;opacity:0;transition:opacity .12s}
+.call.on{opacity:1}
+.call .word{font-size:clamp(44px,12vw,140px);font-weight:700;letter-spacing:.06em;line-height:1}
+.call .sub{font-size:clamp(12px,2vw,22px);letter-spacing:.3em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.call .bar{margin:14px auto 0;width:min(60vw,420px);height:8px;border-radius:999px;background:rgba(242,246,255,.18);overflow:hidden}
+.call .bar i{display:block;height:100%;width:100%;background:var(--amber)}
+.call .bar.depth{margin-top:9px;height:14px}
+.call .bar.depth i{width:0%;background:var(--cyan);transition:width .05s linear}
+.call .bar.depth i.full{background:var(--lime)}
+.call.ready .word{color:var(--muted)} .call.squat .word{color:var(--cyan)}
+.call.push .word{color:var(--amber)} .call.good .word{color:var(--lime)}
+/* losing your legs now loses the car, so this one is a warning, not a note */
+.call.warn .word{color:var(--amber);text-shadow:0 0 26px rgba(0,0,0,.95),0 3px 10px rgba(0,0,0,.9)}
+.call.warn .sub{color:var(--amber);opacity:.9}
+.overlay.setup{background:rgba(7,14,34,.28);flex-direction:column;justify-content:space-between;align-items:stretch;pointer-events:none}
+.overlay.setup button{pointer-events:auto}
+.setTop{text-align:center;padding:4px 10px}
+.setTop h2{margin:0 0 6px;font-size:clamp(34px,9vw,58px);font-weight:700;line-height:1.05;text-shadow:0 3px 18px rgba(0,0,0,.95)}
+.setTop p{margin:0;color:var(--fg);opacity:.92;font-size:clamp(18px,4.6vw,27px);letter-spacing:.04em;text-shadow:0 3px 18px rgba(0,0,0,.95)}
+.setBot{text-align:center;padding:4px 10px}
+/* the count has to be readable from two metres away, standing up */
+/* THE STUDY CARD. You do not read the boards while you are racing - Hugo was
+   clear about that - so the learning cannot live out on the road. The painting
+   and the painter are shown for five seconds before the lights go out, then
+   that same painting appears on a board halfway round as a reminder, and the
+   name is asked at the finish. Seeing it twice is what makes it stick. */
+.study{position:fixed;inset:0;background:rgba(8,12,24,.93);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:5vw;z-index:40}
+/* flex:0 0 auto and an explicit ratio, or the column stretches the canvas:
+   measured at 304x656 against a 520x340 backing store, which squashed every
+   painting into a portrait box. */
+#studyArt{width:auto;height:auto;flex:0 0 auto;aspect-ratio:26/17;
+  max-width:min(93vw,520px);max-height:46vh;border-radius:12px;
+  background:rgba(242,246,255,.06);box-shadow:0 18px 60px rgba(0,0,0,.6)}
+.study .nm{font-family:var(--display);font-weight:700;color:var(--amber);
+  font-size:clamp(26px,7.5vw,48px);line-height:1.05;text-align:center;letter-spacing:.01em}
+.study .ti{color:var(--fg);opacity:.8;font-size:clamp(13px,3.4vw,19px);text-align:center;font-style:italic}
+.study .cue{color:var(--muted);font-size:clamp(10px,2.6vw,13px);letter-spacing:.22em;
+  text-transform:uppercase;text-align:center}
+.study .cnt{font-family:var(--display);font-weight:700;color:var(--fg);opacity:.85;
+  font-size:clamp(40px,13vw,86px);line-height:1}
+.study .go{font-family:var(--display);font-weight:700;color:var(--fg);opacity:.85;
+  font-size:clamp(22px,6.4vw,38px);line-height:1.1;text-align:center;
+  transition:color .12s linear,opacity .12s linear}
+.study .go.lit{color:var(--amber);opacity:1}
+.study .go small{display:block;font-family:inherit;font-weight:400;
+  font-size:clamp(10px,2.6vw,13px);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--muted);margin-top:10px}
+/* The setup and ready screens are read from the mark, two metres back, so the
+   type is sized for that rather than for someone holding the phone.
+   These carry !important, which is why the countdown rules below need it too:
+   without it .setTop h2 won out and the 3-2-1 was capped at 52px instead of
+   the 300px it is specified at. That was true in build 28 as well; rendering
+   the screen is what found it. */
+.setTop h2{font-size:clamp(40px,10.5vw,70px)!important}
+.setTop p{font-size:clamp(19px,5vw,30px)!important}
+.setNote{font-size:clamp(12px,3.2vw,16px)}
+#oCal.counting .setTop{padding-top:12vh}
+#oCal.counting h2{font-size:clamp(110px,40vw,300px)!important;line-height:.9;color:var(--amber);
+  text-shadow:0 6px 40px rgba(0,0,0,.95)}
+#oCal.counting p{font-size:clamp(20px,5vw,30px)!important;letter-spacing:.3em;opacity:.8}
+.setNote{font-size:clamp(11px,2.2vw,14px);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.9)}
+.setDiag{font:500 clamp(10px,2vw,13px)/1.5 ui-monospace,Menlo,monospace;color:var(--cyan);opacity:.95;margin-bottom:8px;text-shadow:0 2px 12px rgba(0,0,0,.95)}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,14,34,.93);
+         padding:max(16px,env(safe-area-inset-left,0px));overflow:auto}
+.card{background:rgba(14,28,60,.96);border:1px solid rgba(242,246,255,.18);border-radius:18px;padding:26px;width:100%;max-width:560px;text-align:center}
+.card h1{margin:0 0 6px;font-size:clamp(26px,5.5vw,40px);font-weight:700;letter-spacing:.05em;text-wrap:balance}
+.card h2{margin:0 0 10px;font-size:clamp(22px,4vw,30px);font-weight:700}
+.card p{margin:0 0 16px;color:var(--muted);font-size:clamp(13px,1.8vw,15px);line-height:1.6}
+.orientNote{position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:40;
+  max-width:min(92vw,560px);padding:9px 14px;border-radius:999px;font-size:13px;line-height:1.4;text-align:center;
+  color:var(--lime);background:rgba(10,18,40,.94);border:1px solid rgba(242,200,75,.45);
+  box-shadow:0 6px 22px rgba(0,0,0,.5);pointer-events:none}
+.moves{display:grid;gap:8px;margin:0 0 18px;text-align:left}
+.mv{display:flex;gap:12px;background:rgba(242,246,255,.06);border-radius:11px;padding:11px 13px}
+.mv b{color:var(--lime);font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;min-width:104px}
+.mv span{font-size:13.5px;color:var(--muted);line-height:1.45}
+.modes{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:0 0 18px}
+.mode{flex:1 1 140px;background:rgba(242,246,255,.06);border:2px solid transparent;border-radius:12px;padding:13px 10px;cursor:pointer}
+.mode.sel{border-color:var(--lime);background:rgba(198,255,61,.12)}
+.mode b{display:block;font-size:clamp(19px,3vw,25px);font-weight:700}
+.mode span{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+#endFlag{display:block;width:100%;max-width:280px;height:auto;margin:0 auto 10px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 18px}
+.stat{background:rgba(242,246,255,.07);border-radius:12px;padding:13px}
+.stat.wide{grid-column:1 / -1;background:rgba(198,255,61,.09);border:1px solid rgba(198,255,61,.25)}
+.stat b{display:block;font-size:clamp(22px,4vw,30px);font-weight:700;font-variant-numeric:tabular-nums}
+.stat.wide small{display:block;font-size:10px;color:var(--muted);margin-top:4px;letter-spacing:.04em;
+  text-transform:none}
+.wt{display:flex;gap:8px;align-items:center;justify-content:center;margin:0 0 14px;flex-wrap:wrap}
+.wt input{width:92px;padding:11px 10px;border-radius:10px;border:1px solid rgba(242,246,255,.25);
+  background:rgba(242,246,255,.07);color:var(--fg);font-family:var(--display);font-size:16px;text-align:center}
+.wt label{font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.wt button{padding:11px 18px;font-size:12px;margin:0}
+.stat span{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+#quizWrap{margin:4px 0 10px}
+#quizArt{width:100%;max-width:520px;border-radius:10px;background:rgba(242,246,255,.06)}
+#quizWrap h3{margin:12px 0 8px;font-size:clamp(15px,2.6vw,21px);font-weight:700}
+.quizRow{display:flex;gap:8px;align-items:stretch}
+.quizOpt{flex:1 1 0;min-width:0;background:rgba(242,246,255,.07);border:2px solid transparent;
+  border-radius:12px;padding:12px 6px;font-size:clamp(12px,3vw,16px);line-height:1.22;min-height:62px;
+  display:flex;flex-direction:column;justify-content:center;overflow-wrap:anywhere;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.quizOpt b{display:block;font-size:1.25em;opacity:.55;margin-bottom:2px}
+.quizOpt i{display:block;font-style:normal;font-size:8.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-top:auto;padding-top:6px}
+.quizOpt.lit{border-color:var(--amber);background:rgba(255,176,31,.14)}
+.quizOpt.right{border-color:var(--lime);background:rgba(198,255,61,.16)}
+.quizOpt.wrong{border-color:var(--red);background:rgba(200,75,46,.16)}
+#quizHint{margin-top:8px;font-size:clamp(10px,1.5vw,13px);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted)}
+.streak{display:inline-block;background:rgba(255,176,31,.15);border:1px solid rgba(255,176,31,.45);color:var(--amber);
+        border-radius:999px;padding:7px 16px;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 16px}
+button{font-family:var(--display);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:15px;
+       padding:16px 32px;border-radius:999px;border:0;cursor:pointer;background:var(--lime);color:#17210A;margin:3px}
+button.ghost{background:transparent;color:var(--fg);border:1px solid rgba(242,246,255,.35)}
+button:active{transform:scale(.97)}
+button:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+button[disabled]{opacity:.5;cursor:default}
+.err{color:var(--red);font-size:13.5px;line-height:1.6;margin-top:13px}
+.load{color:var(--muted);font-size:13.5px;margin-top:13px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<canvas id="view"></canvas>
+
+<div class="hud" id="hud" hidden>
+  <div class="top">
+    <div class="spd"><span id="hSpd">0</span><small>km/h</small></div>
+    <div class="rt">
+      <div class="big" id="hDist">0</div><div class="lbl">metres</div>
+      <div class="big" id="hPos" style="color:var(--amber)">P5</div><div class="lbl">position</div>
+      <div class="big" id="hLap">1</div><div class="lbl">lap</div>
+      <div class="big" id="hClock">0:00</div><div class="lbl">time</div>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="cad"><i id="hCad"></i><b></b></div>
+    <div class="brake" id="depthWrap" hidden><i id="callDepth"></i></div>
+    <div class="chaser" id="hChaser" hidden></div>
+    <div class="foot" id="hFoot">March to build speed</div>
+    <div class="diag" id="hDiag"></div>
+  </div>
+</div>
+
+<div class="call" id="call">
+  <div class="word" id="callWord"></div>
+  <div class="sub" id="callSub"></div>
+</div>
+
+<div class="orientNote" id="orientNote" hidden>You are sideways &mdash; portrait tracks your knees better and shows more road ahead.</div>
+<div class="overlay" id="oStart">
+  <div class="card">
+    <h1>Starry Night Circuit <span style="font-size:.55em;opacity:.65">v2 &middot; build <span id="buildNo">?</span></span></h1>
+    <div class="streak" id="streakChip" hidden></div>
+    <p>You march to drive and steer with your hands. Four rivals race you over one lap, and the nearest one sits on your tail while you are working. The road and the numbers stay plain so you can read them; the sky and the fields carry the brushwork. Paintings line the circuit, a different six every race, and at the finish you are asked who painted one of them.</p>
+    <div class="moves">
+      <div class="mv"><b>March</b><span>Step on the spot, or dance to the beat &mdash; any steady rhythm counts, however small. Faster steps mean a faster car. Ease off and you lose speed, and whoever is behind you will come past.</span></div>
+      <div class="mv"><b>Steer</b><span>Hands at chest height, elbows bent, as if holding a wheel. Turn it to turn the car.</span></div>
+      <div class="mv"><b>Squat</b><span>Squat to brake. The deeper you go, the harder it brakes. Nothing else slows you &mdash; your hands only steer.</span></div>
+      <div class="mv"><b>Jump</b><span>Only if you run off the road: jump, with both feet, to haul yourself back onto it. On the track it does nothing.</span></div>
+      <div class="mv"><b>Corners</b><span>Chevrons and a coloured road warn you well ahead, and an arrow on screen shows which way it goes. Brake early, lean through it, and you get a burst of speed out the other side.</span></div>
+    </div>
+    <div class="modes">
+      <div class="mode sel" data-laps="1"><b>1</b><span>lap</span></div>
+      <div class="mode" data-laps="2"><b>2</b><span>laps</span></div>
+      <div class="mode" data-laps="3"><b>3</b><span>laps</span></div>
+    </div>
+    <div class="wt" id="wtRow">
+      <label for="wtIn">Your weight, for the calorie count</label>
+      <input id="wtIn" type="number" inputmode="numeric" min="25" max="250" placeholder="kg">
+      <button id="bSkipWt" class="ghost">Skip</button>
+    </div>
+    <button id="bStart">Turn on camera</button>
+    <div class="load" id="loadMsg" hidden>Loading the body tracker, a few seconds&hellip;</div>
+    <div class="err" id="errMsg" hidden></div>
+  </div>
+</div>
+
+<div class="overlay setup" id="oCal" hidden>
+  <div class="setTop">
+    <h2 id="calTitle">Finding you</h2>
+    <p id="calHint">Step into the picture</p>
+  </div>
+  <div class="setBot">
+    <div class="setNote" id="calSub">Hold the wheel with both hands to start</div>
+    <div class="setDiag" id="calDiag"></div>
+    <button id="bGo" class="ghost">Start anyway</button>
+  </div>
+</div>
+
+
+<div class="study" id="oStudy" hidden>
+  <div class="cue" id="studyCue">Remember the painter</div>
+  <canvas id="studyArt" width="520" height="340"></canvas>
+  <div class="nm" id="studyName"></div>
+  <div class="ti" id="studyTitle"></div>
+  <div class="go" id="studyGo">Raise a hand<small>when you have it</small></div>
+</div>
+
+<div class="overlay" id="oEnd" hidden>
+  <div class="card">
+    <canvas id="endFlag" width="560" height="340"></canvas>
+    <h2 id="endTitle">Chequered flag</h2>
+    <p id="endNote"></p>
+    <div class="stats">
+      <div class="stat"><b id="eDist">--</b><span>your time</span></div>
+      <div class="stat"><b id="eBest">--</b><span>best time</span></div>
+      <div class="stat"><b id="ePass">P5</b><span>finish</span></div>
+      <div class="stat"><b id="eMove">0</b><span>best lap</span></div>
+      <div class="stat wide"><b id="eKcal">--</b><span>effort</span><small id="eKcalNote"></small></div>
+    </div>
+    <div id="quizWrap" hidden>
+      <canvas id="quizArt" width="520" height="300"></canvas>
+      <h3 id="quizQ">What is it called?</h3>
+      <div class="quizRow">
+        <div class="quizOpt" id="quizA" role="button"><span></span></div>
+        <div class="quizOpt" id="quizB" role="button"><span></span></div>
+        <div class="quizOpt" id="quizC" role="button"><span></span></div>
+      </div>
+      <div id="quizHint">Tap your answer</div>
+    </div>
+    <button id="bMore">One more race</button>
+    <button id="bAgain" class="ghost">Back to start</button>
+    <button id="bRec" class="ghost">Save recording</button>
+  </div>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+const BUILD = 38;          // bump on every deploy; shown on the start card
+const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
+/* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
+   held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
+   one discrete move instead, so the lag costs you nothing.
+   Detected as BOTH limbs of the tracked pair rising at once. A march always
+   has one foot on the ground, so it can never do that. Measured, in torsos
+   per second: a normal march -0.02, a very bouncy march -0.01, a frantic
+   bouncy march 0.13, and the smallest real jump 4.05. Hip speed alone is
+   useless here - a frantic bounce reaches 3.37 against a small jump's 3.75 -
+   but the both-feet signal separates them by 30x. */
+const JUMP_V       = 1.5;   // torsos/sec, both limbs together (no longer used by the
+                            // detector - kept for the history in the comment above)
+/* BUILD 34 - found from Hugo's first recording, not guessed.
+   Build 33's race: 92 s off the road, 64 clear jump attempts in the body data,
+   and the game counted 3. Replaying his landmarks through the rule reproduced
+   exactly those 3. The cause:
+   - his ankles were BELOW THE BOTTOM OF THE PICTURE in 100% of race frames
+     (median y 1.11, where 1.0 is the edge). He stood at torso 0.35; tracking
+     worked in Sparks at 0.18, and the camera gave a landscape 960x720 frame.
+   - MediaPipe still reports off-picture ankles, as guesses, at middling
+     confidence (median 0.57). The rule accepted ankles at VIS_KEEP 0.04, so it
+     chose those guesses over his knees, which were in the picture at 0.82.
+     Guessed ankles do not jump.
+   The rule now uses landmarks that are actually in the picture at any
+   distance worth playing from: BOTH HIPS and BOTH KNEES rising together. A
+   march lifts the knees one at a time; a jump lifts them together, which is
+   what separates the two. Replayed against his race:
+     as shipped (ankles)               3 caught off the road, 0 false on it
+     hips alone > 1.2                  46 off, 1 on
+     hips > 1.2 AND knees > 0.6        34 off, 0 on     <- this
+   About 11x the jumps, with no false trigger anywhere on the road - and a
+   false trigger on the road does nothing anyway, because a jump only acts
+   past |x| 0.92. Velocities are in his own torso lengths per second, so this
+   is the same rule at any distance. */
+const JUMP_HIP_V   = 1.2;   // torsos/sec, both hips rising
+const JUMP_KNEE_V  = 0.6;   // torsos/sec, both knees rising at the same time
+/* What a jump does off the road, as of build 32. Hugo, after playing 31: the
+   jump "literally takes the car from the side to the centre. That is not the
+   purpose." Build 31 slid the car sideways at 6.2 lanes/sec to x = 0 in about
+   a quarter of a second, whatever you were doing - a teleport, not driving.
+   What he wants: you keep driving, and the jump brings you back onto the road
+   ALONG A LINE, faster than you could without it, and leaves the car near the
+   edge for you to carry on from.
+   So for JUMP_HOLD the ground is smooth and your steering has full grip, and
+   on top of your steering there is a nudge toward the road worth JUMP_LINE of
+   full lock. It goes through the same formula as steering - lateral movement
+   scales with forward speed - so the car traces a diagonal back onto the
+   tarmac instead of jumping sideways. JUMP_FLOOR keeps it moving when the
+   rough has already slowed you. The nudge stops at JUMP_LAND, just inside the
+   kerb, and from there the car is yours. */
+/* BUILD 38 - Hugo after 37: the car still "jumps to the road"; it should look
+   like DRIVING back - angling in while moving forward, the jump giving you
+   speed rather than a sideways shove - and it should take you further in,
+   because let go at the kerb (0.85) a bend pushed it straight off again.
+   Measured on build 37 in the five sharpest bends, hands still: back on in
+   0.5 s, off again within 0.3-0.7 s of the nudge letting go, every time.
+   Now: a gentler nudge (0.55 of full lock) that holds for up to 2.6 s, cancels
+   the bend's outward pull while it acts, eases off as it arrives, and lets go
+   at 0.35 - most of the way to the middle. While it lasts the car is pushed
+   forward toward JUMP_PUSH of top speed, and it is drawn turned toward the
+   road along the line it is actually travelling. */
+const JUMP_HOLD    = 2.6;   // seconds of smooth ground, full grip and nudge (most jumps land sooner)
+const JUMP_LINE    = 0.55;  // the nudge, in units of full steering lock
+const JUMP_FLOOR   = 0.45;  // the nudge acts as if at least this fraction of top speed
+const JUMP_LAND    = 0.35;  // lane position where the nudge lets go (1 = the kerb)
+const JUMP_EASE    = 0.35;  // the nudge fades over the last this-many lanes
+const JUMP_HANDOFF = 1.2;   // seconds over which the bend's pull comes back after landing
+const JUMP_PUSH    = 0.45;
+const JUMP_YAW     = 0.45;  // drawn: radians of turn per lane/sec of sideways travel (max 0.32)  // forward: speed is lifted toward this fraction of top speed
+const JUMP_RELIEF  = 0.5;   // off-road speed drain is cut to this while recovering
+/* OFF THE ROAD IS ROUGH GROUND, and that is the whole mechanic.
+   Build 29 put discrete swirl mounds along the verge to jump over. Wrong read
+   of what Hugo asked for: he meant the SURFACE is broken out there, not that
+   there are objects on it. There is nothing to aim at now - the entire verge
+   is the thing.
+   Marching does almost nothing off the road: the rough ground holds you to
+   ROUGH_LIMIT of top speed and drags ROUGH_BITE times harder than tarmac, so
+   driving your way back out is not a strategy, it is a crawl. A jump smooths
+   the ride - the cap lifts back to the ordinary off-road limit, the drag
+   halves, and you are thrown back toward the lane. Jumping stops being a
+   bonus and becomes the way out, which is what it is for.
+   This also suits the input. There is no moment to hit and no object to line
+   up, so none of it asks the player to react inside the camera's 150-250 ms. */
+const ROUGH_LIMIT  = 0.16;  // fraction of top speed the rough ground holds you to
+const ROUGH_BITE   = 2.2;   // how much harder it drags than the ordinary verge
+const ROUGH_SHAKE  = 9.0;   // how hard the car judders over it, at full speed
+const JUMP_SAY     = 2;     // excursions that get the spoken "Jump!", then it stops
+/* Hugo played build 30: "the normal drive gets the car out of trouble too
+   soon and too easily, so there is no real incentive to jump." Measured, and
+   he was right - from 1.2 lanes out, steering back took 0.13 s at 110 km/h
+   and jumping took 0.13 s at 107. Identical. The cause was one line: steering
+   kept full grip off the road, and steering authority scales with speed, so
+   it was strongest at the exact instant you left the tarmac, before the rough
+   ground had slowed you at all.
+   On the rough the wheels now barely bite. Steering still moves you - you are
+   still driving - but slowly enough that walking it back is clearly the wrong
+   answer, and the jump is the right one. */
+const ROUGH_GRIP   = 0.12;  // fraction of your steering that bites on the rough
+let LAPS = 1;                    // the race is a number of laps, not a clock
+const HARD_CAP = 20*60;          // a session cannot run forever
+const segmentLength = 200, rumbleLength = 3, lanes = 3;
+const LANE_SEGS = 12;   // lane dashes get a slower period than the kerbs
+// a tall screen needs a narrower road, or its edges fall off the sides where the motion matters most
+let roadWidth = 1200;
+const fieldOfView = 100, cameraHeight = 600, drawDistance = 150;
+const cameraDepth = 1/Math.tan((fieldOfView/2)*Math.PI/180);
+const playerZ = cameraHeight*cameraDepth;
+const maxSpeed = segmentLength*27;   // slower again; the track is shortened to match
+const COAST_SLOW = 9;        // build 36: coast half as steep - see ROLL_KEEP
+const accel = maxSpeed/11, coast = -maxSpeed/COAST_SLOW, offRoadDecel = -maxSpeed/4;
+const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
+const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
+/* BUILD 35 - speed follows how fast you march. Hugo: "it has auto
+   acceleration... the only thing you need to do is squat to brake. It
+   shouldn't be like that."
+   His first recording showed why. Full speed came at 48 steps/min and his
+   on-road median was 48, so the throttle sat pinned at maximum for 50% of the
+   race and marching harder did nothing; and the target never fell below 12%
+   of top speed, so standing still still drove the car at 19 km/h.
+   Now: full speed at FULL_CADENCE 80, and no floor - stand still and the car
+   rolls to a stop. Against his recorded pace:
+                       his 25% / median / 75% / 90%    pinned    standing
+     as shipped (48)     127   156   156   156          50%       19 km/h
+     80, no floor         90   114   141   156          14%        0
+     100, no floor        78    99   123   143           4%        0
+   80 for the first level: his gentle pace runs with the rivals (90-100 km/h),
+   his usual pace pulls ahead, a hard march reaches the top. 100 would make his
+   usual pace merely keep up - a later level, not this one.
+   A 1 Hz march reads about 120 steps/min.
+   BUILD 36 - Hugo after playing 35: better, but the effort is a little too
+   high, and the car should keep some of its speed when you stop marching -
+   a dead stop, and starting again from nothing, is too hard. So: full speed
+   at 65 (his median pace now gives ~129 km/h, gentle ~102), a coast half as
+   steep, and ROLL_KEEP below. */
+const FULL_CADENCE = 65;
+/* When you stop marching the car keeps ROLLING: it coasts down at 1/COAST_SLOW
+   of top speed per second (was 1/4.5; COAST_SLOW is declared above `coast`) and never coasts below ROLL_KEEP of top
+   speed (~31 km/h). This only HOLDS speed you already have - it never adds any,
+   so a car standing still stays still (no return of the build-34 floor that
+   drove the car with no steps). Stopping still costs: rivals run 90-100 km/h.
+   The squat brake can still take it to zero. */
+const ROLL_KEEP  = 0.20;
+/* How effort turns into speed. Below 1 this bends in the player's favour: a
+   gentle march already gets most of the speed, while the gradient and the
+   quick response to stopping both survive, which a lower FULL_CADENCE alone
+   would have destroyed. */
+const DRIVE_CURVE = 0.62;
+/* BUILD 38 - Hugo: he tries to hold a middle speed by marching steadily and
+   the speed will not settle. Cause: cadence was a COUNT of steps in 1.8 s
+   times 33, so it could only read 0, 33, 67, 100... and every step entering or
+   leaving the window jumped the speed by about half its range. A perfectly
+   steady 48 steps/min read as 104 km/h wobbling +/-43 (it should be 129).
+   Now it is your RHYTHM: the average time between your steps over CAD_WINDOW,
+   pulled down at once if the gap since your last step is longer than that,
+   then eased (CAD_UP / CAD_DOWN per second). On his recording: jitter 49 ->
+   17 km/h per second, typical 5 s swing 55 -> 34 km/h, and a steady march
+   gives a steady speed. Cost: stopping or starting shows about 2.5 s later
+   (the car coasts anyway, and the squat brake is still instant). */
+const CAD_WINDOW = 4000;     // ms of steps your rhythm is read over
+const CAD_UP = 1.0, CAD_DOWN = 2.0;   // per second: how fast cadence follows it
+/* Steps used to be measured against the lowest point the limb ever reached, with
+   a fixed threshold. That works for a crisp march and dies the moment you settle
+   into something smaller - which is exactly what happens when you start dancing
+   to the beat, and why it worked for a minute and then stopped. Each limb is now
+   judged against its OWN recent range, so a big march and a small dance both
+   count, and only the rhythm sets your cadence. */
+const STEP_MIN_RANGE = 0.045;  // of a torso: below this you are not moving, you are noise
+const STEP_UP = 0.72, STEP_DOWN = 0.28;
+const STEP_RELAX = 0.35;       // how fast the range forgets, as a fraction of itself
+const STEP_FLOOR = 0.010;      // with a small absolute floor, in torsos
+const STEP_SMOOTH = 0.08;      // seconds of low-pass before detection
+let LAP_METRES = 6200;       // set from the track itself, so one loop IS one lap
+const FINISH_SEGS = 3;       // how much road the painted line covers
+/* Raised from 0.17. At 0.17 a marching hip bob of 0.12 torso reached 0.71 of
+   a squat and braked the car by 0.35 while the player was trying to go - the
+   game slowing you down for marching hard is the worst possible failure here.
+   A bob and a squat are the same shape, so amplitude is what separates them:
+   at 0.26 a 0.12 bob reads 0.46, under the dead band, and a deliberate dip of
+   a quarter of your torso is still a small movement. */
+const SQUAT_DEPTH = 0.26;
+/* The shadow. One rival sits just off your tail while you are working, and
+   comes through when you stop working. It reads your MARCHING, never your
+   speed: at 150-250ms of camera lag, running wide is usually the tracker's
+   fault, and being passed for that would feel like the game cheating. Being
+   passed because you stopped marching is something you did. */
+/* Corners. The whole corner is judged, never a moment inside it: at
+   150-250ms of camera lag anything needing a correction at an exact instant
+   would feel like the game cheating. You see it coming, you set up, you hold
+   the lean, and the grade comes out the far side. */
+const CORNER_CURVE  = 3.5;   // |curve| that counts as a real corner
+const CORNER_MIN    = 14;    // segments, below which it is just a kink
+const CORNER_PULL   = 1.7;   // how much harder a marked corner throws you wide
+const CORNER_GRIP   = 0.78;  // fraction of full steering lock a corner may demand
+const CORNER_CLEAN  = 0.82;  // fraction of the corner on-road to count as clean
+/* MEASURED, not guessed. The track has 12 marked corners and at full tilt the
+   gap between them is about 4.5 s. The old reward was CORNER_BOOST 5.5 x
+   BRAKE_REWARD 1.6 = 8.80 s, which is nearly twice that gap - so the boost was
+   re-awarded before it ever expired and the car sat at the 1.3x target for
+   69.4% of the lap, peaking at 202 km/h against a nominal top speed of 155.5.
+   A boost that is on two thirds of the time is not a boost, it is the new
+   baseline, which is exactly why it stopped reading as a reward.
+   Swept against the real corner layout: 4.0 s braked + 0.5 s for a clean line
+   puts boosted time at 37.3% and still pays 3.6 s a lap for braking. Dropping
+   the clean-line boost is what buys that - it was 2.48 s, long enough that
+   never braking was boosted 25% of the lap for free. */
+const CORNER_BOOST  = 4.0;   // seconds of push for a corner you braked for
+/* How sharp every corner is. Swept against the sim: the test is whether
+   never braking is still faster than braking, which is what decides whether
+   the brake is a real decision or decoration. */
+const CURVE_SCALE   = 1.15;
+const LINE_BOOST    = 0.5;   // seconds for a clean line you did not brake for
+/* Set to the cars' real combined half-widths, measured rather than guessed: a
+   doubled rival is 0.52 lane units wide, so contact starts at 0.52. Measured
+   consequence: contacts go from 2 to 5 a lap, with lap time and finishing
+   position unchanged - you now have to move aside to pass an inner-lane car
+   instead of driving through it. Lanes sit 0.40-0.44 apart and the road is
+   2.0 wide, so there is still room to go round. */
+const RIVAL_BOX     = 0.52;  // how close in lane terms counts as contact
+/* BUILD 38 - contact you can see. Hugo: at the start "you just go, and it's
+   almost like you pass them through". Two causes in the code: the whole field
+   started inside 15 m in four lanes, and after any contact a 1.6 s shield
+   (hitTimer) switched contact off for EVERY car, so you ploughed through the
+   rest of the pack untouched. Now: a two-column staggered grid with a clear
+   line up the middle; the shield is per car plus HIT_GAP between hits; and
+   your car is the stronger one - a car you hit is shoved SHOVE lanes sideways
+   and twitches (SPIN), you barely move, and you still lose the 15%. A rival
+   running into the back of you is shoved and slowed instead; that costs you
+   nothing. Shoved cars ease back to their own lane over a few seconds. */
+const HIT_GAP       = 0.35;  // seconds between any two contacts
+const SHOVE         = 0.5;   // lanes a car you hit is pushed aside
+const SPIN          = 0.30;  // radians it twitches, drawn only
+const GRID_LANE     = 0.62;  // the two grid columns; the middle is your line
+const HOLD_LINE     = 15;    // metres: inside this a rival keeps its line rather than drift home
+const GRID_FRONT    = 22;    // metres to the front car; rows 5 m apart
+const CORNER_OFF    = 0.38;  // speed you are cut to for running wide inside a corner
+/* Steering. A wide dead band so bouncing and dancing do nothing, a gentle
+   curve near the centre, and full lock only at a big, deliberate turn. Not
+   more smoothing: that would add delay on top of the camera's. */
+/* Less sensitive again, by a third. Not slower - the response time is
+   deliberately untouched, because lag is the one thing this game cannot
+   spend. You simply have to turn your hands further for the same amount of
+   lock, and small movements count for even less than before. */
+const STEER_FULL    = 0.95;  // radians of wrist angle for full lock
+/* The dead band is a FRACTION of full lock, so raising STEER_FULL widened it
+   in absolute terms too. At 0.34 of 1.06 the dead zone reached 0.36rad and a
+   gentle 0.30rad turn of the hands did literally nothing. Pulled back so the
+   dead zone stays near where it was while full lock still needs a bigger
+   movement than before. */
+const STEER_DEAD    = 0.28;  // dead band, as a fraction of full
+/* Hand jitter and a real turn look the same to a plain low-pass, so making the
+   car steadier by smoothing harder buys stability with lag - and lag is the one
+   thing this game cannot spend, the camera already costs 150-250ms. These three
+   make the smoothing adaptive instead: heavy when the hands are barely moving,
+   which is jitter, and almost absent when they are really turning. */
+const STEER_MINCUT  = 0.7;   // Hz of low-pass when the hands are still
+const STEER_BETA    = 1.6;   // how fast the filter opens up as they move
+const STEER_DCUT    = 0.80;  // smoothing on the speed estimate itself
+const STEER_CURVE   = 1.45;   // >1 keeps small movements small
+/* The brake is a squat now. Lifting your hands made you let go of the wheel
+   exactly when a corner arrived, which is when you need to steer; a squat
+   keeps both hands on it. Measured: a squat registers in 0.28-0.48s from the
+   moment you start moving and hands-up in 0.27-0.47s, so the swap costs
+   nothing in response - how fast you move is the bottleneck, not the camera.
+   It also now costs you drive, because you cannot march while you are down:
+   cadence fell 105 -> 81 through a squat, against 105 -> 122 with hands up,
+   which is why braking with your hands never cost anything. */
+/* Your standing height is tracked, not frozen. It used to be captured once at
+   calibration and compared against forever, so ANY sustained change read as a
+   permanent partial squat: settling into a marching stance, drifting a step
+   nearer the camera, nudging the phone. Measured on the old code, standing
+   0.25 of a torso lower than you calibrated - about 15cm - held the brake at
+   0.91 for as long as you marched. That is the "it was braking the whole
+   time" bug, and it was never the hip bob I tuned for.
+   The reference follows you UP quickly, because standing taller is simply
+   your new height, and DOWN slowly, so a squat still reads at once but a
+   slump is forgiven within a few seconds. Same idea as the step detector:
+   judge the body against its own recent self, not against a frozen pose. */
+const REF_UP       = 0.5;   // seconds to accept a taller stance
+const REF_DOWN     = 3.5;   // seconds to forgive a lower one. This also sets how
+                            // long you can hold the brake before the reference
+                            // catches up: it is a tap, not a handbrake. A corner
+                            // approach needs 1-2s, so 3.5 is comfortably enough.
+const SQUAT_DEAD   = 0.55;  // fraction of a full squat before any brake at all,
+                            // so the hip bob of a normal march brakes nothing
+const BRAKE_RATE    = 5.0;   // how hard braking bleeds speed (maxSpeed/this per sec)
+const BRAKE_EASE    = 0.55;  // seconds for the brake to come on, and to let go
+const SHADOW_GAP    = 30;    // metres it tries to hold behind you
+const SHADOW_DROP   = 0.68;  // it comes past below this fraction of YOUR normal pace
+const SHADOW_FLOOR  = 0.28;  // and always below this, however gentle your normal pace
+const EFFORT_TAU    = 3.0;   // seconds your recent effort is averaged over
+const EFFORT_BASE   = 20.0;  // seconds your normal working pace is averaged over
+const SHADOW_KEY    = 'frida';  // ONE car is the shadow, not whoever is nearest
+const SHADOW_MIN    = 12;    // metres it can never get closer than, while you are working
+const CHASER_SHOW   = 60;    // metres: when a chaser appears on the HUD
+const CHASER_WARN   = 25;    // metres: when it is close enough to say so
+const CHASER_SAY    = 12;    // seconds: never says the chaser more often than this
+let chaserSaid = -99;
+/* Dropped one notch each when the brake became a squat. A squat costs you
+   drive - you cannot march while you are down - which made an easy march fall
+   from P2 to P4. This puts the ladder back where it was. */
+const RIVALS = [
+  { key:'dali',     name:'DALI',     pace: 25, lane:-0.62 },
+  { key:'picasso',  name:'PICASSO',  pace: 27, lane: 0.62 },
+  { key:'frida',    name:'FRIDA',    pace: 27, lane:-0.22 },
+  { key:'mondrian', name:'MONDRIAN', pace: 28, lane: 0.22 }
+];
+
+const cv = document.getElementById('view'), ctx = cv.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  W = window.innerWidth; H = window.innerHeight;
+  roadWidth = (H > W) ? 1250 : 1320;
+  cv.width = Math.floor(W*DPR); cv.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+function showOrientNote(){
+  const n=document.getElementById('orientNote');
+  // only on the start screen: once the camera is on, rotating no longer changes the frame
+  const onStart = !document.getElementById('oStart').hidden;
+  if(n) n.hidden = !(onStart && window.innerWidth > window.innerHeight);
+}
+window.addEventListener('resize', function(){ resize(); skyCv=null; showOrientNote(); }); resize();
+
+const ui = {
+  hud:document.getElementById('hud'), spd:document.getElementById('hSpd'), dist:document.getElementById('hDist'),
+  pos:document.getElementById('hPos'), lap:document.getElementById('hLap'),
+  diag:document.getElementById('hDiag'),
+  calTitle:document.getElementById('calTitle'), calSub:document.getElementById('calSub'),
+  calDiag:document.getElementById('calDiag'),
+  clock:document.getElementById('hClock'), cad:document.getElementById('hCad'),
+  foot:document.getElementById('hFoot'), chaser:document.getElementById('hChaser'),
+  call:document.getElementById('call'), callWord:document.getElementById('callWord'),
+  callSub:document.getElementById('callSub'),
+  callDepth:document.getElementById('callDepth'), depthWrap:document.getElementById('depthWrap'),
+  oStart:document.getElementById('oStart'), oCal:document.getElementById('oCal'),
+  oEnd:document.getElementById('oEnd'),
+  loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
+  calHint:document.getElementById('calHint'),
+  bGo:document.getElementById('bGo'),
+  oStudy:document.getElementById('oStudy'), studyArt:document.getElementById('studyArt'),
+  studyName:document.getElementById('studyName'), studyTitle:document.getElementById('studyTitle'),
+  studyGo:document.getElementById('studyGo'),
+  kcal:document.getElementById('eKcal'), kcalNote:document.getElementById('eKcalNote'),
+  streakChip:document.getElementById('streakChip')
+};
+
+/* ---- audio: steady beat, layers follow speed ---- */
+const AC = window.AudioContext||window.webkitAudioContext;
+let actx=null, master=null, noiseBuf=null, engOsc=null, engGain=null, engFilt=null;
+let rivOsc=null, rivOsc2=null, rivGain=null, rivFilt=null;
+let bpm=100, nextTick=0, tickIndex=0, schedTimer=null, layer=0;
+function initAudio(){
+  actx = new AC();
+  master = actx.createGain(); master.gain.value = 0.8; master.connect(actx.destination);
+  const n = actx.sampleRate;
+  noiseBuf = actx.createBuffer(1,n,actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
+  engOsc = actx.createOscillator(); engOsc.type='sawtooth'; engOsc.frequency.value=70;
+  engFilt = actx.createBiquadFilter(); engFilt.type='lowpass'; engFilt.frequency.value=900; engFilt.Q.value=6;
+  engGain = actx.createGain(); engGain.gain.value=0;
+  engOsc.connect(engFilt); engFilt.connect(engGain); engGain.connect(master); engOsc.start();
+  // the car behind you: lower and rougher than your own, two detuned saws so it
+  // beats slightly and sits apart from your engine instead of blending into it
+  rivOsc = actx.createOscillator(); rivOsc.type='sawtooth'; rivOsc.frequency.value=40;
+  rivOsc2= actx.createOscillator(); rivOsc2.type='sawtooth'; rivOsc2.frequency.value=40.7;
+  rivFilt= actx.createBiquadFilter(); rivFilt.type='lowpass'; rivFilt.frequency.value=380; rivFilt.Q.value=4;
+  rivGain= actx.createGain(); rivGain.gain.value=0;
+  rivOsc.connect(rivFilt); rivOsc2.connect(rivFilt);
+  rivFilt.connect(rivGain); rivGain.connect(master);
+  rivOsc.start(); rivOsc2.start();
+}
+function nz(){ const s=actx.createBufferSource(); s.buffer=noiseBuf; return s; }
+function kick(t){
+  const o=actx.createOscillator(), g=actx.createGain();
+  o.frequency.setValueAtTime(145,t); o.frequency.exponentialRampToValueAtTime(45,t+0.1);
+  g.gain.setValueAtTime(0.85,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.28);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.3);
+}
+function snare(t){
+  const s=nz(), f=actx.createBiquadFilter(), g=actx.createGain();
+  f.type='bandpass'; f.frequency.value=1800;
+  g.gain.setValueAtTime(0.4,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.16);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.18);
+}
+function hat(t,vol){
+  const s=nz(), f=actx.createBiquadFilter(), g=actx.createGain();
+  f.type='highpass'; f.frequency.value=7800;
+  g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.04);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.05);
+}
+function bass(t,freq,dur){
+  const o=actx.createOscillator(), f=actx.createBiquadFilter(), g=actx.createGain();
+  o.type='square'; o.frequency.setValueAtTime(freq,t);
+  f.type='lowpass'; f.frequency.setValueAtTime(320,t);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+}
+function lead(t,freq,dur){
+  const o=actx.createOscillator(), g=actx.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.14,t+0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+}
+function blip(freq,dur,vol,type){
+  if(!actx) return;
+  const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+  o.type=type||'triangle'; o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol||0.3,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+}
+const ROOTS = [98.00, 110.00, 87.31, 130.81];
+const PENTA = [392.00, 440.00, 523.25, 587.33, 659.25];
+function scheduler(){
+  if(!actx) return;
+  const spb = 60/bpm;
+  while(nextTick < actx.currentTime + 0.3){
+    const i = tickIndex, t = nextTick, inBar = i%8;
+    if(inBar===0||inBar===4) kick(t);
+    if(inBar===2||inBar===6) snare(t);
+    hat(t, inBar%2===0 ? 0.16 : (layer>0.35 ? 0.1 : 0.03));
+    if(inBar%2===0) bass(t, ROOTS[Math.floor(i/8)%4], spb*0.42);
+    if(layer>0.68 && i%2===1 && Math.random()<0.5) lead(t, PENTA[Math.floor(Math.random()*5)], spb*0.3);
+    nextTick += spb/2; tickIndex++;
+  }
+}
+
+/* ---- camera + pose ---- */
+const video = document.createElement('video');
+video.playsInline=true; video.muted=true; video.autoplay=true;
+let landmarker=null, lastVideoTime=-1, pose=null;
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = function(dl){ return { baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate:dl }, runningMode:"VIDEO", numPoses:1 }; };
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+// the camera has to have actually started sending pictures. play() resolving
+// is not that, and on a phone it can resolve before a single frame exists.
+function waitForFrames(ms){
+  return new Promise(function(res, rej){
+    if(video.readyState >= 2) return res();
+    let done=false;
+    const ok=function(){ if(done) return; done=true; clean(); res(); };
+    const giveUp=function(){ if(done) return; done=true; clean();
+      rej(new Error('The camera turned on but sent no picture. Close any other app using it, then try again.')); };
+    const t=setTimeout(giveUp, ms||10000);
+    function clean(){ clearTimeout(t);
+      video.removeEventListener('loadeddata', ok); video.removeEventListener('playing', ok); }
+    video.addEventListener('loadeddata', ok); video.addEventListener('playing', ok);
+  });
+}
+function dropStream(){
+  const s=video.srcObject;
+  if(s){ try { s.getTracks().forEach(function(t){ t.stop(); }); } catch(e){} }
+  video.srcObject=null;
+}
+let starting=false;
+async function begin(){
+  // one start at a time. tapping twice used to run this twice over, and the
+  // second camera handed to the video element cancelled the first one's play(),
+  // which is the "play() request was interrupted by a new load request" error.
+  if(starting || state!=='idle') return;
+  starting=true;
+  const btn=document.getElementById('bStart');
+  if(btn) btn.disabled=true;
+  ui.errMsg.hidden=true; ui.loadMsg.hidden=false;
+  try {
+    if(!actx) initAudio();
+    if(actx.state==='suspended') await actx.resume();
+    sayNow('Camera starting.');   // a real utterance on the tap, to unlock speech
+    // a tall screen wants a tall frame: a landscape request crops your legs before the tracker sees them
+    const tall = window.innerHeight > window.innerWidth;
+    const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
+    const s = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:vW},height:{ideal:vH},facingMode:'user'}, audio:false });
+    dropStream();                 // never leave an older camera running
+    video.srcObject=s;
+    // an interrupted or auto-resumed play() is not a failure on its own; the
+    // only question that matters is whether frames arrive, which is next.
+    // play() never settles at all on a camera that opens but sends nothing,
+    // so it gets a bounded wait rather than an open-ended one.
+    const playing = video.play();
+    if(playing && playing.catch) playing.catch(function(){});   // never unhandled
+    await Promise.race([ playing ? playing.catch(function(){}) : Promise.resolve(),
+                         new Promise(function(r){ setTimeout(r, 3000); }) ]);
+    await waitForFrames(8000);
+    if(!landmarker) await loadTracker();
+    ui.loadMsg.hidden=true; ui.oStart.hidden=true; showOrientNote();
+    enterStudy(true);          // the painting first, while you are still at the phone
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream();                 // a failed attempt must not hold the camera
+    ui.loadMsg.hidden=true;
+    let m='Something went wrong: '+(err&&err.message?err.message:err);
+    if(err&&err.name==='NotAllowedError') m='Camera permission denied. Allow it in the address bar and reload.';
+    if(err&&err.name==='NotFoundError') m='No camera found on this device.';
+    if(err&&err.name==='NotReadableError') m='Another app is using the camera. Close it and try again.';
+    if(err&&err.name==='AbortError') m='The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent=m; ui.errMsg.hidden=false;
+  } finally {
+    starting=false;
+    const btn2=document.getElementById('bStart');
+    if(btn2) btn2.disabled=false;
+  }
+}
+const L={lsh:11,rsh:12,lwr:15,rwr:16,lhip:23,rhip:24,lkn:25,rkn:26,lank:27,rank:28};
+function pt(i,thr){
+  if(!pose||!pose[i]) return null;
+  const p=pose[i];
+  const t = (thr===undefined) ? 0.3 : thr;
+  if(p.visibility!==undefined && p.visibility<t) return null;
+  return { x:1-p.x, y:p.y };
+}
+function mid(a,b){ const p=pt(a),q=pt(b); if(!p||!q) return null; return {x:(p.x+q.x)/2,y:(p.y+q.y)/2}; }
+
+/* ---- track ---- */
+let segments=[], trackLength=0, cars=[];
+function easeIn(a,b,p){ return a+(b-a)*p*p; }
+function easeInOut(a,b,p){ return a+(b-a)*((-Math.cos(p*Math.PI)/2)+0.5); }
+function addSeg(curve){
+  const n=segments.length;
+  segments.push({ index:n,
+    p1:{world:{y:0,z:n*segmentLength},camera:{},screen:{}},
+    p2:{world:{y:0,z:(n+1)*segmentLength},camera:{},screen:{}},
+    curve:curve, dark:Math.floor(n/rumbleLength)%2===0,
+    laneOn:Math.floor(n/LANE_SEGS)%2===0, clip:0, looped:false, fog:0 });
+}
+/* The road is flat. The hills were never anything but drawn - world.y only
+   ever reached the camera projection, never speed - so cresting one did not
+   actually make you faster. What it did do was make the road LOOK faster as
+   it dropped away, which breaks the one thing the game is about: your speed
+   coming from your legs and nothing else. Worse, a crest hides the road
+   beyond it, and seeing a long way ahead is the only thing that makes a
+   corner readable through 150-250ms of camera lag. */
+function addRoad(enter,hold,leave,curve){
+  curve *= CURVE_SCALE;
+  for(let i=0;i<enter;i++) addSeg(easeIn(0,curve,i/enter));
+  for(let i=0;i<hold;i++)  addSeg(curve);
+  for(let i=0;i<leave;i++) addSeg(easeInOut(curve,0,i/leave));
+}
+function buildTrack(){
+  segments=[];
+  // A real circuit: one loop is one lap, so the start/finish line can live at
+  // a fixed place on the road.
+  addRoad(60,140,60, 0);   // start/finish straight, long enough to see the line coming
+  addRoad(26, 40,26, 4); addRoad(18, 26,18,-2); addRoad(26, 52,26,-5);
+  addRoad(18, 30,18, 3); addRoad(30, 37,30, 0); addRoad(26, 48,26,-3);
+  addRoad(18, 26,18, 6); addRoad(30, 40,30,-4); addRoad(26, 37,26, 2);
+  addRoad(37, 48,37, 0); addRoad(26, 37,26,-6); addRoad(18, 30,18, 5);
+  addRoad(30, 52,30,-3); addRoad(26, 40,26, 2); addRoad(37, 60,37, 0);
+  addRoad(18, 26,18,-7); addRoad(30, 48,30, 4); addRoad(26, 37,26,-2);
+  addRoad(18, 30,18, 6); addRoad(30, 40,30,-5); addRoad(26, 52,26, 3);
+  addRoad(37, 37,37, 0); addRoad(18, 26,18,-4); addRoad(30, 37,30, 2);
+  // THE HAIRPIN. A long approach so it is visible from a long way out,
+  // then the sharpest corner on the circuit, then a short straight to recover.
+  addRoad(60,130,60, 0);
+  addRoad(20, 70,20,-11);
+  addRoad(30, 45,30, 0);
+  addRoad(60,150,60, 0);   // the run to the line
+  trackLength = segments.length*segmentLength;
+  // distance advances at speed*dt/125 and position at speed*dt, so one loop of
+  // the track is exactly this many metres. Deriving it means the painted line
+  // and the lap counter can never drift apart.
+  LAP_METRES = trackLength/125;
+  buildCorners();
+}
+let corners=[];
+function buildCorners(){
+  corners=[];
+  const n=segments.length;
+  for(const sg of segments){ sg.corner=null; sg.cPhase=null; }
+  let i=0;
+  while(i<n){
+    if(Math.abs(segments[i].curve) >= CORNER_CURVE){
+      const dir=Math.sign(segments[i].curve);
+      let j=i, peak=0;
+      while(j<n && Math.sign(segments[j].curve)===dir
+                && Math.abs(segments[j].curve) >= CORNER_CURVE*0.45){
+        peak=Math.max(peak, Math.abs(segments[j].curve)); j++;
+      }
+      if(j-i >= CORNER_MIN){
+        // Derived, not guessed. Holding a line needs steer >= pct*curve*centrifugal*pull,
+        // so the fastest a corner can be held at all is pct = 1/(curve*centrifugal*pull).
+        // CORNER_GRIP leaves room below full lock so it is a corner, not a tightrope.
+        const hold = CORNER_GRIP/(peak*centrifugal*CORNER_PULL);
+        const c={ a:i, b:j, dir:dir, peak:peak,
+                  vSafe: maxSpeed*Math.max(0.18, Math.min(0.95, hold)) };
+        corners.push(c);
+        for(let k=i;k<j;k++){ segments[k].corner=c; segments[k].cPhase='in'; }
+        // the braking zone, longer the sharper the corner, so the hairpin
+        // announces itself far enough out to do something about it
+        const zone = Math.round(30 + 11*Math.max(0, peak-4));
+        for(let k=Math.max(0,i-zone);k<i;k++){
+          if(segments[k].corner) break;          // never eat the corner before it
+          segments[k].corner=c; segments[k].cPhase='brake';
+        }
+      }
+      i=j;
+    } else i++;
+  }
+}
+function buildCars(){
+  cars = RIVALS.map(function(r,i){
+    // two staggered columns either side of you, front to back
+    return { key:r.key, name:r.name, basePace:r.pace,
+             home:r.lane, offset:(i%2 ? 1 : -1)*GRID_LANE, shove:0, spin:0,
+             dist: GRID_FRONT - i*5,
+             v: 0,                    // and they launch from a standstill, like you
+             wob: i*1.7, bumped:0, z:0, dz:0 };
+  });
+}
+function rankNow(){
+  let p = 1;
+  for(const c of cars) if(c.dist > distance) p++;
+  return p;
+}
+let props=[];
+/* PAINTING BOARDS. Every file below was verified to load from Wikimedia
+   Commons before being listed - I checked each one in a real browser rather
+   than trusting the file name. All are public domain, which is why there is
+   no Dali, Picasso, Mondrian, Kahlo or Klee here: those are still in
+   copyright and Commons does not host them, so three of the four rivals
+   cannot have their own work on a board. */
+const ART = [
+ ['Van Gogh - Starry Night - Google Art Project.jpg','The Starry Night','Vincent van Gogh'],
+ ['Vincent van Gogh - Wheatfield with crows - Google Art Project.jpg','Wheatfield with Crows','Vincent van Gogh'],
+ ["Vincent van Gogh - Van Gogh's Bedroom in Arles - Google Art Project.jpg",'The Bedroom','Vincent van Gogh'],
+ ['Irises-Vincent van Gogh.jpg','Irises','Vincent van Gogh'],
+ ['Vincent van Gogh - Sunflowers - VGM F458.jpg','Sunflowers','Vincent van Gogh'],
+ ['Vincent van Gogh - Self-Portrait - Google Art Project (454045).jpg','Self-Portrait','Vincent van Gogh'],
+ ['Gustav Klimt 016.jpg','The Kiss','Gustav Klimt'],
+ ['Katsushika Hokusai - Thirty-Six Views of Mount Fuji- The Great Wave Off the Coast of Kanagawa - Google Art Project.jpg','The Great Wave off Kanagawa','Katsushika Hokusai'],
+ ['Claude Monet, Impression, soleil levant.jpg','Impression, Sunrise','Claude Monet'],
+ ['Claude Monet - Water Lilies - 1906, Ryerson.jpg','Water Lilies','Claude Monet'],
+ ['Edvard Munch, 1893, The Scream, oil, tempera and pastel on cardboard, 91 x 73 cm, National Gallery of Norway.jpg','The Scream','Edvard Munch'],
+ ['Meisje met de parel.jpg','Girl with a Pearl Earring','Johannes Vermeer'],
+ ['Johannes Vermeer - Het melkmeisje - Google Art Project.jpg','The Milkmaid','Johannes Vermeer'],
+ ['A Sunday on La Grande Jatte, Georges Seurat, 1884.jpg','A Sunday on La Grande Jatte','Georges Seurat'],
+ ['Les Joueurs de cartes, par Paul Cézanne.jpg','The Card Players','Paul Cézanne'],
+ ['The Fighting Temeraire, JMW Turner, National Gallery.jpg','The Fighting Temeraire','J. M. W. Turner'],
+ ['Rembrandt van Rijn-De Nachtwacht-1642.jpg','The Night Watch','Rembrandt'],
+ ['Sandro Botticelli - La nascita di Venere - Google Art Project - edited.jpg','The Birth of Venus','Sandro Botticelli'],
+ ['Pieter Bruegel the Elder - Hunters in the Snow (Winter) - Google Art Project.jpg','Hunters in the Snow','Pieter Bruegel the Elder'],
+ ['Pierre-Auguste Renoir, Le Moulin de la Galette.jpg','Bal du moulin de la Galette','Pierre-Auguste Renoir'],
+ ['Edouard Manet, A Bar at the Folies-Bergère.jpg','A Bar at the Folies-Bergère','Édouard Manet'],
+ ['Edgar Degas - The Ballet Class - Google Art Project.jpg','The Ballet Class','Edgar Degas'],
+ ['Grant Wood - American Gothic - Google Art Project.jpg','American Gothic','Grant Wood']
+];
+const ART_N = 6;             // boards on the circuit, a fresh set each race
+/* The study card has no timer, and it now comes FIRST - before you ever walk
+   to your mark. You read the painting standing at the phone, where you can
+   actually see it, and tap when you have it. Build 28 put the card after the
+   position gate and asked for a gesture from the mark, which undid the gate
+   and made the card unreadable at the same time. */
+const STUDY_BOARD = 3;      // which board carries it again: (3+0.5)/6 = 58% of the lap
+/* The brake is not armed until you are actually racing. Hugo kept tripping it
+   while still settling into position, which pinned the car at the line. It
+   arms at the first of: you are properly moving, or ten seconds gone. */
+const BRAKE_ARM_SPEED = 0.22;   // fraction of top speed that counts as under way
+const BRAKE_ARM_MAX   = 10;     // seconds, after which it arms regardless
+/* Calories. Taken from CADENCE, not from drive: drive is capped at 1 and
+   FULL_CADENCE was only 48 then (80 from build 35), so a slow shuffle pinned drive at full and a
+   score built on it gave 30 kcal for a shuffle against 33 for a hard march -
+   measured. Steps per minute keeps rising after the car has stopped getting
+   faster, which is exactly what a workout score should follow.
+   MET = 2.2 + 0.035*cadence, capped at 9: a 0.4Hz shuffle (cadence ~48) is
+   3.9 METs, a 1Hz march (~120) is 6.4, a hard 1.2Hz (~140) is 7.1.
+   kcal/min = MET * 3.5 * kg / 200. An estimate, and labelled as one. */
+const KCAL_MET_BASE = 2.2, KCAL_MET_PER_CAD = 0.035, KCAL_MET_MAX = 9;
+const KCAL_DEFAULT_KG = 70;
+let artSet = [], artImg = {};
+function artURL(file){
+  return 'https://commons.wikimedia.org/wiki/Special:FilePath/'
+       + encodeURIComponent(file) + '?width=420';
+}
+/* Loaded off to one side and never waited on. A board whose painting has not
+   arrived draws as an empty frame and fills itself in when it does, so a slow
+   or failed download can never hold up a race. */
+/* No crossOrigin here, and that is deliberate. It used to say
+   im.crossOrigin='anonymous', which made every single board empty: the
+   Special:FilePath URL answers with a redirect that carries no CORS header,
+   so the CORS-mode request fails before it ever reaches the image. Measured
+   from the live page - with the attribute 4/4 loads failed in ~530ms, without
+   it 4/4 succeeded. Dropping it taints the canvas, which costs nothing here
+   because nothing in this game ever reads pixels back out of a canvas. */
+function loadArt(a){
+  if(artImg[a[0]]) return;
+  const im = new Image();
+  im.onload = ()=>{ artImg[a[0]] = im; };
+  im.onerror = ()=>{ artImg[a[0]] = 'failed'; };
+  im.src = artURL(a[0]);
+}
+function pickArt(){
+  const pool = ART.slice();
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+    const t=pool[i]; pool[i]=pool[j]; pool[j]=t; }
+  artSet = pool.slice(0, ART_N);
+  /* One of the six is the one you are shown before the start and asked about
+     at the end. It is moved to STUDY_BOARD so it also appears on the road
+     about three-fifths of the way round - the reminder in the middle. */
+  const k = Math.min(STUDY_BOARD, artSet.length-1);
+  const j = Math.floor(Math.random()*artSet.length);
+  const t = artSet[k]; artSet[k] = artSet[j]; artSet[j] = t;
+  quizArt = artSet[k];
+  for(const a of artSet) loadArt(a);
+}
+function buildProps(){
+  props=[];
+  for(let i=0;i<segments.length;i+=16){
+    const r = srand(i*1.7);
+    props.push({ z:i*segmentLength, side: r<0.5?-1:1, scale: 0.75+srand(i*4.3)*0.6, seed:i });
+  }
+  // one board per equal slice of the circuit, alternating sides
+  boards = [];
+  for(let k=0;k<artSet.length;k++){
+    const seg = Math.floor(((k+0.5)/artSet.length) * segments.length);
+    boards.push({ z: seg*segmentLength, side: (k%2===0 ? -1 : 1), art: artSet[k] });
+  }
+}
+let boards=[];
+/* Drawn the same way as the cypresses: a post beside the road with a panel on
+   it. Cheaper than the sky, which is painted once; this is one drawImage. */
+/* Sized from the road half-width at the same point, the way the rival cars
+   are. The first attempt reused drawCypress's scale constant and came out
+   0.24 PIXELS wide - which is also why no cypress has ever appeared in this
+   game: the same constant makes the trees sub-pixel too. */
+function drawBoard(x, groundY, roadHalfPx, b){
+  const w = roadHalfPx*0.92, h = w*0.70;
+  if(w < 6) return;
+  const top = groundY - h - w*0.30;
+  ctx.fillStyle = '#2A2317';
+  ctx.fillRect(x - w*0.035, groundY - w*0.34, w*0.07, w*0.34);
+  ctx.fillStyle = '#F2E3B0';
+  ctx.fillRect(x - w/2 - w*0.035, top - w*0.035, w + w*0.07, h + w*0.07);
+  const im = artImg[b.art[0]];
+  if(im && im !== 'failed'){
+    try { ctx.drawImage(im, x - w/2, top, w, h); } catch(e){}
+  } else {
+    ctx.fillStyle = '#1B2238'; ctx.fillRect(x - w/2, top, w, h);
+  }
+  if(w > W*0.16){
+    ctx.font = '700 ' + Math.round(w*0.085) + 'px Chakra Petch, sans-serif';
+    ctx.textAlign = 'center'; ctx.fillStyle = '#F2E3B0';
+    ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=w*0.05;
+    ctx.fillText(b.art[2], x, groundY + w*0.09);
+    ctx.shadowBlur=0;
+  }
+}
+/* The scale argument used to arrive as roughly 0.0003, making every tree a
+   fraction of a pixel, so the cypresses have never actually been visible.
+   Now passed the road half-width in pixels, like the boards and the cars. */
+function drawCypress(x, groundY, scale, seed){
+  const h = scale*2.1, w = h*0.21;
+  if(h < 8) return;
+  ctx.save(); ctx.translate(x, groundY);
+  ctx.fillStyle = '#102016';
+  ctx.beginPath(); ctx.moveTo(0,0);
+  for(let i=0;i<=12;i++){
+    const t=i/12, wob = Math.sin(t*7 + seed)*w*0.3;
+    ctx.lineTo(-w*(1-t)*(1-t*0.25) + wob, -h*t);
+  }
+  for(let i=12;i>=0;i--){
+    const t=i/12, wob = Math.sin(t*7 + seed)*w*0.3;
+    ctx.lineTo(w*(1-t)*(1-t*0.25) + wob, -h*t);
+  }
+  ctx.closePath(); ctx.fill();
+  if(h > 26){
+    ctx.strokeStyle='#3E6B3F'; ctx.lineCap='round';
+    for(let k=0;k<7;k++){
+      const t=0.08+ (k/7)*0.82, wob = Math.sin(t*7 + seed)*w*0.3;
+      const bx = wob + (srand(seed+k)*2-1)*w*(1-t)*0.6;
+      ctx.lineWidth = Math.max(1, h*0.013);
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.moveTo(bx, -h*t);
+      ctx.lineTo(bx + w*0.18, -h*(t+0.1));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+function findSeg(z){ return segments[Math.floor(z/segmentLength)%segments.length]; }
+function lerp(a,b,p){ return a+(b-a)*p; }
+function wrap(z){ while(z>=trackLength) z-=trackLength; while(z<0) z+=trackLength; return z; }
+function project(p,camX,camY,camZ){
+  p.camera.x=(p.world.x||0)-camX; p.camera.y=(p.world.y||0)-camY; p.camera.z=(p.world.z||0)-camZ;
+  if(p.camera.z===0) p.camera.z=0.0001;
+  p.screen.scale=cameraDepth/p.camera.z;
+  p.screen.x=(W/2)+(p.screen.scale*p.camera.x*W/2);
+  p.screen.y=(H/2)-(p.screen.scale*p.camera.y*H/2);
+  p.screen.w=(p.screen.scale*roadWidth*W/2);
+}
+
+/* ---- state ---- */
+let state='idle';
+let position=0, speed=0, playerX=0, distance=0;
+let lap=0, lapStart=0, bestLap=0, squatDepth=0, callTimer=0;
+let effortAvg=0, effortBase=0, chaserArmed=true;
+let curCorner=null, cFrames=0, cOff=0, cLean=0, cBrake=0;
+let signAlpha=0, lastSignCorner=null;
+let braking=false, brakeRamp=0, brakeAmt=0;
+let hitTimer=0;   // brief shield + untapered pull-away after contact
+let steer=0, steerRaw=0, boost=0, shake=0;
+let base=null, startTime=0, acc=0;
+let cadence=0, stepTimes=[], limbUp={}, driveSrc='none';
+// Visibility hysteresis. It takes a clear view to ACQUIRE a limb pair, but only
+// a faint one to KEEP the pair already driving. Measured: with one hard 0.12
+// gate, a knee hovering near it flipped knees<->ankles 41-149 times in 30s, and
+// since every source feeds the SAME stepTimes array with its own up/down state,
+// the flipping both dropped real steps and injected phantom ones - a steady
+// 110 march read as 44-82 or as 181-253. Steady visibility at ANY level was
+// always fine; only crossing the line broke it.
+const VIS_GET = 0.15, VIS_KEEP = 0.04, SRC_HOLD = 600;
+const SRC_NAME = {kn:'knees', an:'ankles'};   // legs only: hands never drive
+let srcLost = 0;
+let angSm = null, angPrev = 0, angSpd = 0;
+let legsSeen = false, legsGone = 0, legsWarned = false;
+// build 37: what the voice says in the race when it loses your legs, by the
+// coach's verdict. Anything else (legs only, standing up) is told to step back.
+let legsSayK = '', legsSayT = 0;
+const LEGS_REPEAT = 3.0;   // seconds between repeats while the legs stay lost
+const LEGS_SAY = {
+  back: ['STEP BACK',    'UNTIL I SEE YOUR LEGS', 'Step back.'],
+  near: ['COME CLOSER',  'A LITTLE',              'Come a bit closer.'],
+  rgt:  ['STEP RIGHT',   'TO THE MIDDLE',         'Step to your right.'],
+  lft:  ['STEP LEFT',    'TO THE MIDDLE',         'Step to your left.'],
+  none: ['STEP IN',      'WHERE I CAN SEE YOU',   'Step back into the picture.'],
+};
+let hipRef = null, shRef = null;
+let pxPrev = 0, pxVel = 0, yawSm = 0;
+let limbPrev = {}, jumpT = 0, jumpOff = 0, jumped = false, jumpRun = 0;
+let rumble = 0, offRuns = 0, wasOff = false;
+let quizOpen=false, quizArt=null, quizOpts=null, quizRight=0, quizHold=0, quizSide=0, quizDone=false;
+let quizStage='title', quizScore=0, quizBusy=false, quizToken=0;
+let studyFresh=true;
+let brakeArmed=false, kcal=0;
+const seenLatch = {kn:false, an:false};
+let rest={}, lastLift=null;
+const step=1/60;
+
+function today(){ return new Date().toISOString().slice(0,10); }
+function readLS(k,d){ try{ const v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
+function writeLS(k,v){ try{ localStorage.setItem(k,String(v)); }catch(e){} }
+// a fixed-distance race is scored by the clock, and each lap count keeps its own
+function bestKey(){ return 'vgTime'+LAPS; }
+/* Optional, and it stays optional: asking for a weight is friction and plenty
+   of people will not answer. Skipped, the count still runs on an average adult
+   and says plainly that it is rougher. */
+function bodyKg(){
+  const v = parseFloat(readLS('vgKg','0'));
+  return (isFinite(v) && v >= 25 && v <= 250) ? v : KCAL_DEFAULT_KG;
+}
+function haveKg(){ const v=parseFloat(readLS('vgKg','0')); return isFinite(v) && v>=25 && v<=250; }
+const BEST_FLOOR = 20;   // seconds: no real lap is quicker, so anything under is junk
+function readBestTime(){
+  const v=parseFloat(readLS(bestKey(),'0'));
+  // an earlier build could store a time of a hundredth of a second, which no
+  // honest run could ever beat. Discard those rather than leave them in the way.
+  if(v > 0 && v < BEST_FLOOR){ try{ localStorage.removeItem(bestKey()); }catch(e){} return 0; }
+  return (v>0)?v:0;
+}
+function fmtTime(s){ if(!(s>0)) return '--';
+  return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')+'.'+String(Math.floor((s*10)%10)); }
+let finishTime = 0;
+function streakInfo(){
+  const last = readLS('vgLast',''), n = parseInt(readLS('vgStreak','0'),10)||0;
+  return { last, n };
+}
+function bumpStreak(){
+  const t = today(), s = streakInfo();
+  if(s.last === t) return s.n;
+  const y = new Date(Date.now()-86400000).toISOString().slice(0,10);
+  const n = (s.last === y) ? s.n + 1 : 1;
+  writeLS('vgLast', t); writeLS('vgStreak', n);
+  return n;
+}
+function showStreak(){
+  const s = streakInfo();
+  if(s.n > 0){ ui.streakChip.hidden = false; ui.streakChip.textContent = s.n + (s.n===1?' day':' days') + ' in a row'; }
+}
+
+/* ---- one stepper, used for whichever limb pair the camera can actually see ---- */
+// returns where the limb sits inside its own recent range: 0 at its lowest,
+// 1 at its highest, or null when it is not moving enough to read
+function limbLift(key, p, dt){
+  if(!p) return null;
+  let e = rest[key];
+  let y = p.y;
+  // a touch of low-pass first. Cadence is a 3s average anyway, so a few tens of
+  // a millisecond here costs nothing and stops noise chattering over the thresholds.
+  if(e && e.sm != null) y = e.sm + (y - e.sm)*Math.min(1, dt/STEP_SMOOTH);
+  if(!e || !isFinite(e.lo)){ rest[key] = {lo:y, hi:y, sm:y}; return null; }
+  e.sm = y;
+  const was = e.lo - e.hi;
+  // the range relaxes in proportion to how wide it is: a fixed rate would
+  // collapse a small movement as fast as the movement itself
+  const relax = Math.max(STEP_FLOOR*base.torso, was*STEP_RELAX) * dt;
+  e.lo = Math.max(y, e.lo - relax);
+  e.hi = Math.min(y, e.hi + relax);
+  const range = e.lo - e.hi;
+  if(range < STEP_MIN_RANGE*base.torso) return null;
+  return (e.lo - y)/range;
+}
+function stepPair(tag, lp, rp, now, dt){
+  if(!lp && !rp) return false;
+  const sides = [['L',lp],['R',rp]];
+  const lift = {};
+  // read both legs first
+  for(const [side,p] of sides){
+    if(!p){ lift[side]=null; continue; }
+    lift[side] = limbLift(tag+side, p, dt);
+    if(tag==='kn' && lift[side]!=null) lastLift = lift[side];
+  }
+  // release anything that has come down BEFORE testing what has gone up. In an
+  // even march the two legs cross at the same instant, and doing this in one
+  // pass let the falling leg block the rising one - which halved a real march.
+  for(const [side] of sides){
+    const k=tag+side;
+    if(lift[side]==null || lift[side] < STEP_DOWN) limbUp[k]=false;
+  }
+  // a rise only counts while the other leg is down: that is what makes it a
+  // step rather than a bounce on both feet
+  for(const [side,p] of sides){
+    if(!p || lift[side]==null) continue;
+    const k=tag+side, other=tag+(side==='L'?'R':'L');
+    if(!limbUp[k] && lift[side] > STEP_UP){
+      limbUp[k]=true;
+      if(!limbUp[other]) stepTimes.push(now);
+    }
+  }
+  return true;
+}
+
+/* ---- pose reading: legs drive, hands steer ---- */
+/* The adaptive part, kept as its own function so the offline race harness runs
+   the player's real steering path instead of a copy of it that drifts. */
+function steerFilter(raw, dt){
+  if(angSm==null){ angSm = raw; angPrev = raw; }
+  const sp = Math.abs(raw - angPrev)/Math.max(dt, 1e-3);
+  angPrev = raw;
+  angSpd += (sp - angSpd) * (1 - Math.pow(STEER_DCUT, dt*60));
+  const cut = STEER_MINCUT + STEER_BETA*angSpd;
+  angSm += (raw - angSm) * (1 - Math.exp(-2*Math.PI*cut*dt));
+  return angSm;
+}
+function steerFromAngle(ang){
+  let s = Math.max(-1, Math.min(1, ang/STEER_FULL));
+  if(Math.abs(s) < STEER_DEAD) return 0;
+  const n = (Math.abs(s)-STEER_DEAD)/(1-STEER_DEAD);
+  return (s<0?-1:1) * Math.pow(n, STEER_CURVE);
+}
+function readPose(dt, now){
+  legsSeen = false;   // set below only if a leg pair was actually readable
+  const lw=pt(L.lwr), rw=pt(L.rwr), sh=mid(L.lsh,L.rsh), hp=mid(L.lhip,L.rhip);
+  if(!sh||!hp) return null;
+  const torso=Math.max(0.05,Math.abs(hp.y-sh.y));
+
+  if(lw&&rw&&base){
+    steerRaw = steerFromAngle(steerFilter(Math.atan2(rw.y-lw.y, rw.x-lw.x) - base.ang, dt));
+  } else { steerRaw *= Math.pow(0.85, dt*60); }
+  // frame-rate independent: at 30fps the old form doubled its time constant and
+  // quietly added lag on top of the camera's
+  steer += (steerRaw - steer) * (1 - Math.pow(0.72, dt*60));
+
+  if(base){
+    /* Seeded from the body in front of the camera on THIS frame, not from the
+       calibration pose. base.hipY is captured when you grip the wheel, and the
+       study card then holds the race until you say you are ready - so by the
+       green flag that measurement is as old as you spent looking at the
+       painting. Seeded from base, a 0.26-torso lean
+       read as a full squat and held the brake down the instant it armed: the
+       ready screen checked your stance, and the study card handed you a reason
+       to abandon it. Measured on build 26 from a standing start, a 30cm lean
+       cost 2.37s of braking and 15 km/h at the five-second mark.
+       Seeded here, every green-flag stance begins at squatDepth 0, and a squat
+       from that height still brakes at once because the reference only follows
+       DOWN over REF_DOWN. It also stops makeBase's hipY:0.55 fallback from
+       reaching the brake, which a bad calibration read could otherwise turn
+       into a phantom squat for the whole race. */
+    if(hipRef===null){ hipRef = hp.y; shRef = sh.y; }
+    const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y < ref ? REF_UP : REF_DOWN));
+    hipRef = follow(hipRef, hp.y);
+    shRef  = follow(shRef,  sh.y);
+    const hipDrop = (hp.y - hipRef)/base.torso;
+    const shDrop  = (sh.y - shRef )/base.torso;
+    squatDepth = Math.max(0, Math.max(hipDrop, shDrop)) / SQUAT_DEPTH;
+  }
+
+  if(base){
+    const cur = Object.keys(SRC_NAME).find(t => SRC_NAME[t]===driveSrc) || null;
+    /* Measure each limb against the HIP ON ITS OWN SIDE, not against the frame.
+       Absolute height cannot tell a step from a rock: with the range-relative
+       envelope, swaying side to side at any amplitude - even 0.01, a fidget -
+       produced a steady cadence of 68, and bouncing on both feet produced 141.
+       A step shortens the distance from hip to knee. A sway or a bounce moves
+       the hip and the knee together and leaves that distance alone, so it
+       cancels out here instead of being guessed at by a threshold. */
+    const lhp = pt(L.lhip, 0.05), rhp = pt(L.rhip, 0.05);
+    const rel = (p, h) => {
+      if(!p) return null;
+      const r = h || hp;                       // same-side hip, else the midpoint
+      return r ? {x:p.x, y:p.y - r.y} : null;  // no hip at all: do not guess
+    };
+    const see = (tag, i1, i2) => {
+      const thr = (tag===cur) ? VIS_KEEP : VIS_GET;
+      const a=rel(pt(i1,thr), lhp), b=rel(pt(i2,thr), rhp);
+      return (a||b) ? [a,b] : null;
+    };
+    const avail = {
+      kn: see('kn', L.lkn,  L.rkn),
+      an: see('an', L.lank, L.rank)
+    };
+    // a faintly-seen pair is still better than falling through to the arms, so
+    // acquisition has a second tier at the KEEP level. It cannot cause flipping:
+    // a pair already driving is held at that same level by the branch above.
+    const faintPair = (i1,i2) => {
+      const a=rel(pt(i1,VIS_KEEP), lhp), b=rel(pt(i2,VIS_KEEP), rhp);
+      return (a||b) ? [a,b] : null;
+    };
+    const faint = { kn: faintPair(L.lkn,L.rkn), an: faintPair(L.lank,L.rank) };
+    legsSeen = !!(avail.kn || avail.an || faint.kn || faint.an);
+    const pick = () => avail.kn ? 'kn' : avail.an ? 'an'
+                     : faint.kn ? 'kn' : faint.an ? 'an' : null;
+    // exactly ONE source runs per frame. Running the fallback in the same frame
+    // as the primary is what let two detectors push into one step history.
+    let tag = null;
+    if(cur && avail[cur]){ tag = cur; srcLost = 0; }
+    else if(cur){
+      // don't abandon a source the instant it blinks out - coast on the last
+      // one for SRC_HOLD, then fall through to whatever is actually visible
+      srcLost += dt*1000;
+      if(srcLost < SRC_HOLD) tag = null;
+      else tag = pick();
+    } else {
+      tag = pick();
+      srcLost = 0;
+    }
+    if(tag && tag!==cur){
+      // a real handover: drop the old pair's up/down state so a limb left
+      // mid-stride cannot fire a phantom step when it comes back
+      for(const k of Object.keys(limbUp)) if(!k.startsWith(tag)) limbUp[k]=false;
+      srcLost = 0;
+    }
+    if(tag){
+      const pr = avail[tag] || faint[tag];
+      /* Both limbs rising together = airborne, measured on the ABSOLUTE
+         landmarks. The drive pair above is hip-relative, which is right for
+         steps and useless here: in a jump the hip and the knee rise together,
+         so the hip-relative knee barely moves and a real jump reads as 1.4
+         against a threshold of 1.5 - measured, and it missed small jumps.
+         Feet first, knees when the feet are cropped out of frame, which on a
+         phone in portrait is most of the time. */
+      jumped = false;
+      const jh0 = pt(L.lhip,VIS_KEEP), jh1 = pt(L.rhip,VIS_KEEP);
+      const jk0 = pt(L.lkn,VIS_KEEP),  jk1 = pt(L.rkn,VIS_KEEP);
+      if(jh0 && jh1 && jk0 && jk1){
+        if(limbPrev.h0 !== undefined && dt > 0){
+          const vh = Math.min(limbPrev.h0 - jh0.y, limbPrev.h1 - jh1.y)/base.torso/dt;
+          const vk = Math.min(limbPrev.k0 - jk0.y, limbPrev.k1 - jk1.y)/base.torso/dt;
+          // two frames in a row, as before: one frame is noise
+          if(vh > JUMP_HIP_V && vk > JUMP_KNEE_V) jumpRun++; else jumpRun = 0;
+          if(jumpRun >= 2) jumped = true;
+        }
+        limbPrev.h0 = jh0.y; limbPrev.h1 = jh1.y; limbPrev.k0 = jk0.y; limbPrev.k1 = jk1.y;
+      } else { limbPrev = {}; jumpRun = 0; }
+      stepPair(tag, pr[0], pr[1], now, dt);
+      driveSrc = SRC_NAME[tag];
+    } else if(srcLost === 0 || !cur){
+      driveSrc='none'; lastLift=null;
+    }
+  }
+  while(stepTimes.length && now-stepTimes[0] > CAD_WINDOW) stepTimes.shift();
+  let rawCad = 0;
+  const nSt = stepTimes.length;
+  if(nSt >= 2){
+    const iv = (stepTimes[nSt-1] - stepTimes[0])/(nSt-1);
+    rawCad = 60000/Math.max(iv, now - stepTimes[nSt-1], 1);
+  } else if(nSt === 1){
+    rawCad = 60000/Math.max(now - stepTimes[0], CAD_WINDOW/2);
+  }
+  // falls faster than it rises: easing off should be felt, building should not be free
+  cadence += (rawCad - cadence) * Math.min(1, dt*(rawCad < cadence ? CAD_DOWN : CAD_UP));
+
+  // how hard you are braking, from how deep you are: a dip brakes gently, a
+  // full squat brakes hard. Below SQUAT_DEAD nothing happens at all.
+  const brakeAmt = Math.max(0, Math.min(1, (squatDepth - SQUAT_DEAD)/(1 - SQUAT_DEAD)));
+  return { torso, hipY:hp.y, shY:sh.y,
+           wristY:(lw&&rw)?(lw.y+rw.y)/2:null,
+           ang:(lw&&rw)?Math.atan2(rw.y-lw.y,rw.x-lw.x):0,
+           spread:(lw&&rw)?Math.abs(rw.x-lw.x):0, brakeAmt: brakeAmt };
+}
+function vis(i){
+  const p = pose && pose[i];
+  return (p && p.visibility!==undefined) ? p.visibility.toFixed(2) : '--';
+}
+function diagText(){
+  return driveSrc
+    + '  kn ' + vis(L.lkn) + '/' + vis(L.rkn)
+    + '  an ' + vis(L.lank) + '/' + vis(L.rank)
+    + '  lift ' + (lastLift==null ? '--' : lastLift.toFixed(2))
+    + '  cad ' + Math.round(cadence);
+}
+
+/* ---- the chequered flag, after Klee ----
+   A finish flag is already a grid of squares, which is the shape Klee spent
+   years on, so the chequerboard keeps its light/dark alternation (you have to
+   read it as a finish flag at a glance) and the colours vary inside each of
+   those two families the way his colour tables do. Nothing here copies a
+   painting; it is his method applied to a flag. */
+const KLEE_LIGHT = ['#F2D98D','#EBC467','#F3E6C4','#E3CE9B','#EFD071','#E8DDB5'];
+const KLEE_DARK  = ['#2E4A7D','#8C3B2E','#1F3A5F','#A8512A','#3B2E5A','#6B2F3A','#244C45'];
+let flagRAF = null, flagT0 = 0;
+// scaling the colour keeps Klee's hue; a dark wash over the top just makes mud
+function shadeHex(hex, k){
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.round(((n>>16)&255) * k));
+  const g = Math.min(255, Math.round(((n>>8)&255) * k));
+  const b = Math.min(255, Math.round((n&255) * k));
+  return 'rgb('+r+','+g+','+b+')';
+}
+function flagPick(list, cx, cy){
+  // a fixed, unchanging scatter: the same cell keeps its colour as it waves
+  const h = Math.abs(Math.sin((cx*12.9898 + cy*78.233) * 43758.5453) % 1);
+  return list[Math.floor(h*list.length) % list.length];
+}
+function drawFlag(g, W, H, t){
+  g.clearRect(0,0,W,H);
+  const NX=10, NY=7;
+  const poleW = Math.max(3, W*0.016);
+  const fx = poleW*2.2, fy = H*0.10, fw = W-fx-W*0.04, fh = H*0.74;
+  // a point on the cloth: it hangs from the pole, so the wave grows across it
+  const vert = (u,v) => {
+    const grow = u*u;
+    const ph = u*7.2 - t*3.1;
+    const z  = Math.sin(ph)*grow;
+    const z2 = Math.sin(ph*0.55 + v*2.1)*grow*0.5;
+    return {
+      x: fx + u*fw - grow*fw*0.05,
+      y: fy + v*fh + (z+z2)*fh*0.11 + Math.sin(ph*0.5)*grow*fh*0.05,
+      // the shade comes from how steeply the cloth is turning away
+      sh: 0.86 + 0.20*Math.cos(ph)
+    };
+  };
+  for(let i=0;i<NX;i++){
+    for(let j=0;j<NY;j++){
+      const u0=i/NX, u1=(i+1)/NX, v0=j/NY, v1=(j+1)/NY;
+      const a=vert(u0,v0), b=vert(u1,v0), c=vert(u1,v1), d=vert(u0,v1);
+      const dark = ((i+j)%2===0);
+      const col = flagPick(dark?KLEE_DARK:KLEE_LIGHT, i, j);
+      const sh = (a.sh+b.sh+c.sh+d.sh)/4;
+      g.save();
+      g.fillStyle = shadeHex(col, sh);
+      g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.lineTo(c.x,c.y); g.lineTo(d.x,d.y); g.closePath();
+      g.fill();
+      g.strokeStyle='rgba(20,22,30,0.50)'; g.lineWidth=Math.max(1,W*0.0035); g.stroke();
+      g.restore();
+    }
+  }
+  // the pole
+  g.fillStyle='rgba(246,235,203,0.92)';
+  g.fillRect(poleW*0.7, fy-H*0.06, poleW, fh+H*0.14);
+  g.fillStyle='rgba(242,200,75,0.95)';
+  g.beginPath(); g.arc(poleW*1.2, fy-H*0.07, poleW*1.3, 0, Math.PI*2); g.fill();
+}
+function startFlag(){
+  const cv2=document.getElementById('endFlag'); if(!cv2) return;
+  const g=cv2.getContext('2d'); if(!g) return;
+  stopFlag(); flagT0=performance.now();
+  const step=function(now){
+    drawFlag(g, cv2.width, cv2.height, (now-flagT0)/1000);
+    flagRAF=requestAnimationFrame(step);
+  };
+  flagRAF=requestAnimationFrame(step);
+}
+function stopFlag(){ if(flagRAF){ cancelAnimationFrame(flagRAF); flagRAF=null; } }
+
+/* ---- keep the screen awake while racing ---- */
+let wakeLock = null;
+async function keepAwake(){
+  try {
+    if('wakeLock' in navigator && !wakeLock){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', function(){ wakeLock = null; });
+    }
+  } catch(e){ wakeLock = null; }
+}
+function letSleep(){
+  try { if(wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){ wakeLock = null; }
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible' && (state === 'race' || state === 'calibrate')) keepAwake();
+});
+
+/* Build 38: every message that appears is written into the recording when it
+   changes, and the ones that were silent can now be said aloud (the `say`
+   argument) - Hugo cannot read the screen from his mark, so nothing should
+   appear that only the eyes can catch. Never spoken over a legs warning. */
+let callLogged = '';
+function showCall(word,sub,cls,say){
+  ui.callWord.textContent=word; ui.callSub.textContent=sub||'';
+  ui.call.className='call on '+cls;
+  const key = word+'|'+(sub||'')+'|'+cls;
+  if(key !== callLogged){
+    callLogged = key;
+    recPush({ k:'call', t:+performance.now().toFixed(1), word, sub:sub||'', cls });
+    if(say && !legsWarned) sayNow(say);
+  }
+}
+function hideCall(){
+  if(callLogged){ recPush({ k:'call_off', t:+performance.now().toFixed(1) }); callLogged=''; }
+  ui.call.className='call';
+}
+
+function startRace(fresh){
+  recPush({ k:'race_start', t:+performance.now().toFixed(1), fresh:!!fresh, laps:chosenLaps });
+  // the art is chosen when the study card opens, not here, so the painting you
+  // were shown is the one that ends up on the road
+  if(!artSet.length) pickArt();
+  if(fresh) buildTrack();
+  buildProps();
+  LAPS = chosenLaps;
+  // every per-race value resets on EVERY race. distance used to live in the
+  // fresh branch, so "one more race" began already past the finish line.
+  distance=0; bestLap=0;
+  buildCars(); lap=0; lapStart=0; squatDepth=0; finishTime=0; ui.depthWrap.hidden=true;
+  hitTimer=0; callTimer=0; steer=0; steerRaw=0;
+  effortAvg=0; effortBase=0; chaserArmed=true; chaserSaid=-99; if(ui.chaser) ui.chaser.hidden=true;
+  curCorner=null; cFrames=0; cOff=0; cLean=0; cBrake=0; braking=false; brakeRamp=0; brakeAmt=0;
+  rumble=0; offRuns=0; wasOff=false;
+  signAlpha=0; lastSignCorner=null;
+  position=0; speed=0; playerX=0; boost=0; shake=0;
+  stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
+  legsSeen=false; legsGone=0; legsWarned=false; legsSayK=''; hipRef=null; shRef=null;
+  pxPrev=playerX; pxVel=0; yawSm=0; limbPrev={}; jumpT=0; jumpOff=0; jumped=false; jumpRun=0; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
+  quizOpen=false; quizDone=false; quizHold=0; quizSide=0; quizToken++; quizBusy=false;
+  brakeArmed=false; kcal=0;
+  showCall('MARCH', 'LEGS UP, KEEP THEM GOING', 'good', 'March!'); callTimer = 1.8;
+  state='race'; startTime=performance.now()/1000; acc=0;
+  bpm=100; tickIndex=0; nextTick=actx.currentTime+0.1; layer=0;
+  if(schedTimer) clearInterval(schedTimer);
+  schedTimer=setInterval(scheduler,25);
+  engGain.gain.value=0.04;
+  keepAwake();
+  ui.oCal.hidden=true; ui.oEnd.hidden=true; ui.hud.hidden=false;
+}
+function endRace(){
+  recPush({ k:'race_end', t:+performance.now().toFixed(1), finished: finishTime > 0, finishTime,
+            distance:+distance.toFixed(1), lap });
+  state='over';
+  if(schedTimer){ clearInterval(schedTimer); schedTimer=null; }
+  if(engGain) engGain.gain.value=0;
+  if(rivGain) rivGain.gain.value=0;
+  hideCall();
+  const finished = finishTime > 0;
+  const prev = readBestTime();
+  const rec = finished && (prev===0 || finishTime < prev);
+  if(rec && finishTime >= BEST_FLOOR) writeLS(bestKey(), finishTime.toFixed(2));
+  const n = bumpStreak();
+  const fin = rankNow();
+  document.getElementById('endTitle').textContent =
+    !finished ? 'Time up' : (rec ? 'Fastest yet' : 'Chequered flag');
+  const who = cars.slice().sort(function(a,b){ return b.dist-a.dist; })[0];
+  const lapWord = LAPS===1 ? 'the lap' : LAPS+' laps';
+  document.getElementById('endNote').textContent = !finished
+    ? 'You ran out of time before the line. Day ' + n + ' in a row.'
+    : ((fin===1)
+      ? 'You took the win over ' + lapWord + '. Day ' + n + ' in a row.'
+      : who.name + ' took it. You finished P' + fin + ' over ' + lapWord + '. Day ' + n + ' in a row.');
+  document.getElementById('eDist').textContent = finished ? fmtTime(finishTime) : '--';
+  document.getElementById('eBest').textContent = fmtTime(rec ? finishTime : prev);
+  document.getElementById('ePass').textContent='P'+fin;
+  const moveEl=document.getElementById('eMove');
+  const moveLbl=moveEl.nextElementSibling;
+  if(LAPS===1){ moveEl.textContent = n; if(moveLbl) moveLbl.textContent='day streak'; }
+  else { moveEl.textContent = bestLap>0 ? bestLap.toFixed(1)+'s' : '--';
+         if(moveLbl) moveLbl.textContent='best lap'; }
+  /* You only really win if you finish AND remember. The painting is one you
+     actually drove past this race, and the decoy is always a different
+     artist, so the answer is never two guesses at the same name. */
+  const kc = Math.round(kcal);
+  ui.kcal.textContent = (kc > 0 ? '~'+kc+' kcal' : '--');
+  ui.kcalNote.textContent = haveKg()
+    ? 'estimated from how long and how hard you marched'
+    : 'rough - add your weight on the start screen for a closer number';
+  const wrap=document.getElementById('quizWrap');
+  quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
+  QOPT().forEach(el=>{ el.className='quizOpt'; });
+  /* Only ask about a painting that actually appeared. Asking over an empty
+     frame - with nothing on screen but the title in text - is the question
+     that made no sense. */
+  /* The question is about the painting you were shown before the start and
+     passed again mid-lap - not a fresh one. Only if that image never arrived
+     does it fall back to another board you actually saw. */
+  const shown = artSet.filter(a => artImg[a[0]] && artImg[a[0]] !== 'failed');
+  const studiedOk = quizArt && artImg[quizArt[0]] && artImg[quizArt[0]] !== 'failed';
+  if(finished && (studiedOk || shown.length)){
+    if(!studiedOk) quizArt = shown[Math.floor(Math.random()*shown.length)];
+    /* THE DECOYS COME FROM THIS RACE'S OWN BOARDS. They used to be drawn from
+       the whole 23-work pool, which meant the right answer was a name you had
+       just read on a board and the wrong one was a name you had never seen:
+       measured over 200,000 races, 61.7% of questions could be answered with
+       no knowledge at all, just by picking the name you recognised. With all
+       three names taken from boards you drove past, that strategy is worth
+       nothing and you have to remember WHICH painting carried WHICH name.
+       99.86% of races have two other artists on the boards; the rest top up
+       from the pool. */
+    const cv=document.getElementById('quizArt'), g=cv.getContext('2d');
+    g.clearRect(0,0,cv.width,cv.height);
+    const im=artImg[quizArt[0]];
+    if(im && im!=='failed'){
+      const r=Math.min(cv.width/im.naturalWidth, cv.height/im.naturalHeight);
+      const dw=im.naturalWidth*r, dh=im.naturalHeight*r;
+      try { g.drawImage(im,(cv.width-dw)/2,(cv.height-dh)/2,dw,dh); } catch(e){}
+    } else {
+      // never the title in text: that would give the first question away
+      g.fillStyle='#1B2238'; g.fillRect(0,0,cv.width,cv.height);
+    }
+    quizScore = 0; quizToken++;
+    quizAsk('title');
+    wrap.hidden=false; quizOpen=true;
+  } else { wrap.hidden=true; }
+  ui.hud.hidden=true; ui.oEnd.hidden=false;
+  startFlag();
+  letSleep();
+  blip(300,0.5,0.28,'sine');
+}
+
+function update(dt, reading, now){
+  const elapsed = performance.now()/1000 - startTime;
+  const left = Math.max(0, HARD_CAP-elapsed);
+
+  const pSeg = findSeg(position+playerZ);
+  const pct = speed/maxSpeed;
+  const dx = dt*2.6*pct;
+  position = wrap(position + dt*speed);
+  /* The brake stays off until you are actually racing. Settling into position
+     at the line used to read as a squat and pin the car at zero. */
+  if(!brakeArmed && (speed > maxSpeed*BRAKE_ARM_SPEED || elapsed > BRAKE_ARM_MAX)) brakeArmed = true;
+  brakeAmt = (brakeArmed && reading) ? reading.brakeAmt : 0;
+  braking = brakeAmt > 0;
+  const inCorner = pSeg.corner && pSeg.cPhase==='in';
+  // full grip on the road and in the air; almost none on the rough
+  const onRough = Math.abs(playerX) > 1 && jumpT <= 0;
+  playerX += steer*dx*(onRough ? ROUGH_GRIP : 1);
+  // a marked corner pulls harder, so carrying too much speed really does take
+  // you out to the kerb and off. This is the whole reason corners matter.
+  // while a jump is carrying you in, the bend does not pull you back out
+  // and after it lets go the pull returns over JUMP_HANDOFF, not all at once
+  if(jumpT <= 0) playerX -= dx*pct*pSeg.curve*centrifugal*(inCorner ? CORNER_PULL : 1)
+                            * (1 - Math.max(0, jumpOff)/JUMP_HANDOFF);
+  if(jumpOff > 0) jumpOff -= dt;
+
+  /* The hands no longer drive, so losing your legs now means losing the car.
+     That has to be said out loud rather than just felt as the car going quiet.
+     Half a second of grace so a single dropped frame says nothing. */
+  /* BUILD 37 - Hugo: "I can't read it... just tell the voice to step back, to
+     step to the left... to come back into a perfect framing." The box said the
+     same thing whatever was wrong, once, in type too small to read from the
+     mark. Now the start-screen coach decides WHICH way to move, the voice says
+     it, and says it again every LEGS_REPEAT seconds until the legs are back -
+     then "Good." so you know without looking. In the race a missing pair of
+     legs with nothing else wrong almost always means you are too close or your
+     knees have dropped below the picture (his first recording: torso 0.354 all
+     race), so that case is told to step back. */
+  if(legsSeen){
+    if(legsWarned){ hideCall(); sayNow('Good.'); }
+    legsGone = 0; legsWarned = false; legsSayK = '';
+  } else {
+    legsGone += dt;
+    if(legsGone > 0.5){
+      const c = coach(reading);
+      const k = LEGS_SAY[c.k] ? c.k : 'back';
+      const w = LEGS_SAY[k];
+      // re-asserted every frame: a corner call landing mid-dropout would
+      // otherwise replace the warning and then expire, leaving nothing
+      showCall(w[0], w[1], 'warn');
+      callTimer = 0;                 // no expiry; it goes when the legs return
+      if(!legsWarned){ legsWarned = true; blip(300, 0.18, 0.28, 'square'); }
+      const t = performance.now()/1000;
+      if(k !== legsSayK || t - legsSayT > LEGS_REPEAT){ legsSayK = k; legsSayT = t; sayNow(w[2]); }
+    }
+  }
+
+  const drive = Math.max(0, Math.min(1, cadence/FULL_CADENCE));
+  const met = Math.min(KCAL_MET_MAX, KCAL_MET_BASE + KCAL_MET_PER_CAD*Math.max(0,cadence));
+  kcal += met * 3.5 * bodyKg() / 200 * (dt/60);
+  // Only while we can actually see a limb to read. If the tracker loses you
+  // entirely, your effort freezes where it was rather than reading as a stop:
+  // standing still with your knees in view is you choosing to rest, but losing
+  // the knees altogether is the camera's problem, not yours.
+  // (speed is deliberately not part of this either; see SHADOW_DROP above)
+  if(driveSrc !== 'none'){
+  effortAvg  += (drive - effortAvg)  * Math.min(1, dt/EFFORT_TAU);
+  // your normal pace rises quickly and falls slowly, on purpose: if it fell as
+  // fast as you did, easing off would lower your own bar and save you from it
+  effortBase += (drive - effortBase) *
+                Math.min(1, dt/(drive > effortBase ? EFFORT_BASE : EFFORT_BASE*4));
+  }
+  // no floor that pushes: no steps, no extra speed - but what you have rolls on
+  let target = maxSpeed*Math.pow(drive, DRIVE_CURVE);
+  /* The corner boost used to raise the target to 1.3x top speed whatever you
+     were doing - four seconds of acceleration you did not have to earn with
+     your legs, which is the other half of "it drives itself". It now
+     multiplies YOUR marching speed: the same shove as before at a full march,
+     nothing if you are standing still. */
+  if(boost>0){ target = Math.max(target, 1.3*target); boost -= dt; }
+  // after the boost, so the boost can never multiply a speed your legs did not make
+  target = Math.max(target, Math.min(speed, maxSpeed*ROLL_KEEP));
+  const gap = target - speed;
+  if(gap > 0){
+    // a boost overrides the taper, so it still feels like a shove
+    const urge = (boost>0 || hitTimer>0) ? 1 : Math.max(0.12, 1 - ACCEL_FALLOFF*(speed/maxSpeed));
+    speed += Math.min(gap, accel*urge*dt);
+  } else {
+    speed += Math.max(gap, coast*dt);
+  }
+  // eases on and off, so it is a long press of the brake rather than a wall
+  brakeRamp += (brakeAmt - brakeRamp) * Math.min(1, dt/BRAKE_EASE);
+  if(brakeRamp > 0.01) speed += (-maxSpeed/BRAKE_RATE)*brakeRamp*dt;
+  speed = Math.max(0, Math.min(maxSpeed*1.35, speed));
+  // going off in a marked corner costs far more than running wide on a straight:
+  // otherwise ploughing through every bend is quicker than braking for it
+  /* Off the road, a jump SMOOTHS the ride: while it lasts the surface behaves
+     like the ordinary verge, and the rest of the time it is broken ground that
+     will not let you build speed at all. */
+  const off = Math.abs(playerX) > 1;
+  const smooth = jumpT > 0;
+  const wideLimit = smooth ? (inCorner ? maxSpeed*CORNER_OFF : offRoadLimit)
+                           : maxSpeed*ROUGH_LIMIT;
+  if(off && speed > wideLimit){
+    const bite = smooth ? JUMP_RELIEF : ROUGH_BITE;
+    speed = Math.max(wideLimit, speed + offRoadDecel*(inCorner?1.6:1)*bite*dt);
+  }
+  // the car judders over the rough, and stops juddering while it is in the air
+  rumble = (off && !smooth) ? ROUGH_SHAKE*Math.min(1, speed/(maxSpeed*0.5)) : 0;
+  /* Tell them what to do about it. Nobody works out that jumping is the way
+     back on their own, so the word is on screen every time - but the voice
+     only says it for the first JUMP_SAY excursions, or it nags every lap. */
+  if(off && !wasOff && legsSeen){
+    offRuns++;
+    showCall('JUMP', 'TO GET BACK ON', 'warn'); callTimer = 0;
+    if(offRuns <= JUMP_SAY) sayNow('Jump!');
+  }
+  if(!off && wasOff && !legsWarned) hideCall();
+  wasOff = off;
+  /* A jump while you are off the lane carries you back onto the road along a
+     line. It does nothing when you are already on it, so it cannot be used as
+     a shortcut through corners - only as a way out of trouble. */
+  if(jumped && Math.abs(playerX) > 0.92){
+    jumpT = JUMP_HOLD; blip(880,0.18,0.30);
+    if(!legsWarned) hideCall();            // the JUMP prompt has been answered
+  }
+  if(jumpT > 0){
+    jumpT -= dt;
+    const over = Math.abs(playerX) - JUMP_LAND;
+    if(over > 0.005){
+      const ease = Math.min(1, 0.25 + over/JUMP_EASE);
+      const line = JUMP_LINE*ease*dt*2.6*Math.max(speed/maxSpeed, JUMP_FLOOR);
+      playerX -= Math.sign(playerX) * Math.min(over, line);
+      // and forward: the jump gives you speed, not just a way back
+      if(speed < maxSpeed*JUMP_PUSH) speed = Math.min(maxSpeed*JUMP_PUSH, speed + accel*0.8*dt);
+    } else {
+      jumpT = 0; jumpOff = JUMP_HANDOFF;       // most of the way in: yours again
+    }
+  }
+  playerX = Math.max(-2,Math.min(2,playerX));
+  // how fast the car is actually travelling sideways, for drawing its heading
+  if(dt > 0){ pxVel += ((playerX - pxPrev)/dt - pxVel)*Math.min(1, dt/0.15); }
+  pxPrev = playerX;
+
+  distance += speed*dt/125;
+  layer = pct;
+  if(rivGain){
+    // whoever is nearest, ahead or behind, gets louder as they close
+    let near=1e9;
+    for(const c of cars){ const g=Math.abs(c.dist-distance); if(g<near) near=g; }
+    const close = Math.max(0, 1 - near/55);       // full volume inside a few metres
+    rivGain.gain.value = 0.085*close*close;
+    const f = 34 + 26*pct;
+    rivOsc.frequency.value = f; rivOsc2.frequency.value = f*1.018;
+    rivFilt.frequency.value = 300 + 500*pct;
+  }
+  if(engGain){
+    engGain.gain.value = 0.03 + 0.07*pct;
+    engOsc.frequency.value = 58 + 150*pct + (boost>0?40:0);
+    engFilt.frequency.value = 700 + 1400*pct;
+  }
+
+  // while you lead, the nearest car behind becomes your shadow
+  let leading = true;
+  for(const c of cars) if(c.dist > distance) leading = false;
+  /* The shadow is one named car. It used to be whichever car happened to be
+     nearest behind, recomputed every frame - and since the shadow is pinned
+     and forbidden to pass while you are working, that quietly made the WHOLE
+     field unable to overtake you. Measured: with it, you finish P1 at every
+     march rate above a crawl; without it, P4/P4/P3/P2/P2. The race had no
+     gradient at all, in either direction. */
+  let shadow = null, shadowGap = 1e9;
+  if(leading){
+    for(const c of cars){
+      if(c.key !== SHADOW_KEY) continue;
+      const g = distance - c.dist;
+      if(g > 0 && g < shadowGap){ shadowGap = g; shadow = c; }
+    }
+  }
+  // relative to your own normal pace, so a gentle player and a hard one are
+  // judged the same way: ease off by about a third and it comes past
+  const releaseAt = Math.max(SHADOW_FLOOR, effortBase*SHADOW_DROP);
+  const holding = effortAvg >= releaseAt;
+
+  for(const c of cars){
+    const gap = distance - c.dist;
+    const band = Math.max(-0.06, Math.min(0.06, gap/900));
+    /* was +/-0.22. That much rubber band collapsed the field: a 25-pace car
+       chasing you ran at 30.5, so every rival arrived together and you either
+       beat all of them or none. Holding station is the shadow's job, and the
+       shadow does not use this. */
+    const wob = Math.sin(elapsed*0.45 + c.wob)*0.045;
+    if(c.bumped>0) c.bumped -= dt;
+    // a shove carries it aside and dies away; then it drifts back to its lane
+    if(Math.abs(c.shove) > 0.01){ c.offset += c.shove*dt; c.shove *= Math.exp(-4*dt); }
+    // ...but not while you are close: a car does not cut across your nose
+    else if(Math.abs(c.dist - distance) > HOLD_LINE) c.offset += (c.home - c.offset)*Math.min(1, dt/2.5);
+    c.offset = Math.max(-1.15, Math.min(1.15, c.offset));
+    c.spin *= Math.exp(-3*dt);
+    let want;
+    if(c===shadow && holding){
+      // hold station: close enough to feel, not close enough to pass
+      const err = (distance - SHADOW_GAP) - c.dist;
+      want = c.basePace * (1 + Math.max(-0.30, Math.min(0.30, err/45)) + wob*0.4);
+    } else {
+      want = c.basePace * (1 + band + wob);
+    }
+    const rate = (c.v < want ? c.basePace/7 : c.basePace/3) * dt;   // launch slower than they slow
+    c.v += Math.max(-rate, Math.min(rate, want - c.v));
+    c.dist += Math.max(0, c.v) * (c.bumped>0 ? 0.5 : 1) * dt;
+    // a hard floor, not a pace nudge: while you are working, the shadow cannot
+    // come past however slow you get. Running wide is the tracker's fault as
+    // often as yours, and losing the lead to it would feel like a cheat.
+    if(c===shadow && holding && c.dist > distance - SHADOW_MIN){
+      c.dist = distance - SHADOW_MIN;
+      if(c.v > Math.max(0, speed/125)) c.v = Math.max(0, speed/125);
+    }
+    c.dz = (c.dist - distance) * 125;
+    c.z = wrap(position + c.dz);
+    if(Math.abs(c.dz) < segmentLength*1.2 && Math.abs(playerX-c.offset) < RIVAL_BOX
+       && c.bumped<=0 && hitTimer <= 1.6 - HIT_GAP){
+      const side = Math.sign(c.offset - playerX) || (c.home >= 0 ? 1 : -1);
+      c.shove = side*SHOVE*4;               // decays at 4/s, so travels SHOVE lanes
+      c.spin = side*SPIN; c.bumped = 1.3;
+      playerX -= side*0.04;                 // you are the heavier car: barely moved
+      if(c.dz >= 0){                        // you ran into it: the 15% stays
+        speed *= 0.85; shake=20; hitTimer=1.6; blip(110,0.25,0.3,'sawtooth');
+      } else {                              // it ran into you: it pays, not you
+        c.v *= 0.7; shake=8; blip(160,0.18,0.22,'sawtooth');
+      }
+      recPush({ k:'hit', t:+performance.now().toFixed(1), car:c.name, from:c.dz>=0?'you':'it' });
+    }
+  }
+
+  // the corner is scored across its whole length and graded on the way out
+  const segCorner = inCorner ? pSeg.corner : null;
+  if(segCorner && segCorner!==curCorner){
+    curCorner=segCorner; cFrames=0; cOff=0; cLean=0; cBrake=0;
+  }
+  if(curCorner){
+    if(segCorner===curCorner){
+      cFrames++;
+      if(playerX<-1||playerX>1) cOff++;
+      // leaning the right way: steer sign matches the corner's direction
+      if(steer*curCorner.dir > 0.12) cLean++;
+      if(brakeRamp > 0.25) cBrake++;
+    } else if(cFrames > 20){
+      // out the far side: grade it
+      const clean = 1 - cOff/cFrames;
+      const held  = cLean/cFrames;
+      /* Braking is rewarded rather than not-braking punished. Measured: with
+         the brake as it was, never braking was 15-40s a lap FASTER, because
+         running wide only caps your speed for the length of a corner while
+         braking costs you the whole climb back afterwards. Sharpening the
+         corners made that worse (up to 97s), cutting the off-road floor to
+         0.10 barely moved it, and faster acceleration only narrowed it while
+         wrecking the clean line. The one lever that does not mean re-adding
+         the off-road punishment Hugo asked to have removed is to pay for the
+         brake on the way out. */
+      const braked = cBrake/cFrames >= 0.18;
+      if(clean >= CORNER_CLEAN && held >= 0.30){
+        boost = Math.max(boost, braked ? CORNER_BOOST : LINE_BOOST);
+        showCall(braked?'GOOD CORNER':'GOOD LINE','', 'good', braked?'Good corner.':'Good line.'); callTimer=1.1;
+        blip(braked?820:700,0.22,0.3);
+      } else if(clean < 0.6){
+        showCall('RAN WIDE','', 'ready', 'Ran wide.'); callTimer=1.0;
+        blip(190,0.24,0.26,'sawtooth');
+      }
+      curCorner=null; cFrames=0;
+    } else { curCorner=null; cFrames=0; }
+  }
+
+  const lapsDone = Math.floor(distance/LAP_METRES);
+  if(lapsDone > lap){
+    const lt = elapsed - lapStart;
+    if(bestLap===0 || lt<bestLap) bestLap = lt;
+    lap = lapsDone; lapStart = elapsed;
+    if(lap >= LAPS){ finishTime = elapsed; endRace(); return; }   // across the line
+    showCall('LAP '+lap, 'P'+rankNow()+'  -  '+lt.toFixed(1)+'s', 'good', 'Lap '+lap+'. Position '+rankNow()+'.');
+    callTimer = 2.2;
+    blip(760,0.3,0.3);
+  }
+
+  /* The called moves are gone. Squat was the boost and is now the brake, and
+     it cannot be both; the palm push was not reading reliably, so it went too.
+     Corner calls and lap calls stay - those are about the track, not tricks.
+     The depth bar is reused to show how hard you are braking. */
+  if(brakeAmt > 0){
+    ui.depthWrap.hidden = false;
+    ui.callDepth.style.width = (brakeAmt*100)+'%';
+    ui.callDepth.className = brakeAmt>=0.99 ? 'full' : '';
+  } else if(!ui.depthWrap.hidden){
+    ui.depthWrap.hidden = true;
+  }
+
+  if(hitTimer>0) hitTimer -= dt;
+
+  if(callTimer>0){ callTimer -= dt; if(callTimer<=0) hideCall(); }
+
+  if(shake>0) shake=Math.max(0,shake-dt*60);
+
+  ui.spd.textContent = Math.round(speed/segmentLength*3.6*1.6);
+  ui.dist.textContent = Math.round(distance);
+  ui.pos.textContent = 'P'+rankNow();
+  ui.lap.textContent = (lap+1);
+  ui.clock.textContent = Math.floor(elapsed/60)+':'+String(Math.floor(elapsed%60)).padStart(2,'0');
+  ui.cad.style.width = Math.round(drive*100)+'%';
+  const legs = (driveSrc==='knees' || driveSrc==='ankles');
+  const verb = legs ? 'MARCH TO BUILD SPEED'
+             : (legsGone > 0.5 ? 'STEP BACK INTO THE FRAME'
+                               : 'STEP INTO THE PICTURE');
+  // a car behind you is never drawn, so the only way to feel it is to be told
+  let chName=null, chGap=0;
+  for(const c of cars){
+    const g = distance - c.dist;
+    if(g > 0 && g < CHASER_SHOW && (chName===null || g < chGap)){ chName=c.name; chGap=g; }
+  }
+  if(ui.chaser){
+    if(chName){
+      ui.chaser.hidden=false;
+      ui.chaser.textContent = chName + '  ' + Math.round(chGap) + 'm';
+      ui.chaser.className = 'chaser' + (chGap < CHASER_WARN ? ' near' : '');
+      /* Build 38: this pill turning red is the most likely "little red square"
+         Hugo kept seeing and could not read from his mark - a rival within
+         CHASER_WARN metres behind you. Now it is said aloud (at most every
+         CHASER_SAY seconds) and logged. */
+      if(chGap < CHASER_WARN && chaserArmed){ chaserArmed=false; blip(150,0.22,0.22,'sawtooth');
+        recPush({ k:'chaser', t:+performance.now().toFixed(1), name:chName, gap:Math.round(chGap) });
+        const tn = performance.now()/1000;
+        if(tn - chaserSaid > CHASER_SAY && !legsWarned){ chaserSaid = tn;
+          sayNow(chName.charAt(0)+chName.slice(1).toLowerCase()+' is right behind you.'); } }
+      if(chGap > CHASER_WARN*1.8) chaserArmed=true;
+    } else { ui.chaser.hidden=true; chaserArmed=true; }
+  }
+  if(brakeRamp>0.15){ ui.foot.textContent='BRAKING'; ui.foot.className='foot warn'; }
+  else {
+  // the warning wins over the pace line: cadence takes ~1.8s to decay, so
+  // without this the footer still says 'Good pace' under a STEP BACK call
+  ui.foot.textContent = (!legs && legsGone > 0.5) ? verb
+    : (drive>0.55 ? 'Good pace' : (drive>0.2 ? 'Keep going' : verb));
+  ui.foot.className = (drive>0.2 && legs) ? 'foot' : 'foot warn'; }
+  ui.diag.textContent = diagText() + ' eff ' + effortAvg.toFixed(2)
+    + '/' + effortBase.toFixed(2) + (holding?' hold':' RELEASED');
+
+  if(left<=0) endRace();     // the backstop; the finish line is what normally ends it
+}
+
+/* ---- render ---- */
+function poly(x1,y1,x2,y2,x3,y3,x4,y4,c){
+  ctx.fillStyle=c; ctx.beginPath();
+  ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x3,y3); ctx.lineTo(x4,y4);
+  ctx.closePath(); ctx.fill();
+}
+/* ---- painted sky: swirling strokes on an offscreen canvas, painted once ---- */
+/* Van Gogh does not leave canvas showing. The old sky was ~270 thin strokes
+   scattered over a flat gradient, which reads as scratches on paper rather
+   than paint. This covers the whole surface, builds it in three passes
+   (underpaint, swirl bands, highlights) and gives every stroke a dark edge
+   and a lit ridge so it sits proud like loaded paint. It is all painted once
+   into an offscreen canvas, so none of this costs anything per frame. */
+const SKY  = ['#0B1B3A','#13275A','#1B3C7E','#2A5A9B','#3E7CB8','#5E9BC9','#8FBBDD'];
+const SKY_HI = ['#A8CDE8','#CFE4F3','#E8F2FA'];
+const GOLD = ['#F2C84B','#FFE9A3','#E0A93A'];
+let skyCv = null;
+
+function srand(n){ const x = Math.sin(n*127.1)*43758.5453; return x - Math.floor(x); }
+function flowAngle(nx,ny){
+  return Math.sin(nx*5.5 + ny*2.6)*1.9
+       + Math.cos(ny*4.4 - nx*2.2)*1.5
+       + Math.sin((nx+ny)*3.6)*0.9;
+}
+function shade(hex,k){
+  const n=parseInt(hex.slice(1),16);
+  const r=Math.max(0,Math.min(255,Math.round(((n>>16)&255)*k)));
+  const g=Math.max(0,Math.min(255,Math.round(((n>>8)&255)*k)));
+  const b=Math.max(0,Math.min(255,Math.round((n&255)*k)));
+  return 'rgb('+r+','+g+','+b+')';
+}
+/* One loaded brushstroke: a tapered ribbon, drawn three times - a dark lip,
+   the body, then a thin lit ridge pushed up-left. That triple is what makes
+   it read as paint standing off the canvas instead of a drawn line. */
+function brush(g, x, y, steps, len, width, color, alpha, swirlAt, lit){
+  const pts=[];
+  for(let i=0;i<=steps;i++){
+    pts.push([x,y]);
+    let a = flowAngle(x/skyCv.width, y/skyCv.height);
+    if(swirlAt){
+      const dx=x-swirlAt.x, dy=y-swirlAt.y, d=Math.hypot(dx,dy);
+      if(d < swirlAt.r) a = Math.atan2(dy,dx) + Math.PI/2 + (d/swirlAt.r)*1.2;
+    }
+    x += Math.cos(a)*len; y += Math.sin(a)*len;
+  }
+  const run=(col,w,al,ox,oy)=>{
+    g.globalAlpha=al; g.strokeStyle=col; g.lineCap='round'; g.lineJoin='round';
+    for(let i=0;i<pts.length-1;i++){
+      // taper: fat in the middle of the stroke, thin at both ends
+      const t=i/(pts.length-1), taper=0.45+0.55*Math.sin(Math.PI*t);
+      g.lineWidth=Math.max(0.4,w*taper);
+      g.beginPath();
+      g.moveTo(pts[i][0]+ox,   pts[i][1]+oy);
+      g.lineTo(pts[i+1][0]+ox, pts[i+1][1]+oy);
+      g.stroke();
+    }
+  };
+  run(shade(color,0.45), width*1.25, alpha*0.55,  0.9,  0.9);   // dark lip below
+  run(color,             width,      alpha,       0,    0  );   // the body
+  if(lit) run(lit,       width*0.30, alpha*0.75, -0.8, -0.8);    // lit ridge above
+  g.globalAlpha=1;
+}
+/* Concentric arcs around a swirl centre, broken into separate strokes so the
+   eye reads brushwork rather than a drawn spiral. */
+function swirlBand(g, c, seed){
+  for(let r=c.r*0.10; r<c.r*1.02; r+=c.r*0.062){
+    const n = Math.max(5, Math.floor(r/9));
+    const tone = Math.min(1, r/c.r);
+    for(let k=0;k<n;k++){
+      const jitter = srand(seed+r*0.7+k*3.3);
+      if(jitter < 0.22) continue;                       // gaps, not a perfect ring
+      const a0 = (k/n)*Math.PI*2 + srand(seed+r+k)*0.5;
+      // sweep varies a lot on purpose: equal-length arcs read as machined
+      // dashes, which is exactly what the first attempt looked like
+      const sweep = (0.14 + jitter*jitter*1.5) * (Math.PI*2/n);
+      const col = SKY[Math.min(SKY.length-1, 1+Math.floor(tone*4 + jitter*1.6))];
+      const lit = (jitter>0.90) ? SKY_HI[Math.floor(jitter*3)%3] : null;
+      const w = (2.2 + jitter*4.6) * (0.55 + tone*0.6);
+      g.globalAlpha = 0.52 + jitter*0.42;
+      const draw=(col2,ww,al,ox,oy)=>{
+        g.globalAlpha=al; g.strokeStyle=col2; g.lineWidth=ww; g.lineCap='round';
+        g.beginPath(); g.arc(c.x+ox, c.y+oy, r, a0, a0+sweep); g.stroke();
+      };
+      draw(shade(col,0.42), w*1.25, 0.30+jitter*0.22,  0.9, 0.9);
+      draw(col,             w,      0.40+jitter*0.28, 0,   0  );
+      if(lit) draw(lit,     w*0.26, 0.38,            -0.8,-0.8);
+    }
+  }
+  g.globalAlpha=1;
+}
+function paintSky(){
+  skyCv = document.createElement('canvas');
+  skyCv.width = Math.max(320, Math.floor(W)); skyCv.height = Math.max(240, Math.floor(H));
+  const g = skyCv.getContext('2d');
+  const w = skyCv.width, h = skyCv.height;
+
+  const base = g.createLinearGradient(0,0,0,h);
+  base.addColorStop(0,'#060D22'); base.addColorStop(0.55,'#13275A'); base.addColorStop(1,'#24487E');
+  g.fillStyle = base; g.fillRect(0,0,w,h);
+
+  const moon   = { x: w*0.80, y: h*0.17, r: Math.min(w,h)*0.085 };
+  const swirlA = { x: w*0.30, y: h*0.22, r: Math.min(w,h)*0.34 };
+  const swirlB = { x: w*0.62, y: h*0.36, r: Math.min(w,h)*0.26 };
+  const swirlC = { x: w*0.08, y: h*0.52, r: Math.min(w,h)*0.22 };
+  const swirls = [swirlA, swirlB, swirlC];
+  const nearest = (x,y) => {
+    let best=swirls[0], bd=1e9;
+    for(const c of swirls){ const d=Math.hypot(x-c.x,y-c.y)/c.r; if(d<bd){bd=d;best=c;} }
+    return best;
+  };
+
+  // PASS 1 - underpaint. Enough strokes to bury the gradient completely.
+  const n1 = Math.floor((w*h)/420);
+  for(let i=0;i<n1;i++){
+    const x = srand(i*2.1)*w, y = srand(i*3.7)*h*0.98;
+    const r = srand(i*5.3);
+    const col = SKY[Math.floor(r*5)];
+    brush(g, x, y, 6+Math.floor(srand(i*17.7)*5), 6+srand(i*7.9)*8,
+          4.5+srand(i*11.3)*7, col, 0.55+srand(i*13.1)*0.35, nearest(x,y), null);
+  }
+
+  // PASS 2 - the swirls themselves, as concentric brushwork
+  swirlBand(g, swirlA, 11.3);
+  swirlBand(g, swirlB, 57.9);
+  swirlBand(g, swirlC, 91.7);
+
+  // PASS 3 - highlights riding on top of the wet paint
+  const n3 = Math.floor((w*h)/4200);
+  for(let i=0;i<n3;i++){
+    const x = srand(i*19.3+5)*w, y = srand(i*23.9+5)*h*0.9;
+    const r = srand(i*29.7);
+    brush(g, x, y, 5+Math.floor(r*4), 7+r*9, 1.8+r*2.6,
+          SKY[4+Math.floor(r*2)], 0.28+r*0.26, nearest(x,y),
+          r>0.6 ? SKY_HI[Math.floor(r*3)%3] : null);
+  }
+
+  /* Knock the top band back BEFORE the lights go on. Painted after them it
+     greyed out the moon and the upper stars into flat discs - the scrim is
+     meant to quiet the swirls behind the HUD, not dim the light sources. */
+  const hud = g.createLinearGradient(0,0,0,h*0.32);
+  hud.addColorStop(0,'rgba(6,13,34,0.52)');
+  hud.addColorStop(1,'rgba(6,13,34,0)');
+  g.fillStyle = hud; g.fillRect(0,0,w,h*0.32);
+
+  // stars: a bloom, then concentric rings of short strokes, the way he rings them
+  for(let i=0;i<13;i++){
+    const sx = srand(i*23.3)*w, sy = srand(i*29.1)*h*0.66;
+    const sr = Math.min(w,h)*(0.012 + srand(i*31.7)*0.022);
+    const halo = g.createRadialGradient(sx,sy,0,sx,sy,sr*4.6);
+    halo.addColorStop(0,'rgba(255,236,176,0.92)');
+    halo.addColorStop(0.35,'rgba(242,200,75,0.40)');
+    halo.addColorStop(1,'rgba(242,200,75,0)');
+    g.fillStyle = halo; g.beginPath(); g.arc(sx,sy,sr*4.6,0,Math.PI*2); g.fill();
+    // two broken rings, not three even ones. Evenly spaced equal arcs read as
+    // a dashed circle - a clock face - which is what the first pass gave.
+    for(let ring=1; ring<=2; ring++){
+      const rr = sr*(1.30 + ring*0.80);
+      const cnt = 6 + ring*3;
+      for(let k=0;k<cnt;k++){
+        const jj = srand(i*7.7 + ring*13.1 + k*3.9);
+        if(jj < 0.34) continue;
+        const a0 = (k/cnt)*Math.PI*2 + jj*1.3;
+        const sweep = (0.12+jj*jj*1.1)*(Math.PI*2/cnt);
+        g.globalAlpha = (0.34 - ring*0.09) + jj*0.16;
+        g.strokeStyle = GOLD[Math.floor(jj*3)%3];
+        g.lineWidth = sr*(0.26 - ring*0.07)*(0.6+jj*0.8); g.lineCap='round';
+        g.beginPath(); g.arc(sx,sy,rr,a0,a0+sweep); g.stroke();
+      }
+    }
+    g.globalAlpha=1;
+    g.fillStyle = '#FFF4CF'; g.beginPath(); g.arc(sx,sy,sr,0,Math.PI*2); g.fill();
+  }
+
+  const mh = g.createRadialGradient(moon.x,moon.y,0,moon.x,moon.y,moon.r*3.8);
+  mh.addColorStop(0,'rgba(255,240,190,0.75)');
+  mh.addColorStop(0.4,'rgba(242,200,75,0.3)');
+  mh.addColorStop(1,'rgba(242,200,75,0)');
+  g.fillStyle = mh; g.beginPath(); g.arc(moon.x,moon.y,moon.r*3.8,0,Math.PI*2); g.fill();
+  for(let ring=1; ring<=3; ring++){
+    const rr = moon.r*(1.18 + ring*0.46), cnt = 9 + ring*3;
+    for(let k=0;k<cnt;k++){
+      const jj = srand(ring*17.3 + k*5.1);
+      if(jj < 0.32) continue;
+      const a0 = (k/cnt)*Math.PI*2 + jj*1.4;
+      g.globalAlpha = (0.34 - ring*0.07) + jj*0.16;
+      g.strokeStyle = GOLD[Math.floor(jj*3)%3];
+      g.lineWidth = moon.r*(0.13 - ring*0.028)*(0.6+jj*0.8); g.lineCap='round';
+      g.beginPath(); g.arc(moon.x,moon.y,rr,a0,a0+(0.12+jj*jj*0.9)*(Math.PI*2/cnt)); g.stroke();
+    }
+  }
+  g.globalAlpha=1;
+  g.fillStyle = '#FFF0BE';
+  g.beginPath();
+  g.arc(moon.x, moon.y, moon.r, Math.PI*0.5, Math.PI*1.5);
+  g.bezierCurveTo(moon.x + moon.r*0.62, moon.y - moon.r*0.72,
+                  moon.x + moon.r*0.62, moon.y + moon.r*0.72,
+                  moon.x, moon.y + moon.r);
+  g.closePath(); g.fill();
+
+}
+
+function drawSky(){
+  if(!skyCv || skyCv.width !== Math.max(320,Math.floor(W))) paintSky();
+  ctx.drawImage(skyCv, 0, 0, W, H);
+}
+function renderSeg(s){
+  const p1=s.p1.screen,p2=s.p2.screen;
+  /* The fields. Two alternating flat ochres used to leave hard horizontal
+     seams right across the screen, which was the least painted thing in the
+     picture. The two tones are much closer now so the seam stops shouting,
+     and the colour comes from strokes laid over it instead: warm ochres with
+     olive and violet worked through them, the way he keeps a field alive by
+     putting its complement next to it rather than by changing the fill.
+     Stroke count scales with how tall the band is on screen, so near ground
+     gets real brushwork and the far ground stays cheap. */
+  ctx.fillStyle = s.dark?'#705713':'#775C15';
+  ctx.fillRect(0,p2.y,W,p1.y-p2.y+1);
+  const band = p1.y-p2.y;
+  /* A segment thinner than a pixel still cost six polygons for kerbs, road and
+     lane lines that cannot be seen. That did not matter when hills hid a third
+     of the road; on a flat track almost nothing is culled and every one of
+     them reaches the screen. Ground fill plus the road surface only. */
+  if(band < 1.1){
+    poly(p1.x-p1.w,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x-p2.w,p2.y, s.dark?'#1E2436':'#242B40');
+    if(s.fog>0.01){ ctx.fillStyle='rgba(19,39,90,'+s.fog.toFixed(3)+')'; ctx.fillRect(0,p2.y,W,p1.y-p2.y+1); }
+    return;
+  }
+  /* Far bands are only a pixel or two tall; brushwork there costs a lot of
+     strokes for nothing visible, and this runs every frame. Raised from 2.2
+     when the road went flat: with no crests to hide behind, far more segments
+     reach the screen, and the frame cost went 7.34ms -> 9.52ms. */
+  if(band > 3.4){
+    const WARM = ['#9C7A1C','#C39A28','#E0B840','#B8871F','#D8A82F'];
+    const COOL = ['#53702A','#3E5E22','#6E5A3A','#2F4A2E','#7A5E2B'];
+    /* Place strokes IN the verges rather than over the whole width and throw
+       away the ones that land on the road. Near the camera the road fills most
+       of the screen, so that threw away nearly all of them and left the near
+       ground bare - which is exactly where the brushwork needs to be visible. */
+    const gutNear = Math.max(0, p1.x-p1.w) + Math.max(0, W-(p1.x+p1.w));
+    if(gutNear > 1.5){
+      const q0 = Math.max(3, Math.min(13, Math.round(Math.sqrt(gutNear*band)*0.62)));
+      for(let q=0;q<q0;q++){
+        const r1=srand(s.index*7.3+q*2.9), r2=srand(s.index*11.7+q*5.1), r3=srand(s.index*3.1+q*8.7);
+        const py = p2.y + r2*band;
+        const t  = band>0 ? (py-p2.y)/band : 0;              // 0 far, 1 near
+        const cx = p2.x + (p1.x-p2.x)*t, cw = p2.w + (p1.w-p2.w)*t;
+        const lg = Math.max(0, cx-cw), rg = Math.max(0, W-(cx+cw));
+        if(lg+rg < 1) continue;
+        const pick = r1*(lg+rg);
+        const px = pick < lg ? pick : (cx+cw) + (pick-lg);
+        // strokes fan out from up the road, so the field reads in perspective
+        // instead of every mark leaning the same way
+        const ang = Math.atan2(py-p2.y+1, px-p2.x) + (flowAngle(px/W,py/H))*0.13;
+        const near = Math.min(1, band/26);
+        const len = (3.5 + r3*8) * (0.45 + near*1.9);
+        ctx.strokeStyle = (r3 > 0.60) ? COOL[q%5] : WARM[q%5];
+        ctx.lineWidth = (1.0 + r2*2.0) * (0.55 + near*1.2);
+        ctx.globalAlpha = 0.45 + r3*0.45;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(px,py);
+        ctx.lineTo(px+Math.cos(ang)*len, py+Math.sin(ang)*len);
+        ctx.stroke();
+      }
+      /* Broken ground, laid over the field brushwork. The strokes above say
+         "painted field"; these say "you do not want to drive on this": short,
+         thick, dark marks lying ACROSS the direction of travel, so the verge
+         reads as ploughed rather than mown. Near bands only - far ground is a
+         couple of pixels tall and the clods would just be dirt on the lens. */
+      if(band > 7){
+        const c0 = Math.max(2, Math.min(9, Math.round(Math.sqrt(gutNear*band)*0.30)));
+        for(let q=0;q<c0;q++){
+          const r1=srand(s.index*5.7+q*3.3), r2=srand(s.index*13.1+q*6.7), r3=srand(s.index*2.3+q*9.1);
+          const py = p2.y + (0.3+r2*0.7)*band;
+          const t  = band>0 ? (py-p2.y)/band : 0;
+          const cx = p2.x + (p1.x-p2.x)*t, cw = p2.w + (p1.w-p2.w)*t;
+          const lg = Math.max(0, cx-cw), rg = Math.max(0, W-(cx+cw));
+          if(lg+rg < 1) continue;
+          const pick = r1*(lg+rg);
+          const px = pick < lg ? pick : (cx+cw) + (pick-lg);
+          const near = Math.min(1, band/26);
+          const len = (4 + r3*9) * (0.5 + near*2.2);
+          ctx.strokeStyle = (r3 > 0.5) ? '#4A3A0E' : '#2E2608';
+          ctx.lineWidth = (2.0 + r2*3.2) * (0.6 + near*1.4);
+          ctx.globalAlpha = 0.50 + r3*0.38;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(px - len*0.5, py);
+          ctx.lineTo(px + len*0.5, py + (r3-0.5)*len*0.4);
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.lineCap = 'butt';
+    }
+  }
+  const r1=p1.w/8, r2=p2.w/8;
+  const rb = s.dark?'#F2E3B0':'#C84B2E';
+  poly(p1.x-p1.w-r1,p1.y,p1.x-p1.w,p1.y,p2.x-p2.w,p2.y,p2.x-p2.w-r2,p2.y,rb);
+  poly(p1.x+p1.w+r1,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x+p2.w+r2,p2.y,rb);
+  poly(p1.x-p1.w,p1.y,p1.x+p1.w,p1.y,p2.x+p2.w,p2.y,p2.x-p2.w,p2.y, s.dark?'#1E2436':'#242B40');
+  /* The road gets a whisper of the same brushwork so it does not sit in the
+     picture as the one flat plastic surface. Kept very low contrast on
+     purpose: this is the thing the player has to read at speed, and a
+     painterly road that hides the lane lines would be a bad trade. */
+  if(band > 8){
+    for(let q=0;q<4;q++){
+      const r1=srand(s.index*5.9+q*3.7), r2=srand(s.index*13.3+q*7.1);
+      const py = p2.y + r2*band;
+      const t  = (py-p2.y)/band;
+      const cx = p2.x + (p1.x-p2.x)*t, cw = p2.w + (p1.w-p2.w)*t;
+      const px = cx - cw + r1*cw*2;
+      const len = (4 + r2*9)*Math.min(2.2, band/14);
+      ctx.strokeStyle = (r1>0.5) ? '#39415C' : '#141A2A';
+      ctx.lineWidth = 1.3 + r2*2.4;
+      ctx.globalAlpha = 0.30 + r2*0.24;
+      ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(px,py);
+      ctx.lineTo(px+Math.cos(Math.atan2(py-p2.y+1,px-p2.x))*len,
+                 py+Math.sin(Math.atan2(py-p2.y+1,px-p2.x))*len);
+      ctx.stroke();
+    }
+    ctx.globalAlpha=1; ctx.lineCap='butt';
+  }
+  if(s.laneOn){
+    const lw1=p1.w/60, lw2=p2.w/60, l1=(p1.w*2)/lanes, l2=(p2.w*2)/lanes;
+    let x1=p1.x-p1.w+l1, x2=p2.x-p2.w+l2;
+    for(let l=1;l<lanes;l++){
+      poly(x1-lw1,p1.y,x1+lw1,p1.y,x2+lw2,p2.y,x2-lw2,p2.y,'rgba(242,227,176,0.5)');
+      x1+=l1; x2+=l2;
+    }
+  }
+  if(s.corner && s.cPhase==='brake'){
+    // a band of colour on the road, so the corner is something you see coming
+    const t0=0.08, t1=0.92;
+    const x1a=(p1.x-p1.w)+(p1.w*2)*t0, x1b=(p1.x-p1.w)+(p1.w*2)*t1;
+    const x2a=(p2.x-p2.w)+(p2.w*2)*t0, x2b=(p2.x-p2.w)+(p2.w*2)*t1;
+    poly(x1a,p1.y,x1b,p1.y,x2b,p2.y,x2a,p2.y,
+         (Math.floor(s.index/4)%2===0) ? 'rgba(232,163,61,0.30)' : 'rgba(232,163,61,0.13)');
+  }
+  if(s.corner && s.cPhase==='in'){
+    // the inside kerb lights up through the turn
+    const inside = s.corner.dir>0 ? 1 : -1;  // and the inside is the other side
+    const r1=p1.w/7, r2=p2.w/7;
+    const x1=p1.x+inside*p1.w, x2=p2.x+inside*p2.w;
+    poly(x1,p1.y,x1+inside*r1,p1.y,x2+inside*r2,p2.y,x2,p2.y,
+         (Math.floor(s.index/3)%2===0) ? '#E8A33D' : '#F2E3B0');
+  }
+  if(s.index < FINISH_SEGS){
+    // the chequered line across the road, one row of squares per segment
+    const N=10, ph=s.index%2;
+    for(let i=0;i<N;i++){
+      const t0=i/N, t1=(i+1)/N;
+      const x1a=(p1.x-p1.w)+(p1.w*2)*t0, x1b=(p1.x-p1.w)+(p1.w*2)*t1;
+      const x2a=(p2.x-p2.w)+(p2.w*2)*t0, x2b=(p2.x-p2.w)+(p2.w*2)*t1;
+      poly(x1a,p1.y,x1b,p1.y,x2b,p2.y,x2a,p2.y, ((i+ph)%2===0)?'#F2E3B0':'#141A2C');
+    }
+  }
+  if(s.fog>0.01){ ctx.fillStyle='rgba(19,39,90,'+s.fog.toFixed(3)+')'; ctx.fillRect(0,p2.y,W,p1.y-p2.y+1); }
+}
+
+/* the banner over the line. Same Klee cloth as the end screen, so the thing you
+   drive under and the thing you are handed at the end are one object. */
+function drawGantry(s, t){
+  const p=s.p1.screen;
+  if(!isFinite(p.x)||!isFinite(p.w)||p.w<=0.5) return;
+  const w=p.w, x=p.x, y=p.y;
+  // passing underneath: fade it out rather than letting it fill the screen
+  const fade = 1 - Math.max(0, Math.min(1, (w - W*0.62)/(W*0.55)));
+  if(fade <= 0.01) return;
+  const left=x-w*1.20, right=x+w*1.20, span=right-left;
+  const h=w*1.25, postW=Math.max(2,w*0.065), by=y-h, bh=Math.max(4,w*0.34);
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.fillStyle='rgba(246,235,203,0.95)';
+  ctx.fillRect(left-postW/2, by, postW, h);
+  ctx.fillRect(right-postW/2, by, postW, h);
+  const NX=12, NY=3;
+  const wave=(u,v)=>Math.sin(u*5.6 - t*2.6 + v*0.9)*bh*0.16;
+  for(let i=0;i<NX;i++){
+    for(let j=0;j<NY;j++){
+      const u0=i/NX,u1=(i+1)/NX,v0=j/NY,v1=(j+1)/NY;
+      const xa=left+span*u0, xb=left+span*u1;
+      const ya=by+bh*v0, yb=by+bh*v1;
+      const dark=((i+j)%2===0);
+      ctx.fillStyle=shadeHex(flagPick(dark?KLEE_DARK:KLEE_LIGHT,i,j),
+                             0.86+0.20*Math.cos(u0*5.6-t*2.6));
+      ctx.beginPath();
+      ctx.moveTo(xa, ya+wave(u0,v0)); ctx.lineTo(xb, ya+wave(u1,v0));
+      ctx.lineTo(xb, yb+wave(u1,v1)); ctx.lineTo(xa, yb+wave(u0,v1));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); ctx.fill();
+}
+function tri(ax,ay,bx,by,cx2,cy2,col){
+  ctx.fillStyle=col; ctx.beginPath();
+  ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.lineTo(cx2,cy2); ctx.closePath(); ctx.fill();
+}
+/* one racing-car silhouette seen from behind; the artist is the paint, not the shape */
+function carBody(w,h,P,opt){
+  opt = opt||{};
+  const r1=Math.max(1,w*0.04);
+  // rear tyres
+  ctx.fillStyle='#121318';
+  rr(-w*0.54,-h*0.66,w*0.23,h*0.66,r1); rr(w*0.31,-h*0.66,w*0.23,h*0.66,r1);
+  if(w>26){ ctx.fillStyle='rgba(255,255,255,0.12)';
+    rr(-w*0.54,-h*0.66,w*0.23,h*0.13,1); rr(w*0.31,-h*0.66,w*0.23,h*0.13,1); }
+  // floor and diffuser
+  ctx.fillStyle=P.dark; rr(-w*0.32,-h*0.28,w*0.64,h*0.28,1);
+  if(w>26){ ctx.fillStyle='rgba(0,0,0,0.45)';
+    for(let i=-2;i<=2;i++) rr(i*w*0.10-w*0.012,-h*0.26,w*0.024,h*0.22,0); }
+  // sidepods and main body
+  ctx.fillStyle=P.body; rr(-w*0.33,-h*0.82,w*0.66,h*0.56,Math.max(1,w*0.06));
+  // engine cover rising to the airbox
+  ctx.fillStyle=P.body; ctx.beginPath();
+  ctx.moveTo(-w*0.13,-h*0.80); ctx.lineTo(-w*0.075,-h*1.16);
+  ctx.lineTo(w*0.075,-h*1.16); ctx.lineTo(w*0.13,-h*0.80); ctx.closePath(); ctx.fill();
+  // rear wing
+  if(opt.meltWing){
+    ctx.fillStyle=P.wing; ctx.beginPath();
+    ctx.moveTo(-w*0.48,-h*1.30);
+    ctx.bezierCurveTo(-w*0.16,-h*1.06, w*0.16,-h*1.44, w*0.48,-h*1.16);
+    ctx.lineTo(w*0.48,-h*0.99);
+    ctx.bezierCurveTo(w*0.16,-h*1.27, -w*0.16,-h*0.89, -w*0.48,-h*1.13);
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.fillStyle=P.wing; rr(-w*0.48,-h*1.32,w*0.96,h*0.18,Math.max(1,w*0.02));
+  }
+  // endplates and pylon
+  ctx.fillStyle=P.wingDark;
+  rr(-w*0.52,-h*1.38,w*0.09,h*0.40,1); rr(w*0.43,-h*1.38,w*0.09,h*0.40,1);
+  ctx.fillStyle=P.dark; rr(-w*0.035,-h*1.30,w*0.07,h*0.26,1);
+  // rain light
+  ctx.fillStyle=P.lamp; ctx.beginPath();
+  ctx.arc(0,-h*0.44,Math.max(1.2,w*0.045),0,Math.PI*2); ctx.fill();
+}
+function drawDali(w,h){
+  carBody(w,h,{ body:'#E8C97A', dark:'#8A6A24', wing:'#D9B45E', wingDark:'#A8822F', lamp:'#F6EBCB' }, {meltWing:true});
+  if(w>30){   // a clock face on the engine cover, hands askew
+    ctx.fillStyle='#F6EBCB'; ctx.beginPath(); ctx.arc(0,-h*0.98,w*0.085,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#4A3410'; ctx.lineWidth=Math.max(1,w*0.012);
+    ctx.beginPath(); ctx.moveTo(0,-h*0.98); ctx.lineTo(0,-h*1.06); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,-h*0.98); ctx.lineTo(w*0.06,-h*0.95); ctx.stroke();
+  }
+}
+function drawPicasso(w,h){
+  carBody(w,h,{ body:'#3E6E99', dark:'#1E3A4A', wing:'#C4873C', wingDark:'#8A5C24', lamp:'#F2F6FF' });
+  // the bodywork broken into planes
+  tri(-w*0.33,-h*0.82, w*0.02,-h*0.80, -w*0.10,-h*0.26, '#7FA8C4');
+  tri( w*0.02,-h*0.80, w*0.33,-h*0.70, w*0.14,-h*0.26, '#C4873C');
+  tri(-w*0.33,-h*0.58, -w*0.10,-h*0.26, -w*0.33,-h*0.26, '#2B4F74');
+  if(w>24){
+    ctx.strokeStyle='#14202E'; ctx.lineWidth=Math.max(1,w*0.018);
+    ctx.beginPath(); ctx.moveTo(-w*0.33,-h*0.82); ctx.lineTo(w*0.02,-h*0.42);
+    ctx.lineTo(w*0.33,-h*0.70); ctx.stroke();
+  }
+}
+function drawFrida(w,h){
+  carBody(w,h,{ body:'#A51C2C', dark:'#4E0D16', wing:'#1E6B46', wingDark:'#12462E', lamp:'#F2C84B' });
+  // an embroidered band across the sidepods
+  ctx.fillStyle='#1E6B46'; rr(-w*0.33,-h*0.50,w*0.66,h*0.11,1);
+  if(w>26){   // flowers along the rear wing
+    const cols=['#F2C84B','#F07E9A','#F6EBCB'];
+    for(let i=0;i<5;i++){
+      const fx=-w*0.34+i*(w*0.17), r=Math.max(1.2,w*0.045);
+      ctx.fillStyle=cols[i%3];
+      ctx.beginPath(); ctx.arc(fx,-h*1.23,r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#A51C2C';
+      ctx.beginPath(); ctx.arc(fx,-h*1.23,r*0.38,0,Math.PI*2); ctx.fill();
+    }
+  }
+}
+function drawMondrian(w,h){
+  carBody(w,h,{ body:'#F4F3EE', dark:'#1A1A1A', wing:'#F4F3EE', wingDark:'#121212', lamp:'#CE2B37' });
+  // primary blocks laid onto the bodywork
+  ctx.fillStyle='#CE2B37'; ctx.fillRect(-w*0.33,-h*0.82,w*0.26,h*0.30);
+  ctx.fillStyle='#1E4FA8'; ctx.fillRect( w*0.11,-h*0.52,w*0.22,h*0.26);
+  ctx.fillStyle='#F2C84B'; ctx.fillRect( w*0.13,-h*0.82,w*0.20,h*0.22);
+  ctx.fillStyle='#CE2B37'; ctx.fillRect(-w*0.48,-h*1.32,w*0.30,h*0.18);
+  ctx.fillStyle='#1E4FA8'; ctx.fillRect( w*0.20,-h*1.32,w*0.28,h*0.18);
+  if(w>22){
+    ctx.strokeStyle='#121212'; ctx.lineWidth=Math.max(1.2,w*0.030);
+    ctx.beginPath();
+    ctx.moveTo(-w*0.07,-h*0.82); ctx.lineTo(-w*0.07,-h*0.26);
+    ctx.moveTo( w*0.11,-h*0.82); ctx.lineTo( w*0.11,-h*0.26);
+    ctx.moveTo(-w*0.33,-h*0.52); ctx.lineTo( w*0.33,-h*0.52);
+    ctx.stroke();
+    ctx.lineWidth=Math.max(1,w*0.022);
+    ctx.strokeRect(-w*0.33,-h*0.82,w*0.66,h*0.56);
+  }
+}
+
+function drawCar(x,y,scale,car){
+  /* Doubled. At the old size a rival was a few pixels at distance, and with
+     150-250ms of camera lag the rivals are meant to be the thing you LOOK at
+     rather than react to - which only works if you can see them. The
+     collision width is widened to match (RIVAL_BOX) so passing stays honest. */
+  const w=roadWidth*0.00026*scale*W, h=w*0.56;
+  if(w<2) return;
+  ctx.save(); ctx.translate(x,y);
+  if(car.spin) ctx.rotate(car.spin);      // knocked askew by contact (build 38)
+  ctx.fillStyle='rgba(0,0,0,0.42)';
+  ctx.beginPath(); ctx.ellipse(0,0,w*0.58,h*0.17,0,0,Math.PI*2); ctx.fill();
+  if(car.key==='dali') drawDali(w,h);
+  else if(car.key==='picasso') drawPicasso(w,h);
+  else if(car.key==='frida') drawFrida(w,h);
+  else drawMondrian(w,h);
+  if(w > W*0.07){
+    ctx.font='700 '+Math.round(w*0.19)+'px Chakra Petch, sans-serif';
+    ctx.textAlign='center'; ctx.fillStyle='rgba(242,246,255,0.92)';
+    ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=w*0.1;
+    ctx.fillText(car.name, 0, -h*1.35);
+    ctx.shadowBlur=0;
+  }
+  ctx.restore();
+}
+function drawPlayerCar(){
+  const bob=Math.sin(performance.now()/80)*(speed/maxSpeed)*2;
+  // rumble is the rough ground; shake is a collision. They add.
+  const jx = (shake?(Math.random()-0.5)*shake:0) + (rumble?(Math.random()-0.5)*rumble:0);
+  const jy = rumble ? (Math.random()-0.5)*rumble*0.8 : 0;
+  const x=W/2+jx;
+  // bigger on screen only. Overtaking uses playerX against each rival's lane,
+  // which is in track space and has not changed, so the gaps stay exactly as
+  // wide as they were.
+  /* Measured in the renderer, not by algebra - the last time this was done by
+     algebra a x1000 went missing at the call site. A rival drawn alongside came
+     out 152 px wide against the player's 107 px, so the player was 0.70x the
+     size of the cars it races. 0.26 -> 0.36 of the canvas puts them level.
+     On screen only: overtaking uses playerX against each rival's lane, which is
+     in track space and has not changed, so every gap is exactly as wide. */
+  const y=H*0.86+bob+jy, w=W*0.36, h=w*0.60;
+  /* During a jump the body shows what the car is actually doing: your own
+     steering plus the jump's nudge toward the road. So it reads as the car
+     turning back onto the tarmac, and it straightens the moment it lands. */
+  /* Build 38: while a jump carries you in, the car is drawn pointing along the
+     line it is actually travelling - nose toward the road - so it reads as
+     driving back on, and it straightens out as the line flattens. */
+  const yawWant = (jumpT > 0 || jumpOff > 0)
+    ? Math.max(-0.32, Math.min(0.32, pxVel*JUMP_YAW)) : 0;
+  yawSm += (yawWant - yawSm)*0.12;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(steer*0.075 + yawSm);
+  ctx.fillStyle='rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.ellipse(0,h*0.16,w*0.58,h*0.17,0,0,Math.PI*2); ctx.fill();
+  if(boost>0){
+    const g=ctx.createRadialGradient(0,-h*0.3,0,0,-h*0.3,w*0.7);
+    g.addColorStop(0,'rgba(127,178,217,0.55)'); g.addColorStop(1,'rgba(127,178,217,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,-h*0.3,w*0.7,0,Math.PI*2); ctx.fill();
+  }
+  carBody(w,h,{ body:'#1B3C7E', dark:'#070E22', wing:'#13275A', wingDark:'#0B1B3A', lamp:'#F2C84B' });
+  // the night sky, painted onto the bodywork
+  ctx.save();
+  ctx.beginPath(); ctx.rect(-w*0.33,-h*0.82,w*0.66,h*0.56); ctx.clip();
+  ctx.strokeStyle='rgba(127,178,217,0.85)'; ctx.lineWidth=Math.max(1.4,w*0.016);
+  for(let i=0;i<3;i++){
+    const cy=-h*(0.72-i*0.18), amp=h*0.07;
+    ctx.beginPath(); ctx.moveTo(-w*0.33,cy);
+    ctx.bezierCurveTo(-w*0.14,cy-amp, w*0.02,cy+amp, w*0.33,cy-amp*0.5);
+    ctx.stroke();
+  }
+  ctx.fillStyle='rgba(242,200,75,0.95)';
+  for(const [sx,sy,sr] of [[-0.20,-0.70,0.045],[0.14,-0.60,0.055],[-0.03,-0.44,0.035]]){
+    ctx.beginPath(); ctx.arc(w*sx,h*sy,Math.max(1.2,w*sr),0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+  // a crescent on the airbox
+  ctx.fillStyle='#F2C84B';
+  ctx.beginPath(); ctx.arc(0,-h*1.00,w*0.045,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function render(){
+  const base_=findSeg(position);
+  const basePct=(position%segmentLength)/segmentLength;
+  const pSeg=findSeg(position+playerZ);
+  const pPct=((position+playerZ)%segmentLength)/segmentLength;
+  const pY=lerp(pSeg.p1.world.y,pSeg.p2.world.y,pPct);
+  let maxy=H, x=0, dx=-(base_.curve*basePct);
+  drawSky();
+  for(let n=0;n<drawDistance;n++){
+    const s=segments[(base_.index+n)%segments.length];
+    s.looped = s.index<base_.index; s.clip=maxy;
+    s.fog=Math.max(0,(n/drawDistance-0.45)/0.55)*0.9;
+    project(s.p1,(playerX*roadWidth)-x,pY+cameraHeight,position-(s.looped?trackLength:0));
+    project(s.p2,(playerX*roadWidth)-x-dx,pY+cameraHeight,position-(s.looped?trackLength:0));
+    x+=dx; dx+=s.curve;
+    if(s.p1.camera.z<=cameraDepth) continue;
+    if(s.p2.screen.y>=s.p1.screen.y) continue;
+    if(s.p2.screen.y>=maxy) continue;
+    renderSeg(s); maxy=s.p1.screen.y;
+  }
+  for(let n=drawDistance-1;n>0;n--){
+    const s=segments[(base_.index+n)%segments.length];
+    if(s.p1.camera.z<=cameraDepth) continue;
+    if(s.index===0 && s.p1.screen.y<=s.clip+2) drawGantry(s, performance.now()/1000);
+    // chevron boards on the outside of the bend, through the braking zone and
+    // round the turn itself: the thing you read, rather than react to
+    if(s.corner && s.p1.screen.y<=s.clip+2 && s.index%5===0){
+      const out = s.corner.dir>0 ? -1 : 1;   // measured: negative curve bends left, so its outside is the right
+      const p=s.p1.screen;
+      if(isFinite(p.x) && p.w>1){
+        // closer to the road and larger, so they stay in frame further into the bend
+        const bx=p.x+out*p.w*1.30, by=p.y, bw=p.w*0.50, bh=bw*0.62;
+        ctx.save();
+        ctx.fillStyle='rgba(12,17,34,0.88)';
+        ctx.fillRect(bx-bw/2, by-bh*1.9, bw, bh);
+        ctx.strokeStyle='rgba(232,163,61,0.9)'; ctx.lineWidth=Math.max(1,bw*0.06);
+        ctx.strokeRect(bx-bw/2, by-bh*1.9, bw, bh);
+        ctx.fillStyle='#E8A33D';
+        // the board sits outside the bend, but the arrows point INTO it,
+        // the way real chevrons do
+        const arrow = -out;
+        for(let k=0;k<2;k++){
+          const cx=bx-bw*0.18+k*bw*0.34, cy=by-bh*1.9+bh*0.5;
+          ctx.beginPath();
+          ctx.moveTo(cx-arrow*bw*0.12, cy-bh*0.28);
+          ctx.lineTo(cx+arrow*bw*0.13, cy);
+          ctx.lineTo(cx-arrow*bw*0.12, cy+bh*0.28);
+          ctx.lineTo(cx-arrow*bw*0.02, cy);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+    for(const b of boards){
+      if(findSeg(b.z).index!==s.index) continue;
+      const bp=(b.z%segmentLength)/segmentLength;
+      const bsc=lerp(s.p1.screen.scale,s.p2.screen.scale,bp);
+      const bw=lerp(s.p1.screen.w,s.p2.screen.w,bp);
+      const bx=lerp(s.p1.screen.x,s.p2.screen.x,bp) + b.side*bw*1.38;
+      const by=lerp(s.p1.screen.y,s.p2.screen.y,bp);
+      if(by>s.clip+2) continue;
+      drawBoard(bx, by, bw, b);
+    }
+    for(const pr of props){
+      if(findSeg(pr.z).index!==s.index) continue;
+      const pp=(pr.z%segmentLength)/segmentLength;
+      const psc=lerp(s.p1.screen.scale,s.p2.screen.scale,pp);
+      const pw=lerp(s.p1.screen.w,s.p2.screen.w,pp);
+      const px=lerp(s.p1.screen.x,s.p2.screen.x,pp) + pr.side*pw*1.95;
+      const py=lerp(s.p1.screen.y,s.p2.screen.y,pp);
+      if(py>s.clip+2) continue;
+      drawCypress(px, py, pw*pr.scale, pr.seed);
+    }
+    for(const c of cars){
+      if(c.dz < -segmentLength*2 || c.dz > drawDistance*segmentLength) continue;
+      if(findSeg(c.z).index!==s.index) continue;
+      const pc=(c.z%segmentLength)/segmentLength;
+      const sc=lerp(s.p1.screen.scale,s.p2.screen.scale,pc);
+      const cx=lerp(s.p1.screen.x,s.p2.screen.x,pc)+(sc*c.offset*roadWidth*W/2);
+      const cy=lerp(s.p1.screen.y,s.p2.screen.y,pc);
+      if(cy>s.clip+2) continue;
+      drawCar(cx,cy,sc*1000,c);
+    }
+  }
+  drawPlayerCar();
+  drawCornerSign();
+  if(shake>0){ ctx.fillStyle='rgba(255,75,92,'+Math.min(0.3,shake/50)+')'; ctx.fillRect(0,0,W,H); }
+}
+
+function chevron(cx, cy, w, h, dir){
+  ctx.beginPath();
+  ctx.moveTo(cx - dir*w*0.5, cy - h*0.5);
+  ctx.lineTo(cx + dir*w*0.5, cy);
+  ctx.lineTo(cx - dir*w*0.5, cy + h*0.5);
+  ctx.lineTo(cx - dir*w*0.12, cy);
+  ctx.closePath(); ctx.fill();
+}
+/* The roadside boards sit outside the road edge, so once you are actually in
+   the bend they are off the side of the screen - the one moment you most need
+   to know which way it goes. This one is fixed to the screen instead. */
+function drawCornerSign(){
+  const seg = findSeg(position+playerZ);
+  const c = seg.corner;
+  signAlpha += ((c?1:0) - signAlpha) * (1 - Math.pow(0.88, Math.max(0.001,renderDt)*60));
+  if(signAlpha < 0.02) return;
+  if(c) lastSignCorner = c;
+  const cc = c || lastSignCorner;
+  if(!cc) return;
+  const dir = cc.dir > 0 ? 1 : -1;        // positive curve turns right on screen
+  const n = cc.peak >= 9 ? 3 : (cc.peak >= 6 ? 2 : 1);
+  const inIt = !!(c && seg.cPhase === 'in');
+  const t = performance.now()/1000;
+  const pulse = inIt ? (0.80 + 0.20*Math.sin(t*7)) : (0.66 + 0.16*Math.sin(t*4));
+  const u = Math.min(W,H);
+  const w = u*0.115, h = u*0.145, gap = w*0.72;
+  const cx = W/2 + dir*u*0.10, cy = H*0.30;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, signAlpha)*pulse;
+  ctx.fillStyle='rgba(10,16,36,0.55)';
+  const pw = gap*(n-1)+w+u*0.07, ph = h+u*0.055;
+  ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(cx-pw/2, cy-ph/2, pw, ph, u*0.03);
+  else ctx.rect(cx-pw/2, cy-ph/2, pw, ph);
+  ctx.fill();
+  ctx.fillStyle = inIt ? '#F2C84B' : '#E8A33D';
+  for(let i=0;i<n;i++) chevron(cx + (i-(n-1)/2)*gap*dir, cy, w, h, dir);
+  ctx.restore();
+}
+
+/* The shape to stand into. These numbers are PROPORTIONS, not screen positions:
+   they are read through fitGuide(), which anchors them to the shoulders you
+   actually have and scales them by your own shoulder width and torso. A tall
+   player far back and a short player close by both get a shape that fits, so
+   nobody has to find one magic distance. */
+const GUIDE = {
+  head:[0.500,0.150], lsh:[0.398,0.300], rsh:[0.602,0.300],
+  lel:[0.330,0.400],  rel:[0.670,0.400],
+  lwr:[0.408,0.330],  rwr:[0.592,0.330],
+  lhip:[0.446,0.550], rhip:[0.554,0.550],
+  lkn:[0.446,0.745],  rkn:[0.554,0.745],
+  lank:[0.446,0.935], rank:[0.554,0.935]
+};
+const CHECKS = [ {g:'lwr',i:15}, {g:'rwr',i:16} ];
+// the guide's own shoulder line and torso, the units everything else is measured in
+const G_SHY = GUIDE.lsh[1], G_HALF = (GUIDE.rsh[0]-GUIDE.lsh[0])/2, G_TORSO = GUIDE.lhip[1]-GUIDE.lsh[1];
+let fitG = null;
+function resetFit(){ fitG = null; }
+// fit the shape to the body in front of the camera; null until there is one
+function fitGuide(F, dt){
+  const lsh=pt(L.lsh,0.15), rsh=pt(L.rsh,0.15), hp=mid(L.lhip,L.rhip);
+  let target = null;
+  if(lsh && rsh && hp){
+    const half = Math.abs(rsh.x-lsh.x)/2;
+    const shY  = (lsh.y+rsh.y)/2;
+    const torso = Math.abs(hp.y-shY);
+    if(half > 0.02 && torso > 0.03) target = { cx:(lsh.x+rsh.x)/2, cy:shY, half:half, torso:torso };
+  }
+  if(target){
+    // tracking jitters, and a shape that twitches is one you cannot stand into:
+    // move toward the body slowly enough that the target holds still
+    if(!fitG) fitG = Object.assign({}, target);
+    else { const a = 1-Math.exp(-dt*3.5);
+           fitG.cx += (target.cx-fitG.cx)*a; fitG.cy += (target.cy-fitG.cy)*a;
+           fitG.half += (target.half-fitG.half)*a; fitG.torso += (target.torso-fitG.torso)*a; }
+  }
+  if(!fitG) return null;
+  const kx = fitG.half/G_HALF, ky = fitG.torso/G_TORSO;
+  return {
+    X: g => F.dx + (fitG.cx + (GUIDE[g][0]-0.5)*kx) * F.dw,
+    Y: g => F.dy + (fitG.cy + (GUIDE[g][1]-G_SHY)*ky) * F.dh,
+    // one unit of the fitted body, in screen pixels: marks scale with the player
+    U: Math.max(14, fitG.torso*F.dh)
+  };
+}
+function drawGuide(F, fit, legsLit){
+  const U = fit ? fit.U : Math.min(F.dw,F.dh)*0.25;
+  const X = fit ? fit.X : (g => F.dx + GUIDE[g][0]*F.dw);
+  const Y = fit ? fit.Y : (g => F.dy + GUIDE[g][1]*F.dh);
+  ctx.save();
+  ctx.lineWidth=Math.max(2,U*0.052); ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.setLineDash([Math.max(5,U*0.112), Math.max(5,U*0.088)]);
+  const seg=(a,b,lit)=>{ ctx.strokeStyle = lit ? 'rgba(127,224,160,0.80)' : 'rgba(242,246,255,0.34)';
+    ctx.beginPath(); ctx.moveTo(X(a),Y(a)); ctx.lineTo(X(b),Y(b)); ctx.stroke(); };
+  ctx.strokeStyle='rgba(242,246,255,0.34)';
+  ctx.beginPath(); ctx.arc(X('head'),Y('head'),U*0.32,0,Math.PI*2); ctx.stroke();
+  seg('lsh','rsh'); seg('lsh','lel'); seg('lel','lwr'); seg('rsh','rel'); seg('rel','rwr');
+  seg('lsh','lhip'); seg('rsh','rhip'); seg('lhip','rhip');
+  // the legs light up when the camera can actually see them, which is the
+  // only thing standing further back was ever for
+  seg('lhip','lkn',legsLit); seg('lkn','lank',legsLit);
+  seg('rhip','rkn',legsLit); seg('rkn','rank',legsLit);
+  ctx.setLineDash([]); ctx.restore();
+}
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);           // contain: show the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw:dw, dh:dh, vw:vw, vh:vh };
+}
+function joint(i){
+  if(!pose||!pose[i]) return null;
+  const q=pose[i];
+  const v=(q.visibility===undefined)?1:q.visibility;
+  const f=videoFit();
+  return { x:f.dx+(1-q.x)*f.dw, y:f.dy+q.y*f.dh, v:v };
+}
+/* ---- taking the wheel, one hand at a time ----
+   Each hand mark fills on its own and then latches. A latched hand stays
+   latched through tracking flicker and only lets go if the wrist is visibly
+   away for long enough. At 150-250 ms you cannot ask someone to hold two
+   things steady at once and judge it; you can ask them to arrive twice. */
+const GRIP_FILL = 0.45;   // s a hand must sit on its mark before it locks
+const GRIP_BOTH = 0.40;   // s both hands held before the race starts
+const GRIP_FREE = 0.70;   // s visibly away before a locked hand lets go
+let grip = null;
+function resetGrip(){
+  grip = { both:0, L:{fill:0,lock:false,off:0}, R:{fill:0,lock:false,off:0} };
+}
+resetGrip();
+
+function drawGlove(x,y,R,flip,locked){
+  ctx.save(); ctx.translate(x,y); ctx.scale(flip,1);
+  ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.lineWidth = Math.max(1.5, R*0.16);
+  ctx.fillStyle   = locked ? 'rgba(246,235,203,0.98)' : 'rgba(246,235,203,0.26)';
+  ctx.strokeStyle = locked ? 'rgba(28,38,74,0.90)'    : 'rgba(246,235,203,0.78)';
+  // a mitt closing on the rim, fingers wrapping toward the wheel
+  ctx.beginPath();
+  ctx.moveTo(-R*0.86,-R*0.52);
+  ctx.quadraticCurveTo(-R*0.20,-R*0.92,  R*0.46,-R*0.78);
+  ctx.quadraticCurveTo( R*1.00,-R*0.66,  R*1.00,-R*0.12);
+  ctx.quadraticCurveTo( R*1.00, R*0.52,  R*0.36, R*0.62);
+  ctx.quadraticCurveTo(-R*0.26, R*0.72, -R*0.86, R*0.42);
+  ctx.quadraticCurveTo(-R*1.10, R*0.00, -R*0.86,-R*0.52);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-R*0.70, R*0.10);
+  ctx.quadraticCurveTo(-R*0.20, R*0.46, R*0.18, R*0.98);
+  ctx.quadraticCurveTo(-R*0.30, R*0.86, -R*0.74, R*0.46);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  if(locked){
+    ctx.lineWidth=Math.max(1,R*0.12); ctx.strokeStyle='rgba(28,38,74,0.60)';
+    for(const fy of [-R*0.42, -R*0.06, R*0.30]){
+      ctx.beginPath(); ctx.moveTo(R*0.10,fy); ctx.quadraticCurveTo(R*0.62,fy-R*0.06,R*0.84,fy); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawHandMark(x,y,R,fill,locked,flip){
+  ctx.save(); ctx.lineCap='butt';
+  ctx.fillStyle = locked ? 'rgba(242,200,75,0.24)' : 'rgba(12,17,34,0.74)';
+  ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.fill();
+  ctx.lineWidth=Math.max(3,R*0.16);
+  ctx.strokeStyle = locked ? 'rgba(242,200,75,0.98)' : 'rgba(246,235,203,0.82)';
+  ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.stroke();
+  if(!locked && fill>0.01){
+    ctx.strokeStyle='rgba(127,178,217,0.98)';
+    ctx.lineWidth=Math.max(4,R*0.26); ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(x,y,R*1.24,-Math.PI/2,-Math.PI/2+fill*Math.PI*2); ctx.stroke();
+  }
+  ctx.restore();
+  drawGlove(x,y,R*0.92,flip,locked);
+}
+
+function drawSetupWheel(cx,cy,R,g){
+  const dim='rgba(246,235,203,0.78)', hot='rgba(242,200,75,0.96)';
+  const rim=Math.max(5,R*0.17);
+  ctx.save(); ctx.translate(cx,cy); ctx.lineCap='butt';
+  // a dark backing, so the wheel reads as an object and not as more skeleton
+  ctx.strokeStyle='rgba(12,17,34,0.80)'; ctx.lineWidth=rim*1.85;
+  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+  ctx.lineWidth=rim;
+  ctx.strokeStyle = g.L.lock?hot:dim;
+  ctx.beginPath(); ctx.arc(0,0,R,Math.PI*0.5,Math.PI*1.5); ctx.stroke();
+  ctx.strokeStyle = g.R.lock?hot:dim;
+  ctx.beginPath(); ctx.arc(0,0,R,-Math.PI*0.5,Math.PI*0.5); ctx.stroke();
+  const both = g.L.lock && g.R.lock;
+  ctx.lineCap='round';
+  for(const pass of [0,1]){
+    ctx.strokeStyle = pass ? (both?hot:dim) : 'rgba(12,17,34,0.80)';
+    ctx.lineWidth = pass ? Math.max(3,R*0.10) : Math.max(3,R*0.10)*2.1;
+    for(const a of [Math.PI, 0, Math.PI/2]){
+      ctx.beginPath(); ctx.moveTo(0,0);
+      ctx.lineTo(Math.cos(a)*R*0.92, Math.sin(a)*R*0.92); ctx.stroke();
+    }
+  }
+  ctx.beginPath(); ctx.arc(0,0,R*0.16,0,Math.PI*2);
+  ctx.fillStyle = both?hot:dim; ctx.fill();
+  if(both && g.both>0.01){
+    ctx.strokeStyle='rgba(127,178,217,0.98)'; ctx.lineCap='round';
+    ctx.lineWidth=rim*0.62;
+    ctx.beginPath(); ctx.arc(0,0,R,-Math.PI/2,-Math.PI/2+(g.both/GRIP_BOTH)*Math.PI*2); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawMirror(alpha){
+  ctx.clearRect(0,0,W,H);
+  const f = videoFit();
+  ctx.save(); ctx.scale(-1,1); ctx.globalAlpha=alpha;
+  ctx.drawImage(video, -(f.dx+f.dw), f.dy, f.dw, f.dh);
+  ctx.restore(); ctx.globalAlpha=1;
+  // outline what the camera can actually see
+  ctx.strokeStyle='rgba(242,200,75,0.55)'; ctx.lineWidth=2;
+  ctx.setLineDash([8,8]); ctx.strokeRect(f.dx+1,f.dy+1,f.dw-2,f.dh-2); ctx.setLineDash([]);
+}
+
+function makeBase(r){
+  // never return something that can produce NaN downstream
+  return {
+    ang:    r ? r.ang : 0,
+    hipY:   (r && isFinite(r.hipY)) ? r.hipY : 0.55,
+    shY:    (r && isFinite(r.shY))  ? r.shY  : 0.32,
+    torso:  (r && r.torso > 0.03)   ? r.torso : 0.18,
+    // null here reads as 0 (the top of the frame) wherever it is used, which
+    // silently kills brake and push for the whole race. Fall back to a wheel
+    // held just below the shoulders.
+    wristY: (r && isFinite(r.wristY)) ? r.wristY
+            : (((r && isFinite(r.shY)) ? r.shY : 0.32) + ((r && r.torso>0.03) ? r.torso : 0.18)*0.12),
+    spread: Math.max(0.05, (r && r.spread) ? r.spread : 0.20)
+  };
+}
+function beginRaceFrom(r, fresh){
+  base = makeBase(r);
+  limbUp={}; rest={}; lastLift=null; resetGrip(); resetFit();
+  try { blip(680,0.18,0.3); } catch(e){}
+  startRace(fresh !== false);
+}
+
+/* ---- the voice ----
+   Lifted from siege-capture.html, which shipped 28 Oct. Speech carries the
+   instruction, the screen carries the same words in type big enough to read
+   from the mark, and the blips carry the timing. If speechSynthesis is missing
+   or silent the screen still runs the session on its own. Unlocked by a real
+   utterance on the Start tap: a first utterance outside a user gesture is
+   refused by the browser and every later one is then silently dropped. */
+let speechOK = ('speechSynthesis' in window);
+let coachKey = '', coachSaid = 0;
+function sayNow(text){
+  if(!speechOK || !text) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
+    speechSynthesis.speak(u);
+  } catch(e){ speechOK = false; }
+}
+/* Speaks only when the thing being said CHANGES, and never twice inside
+   SAY_GAP. Without both it talks over itself while you shuffle into place. */
+const SAY_GAP = 1.4;
+function sayKeyed(key, text){
+  const now = performance.now()/1000;
+  if(key === coachKey || now - coachSaid < SAY_GAP) return;
+  coachKey = key; coachSaid = now; sayNow(text);
+}
+/* Where you are standing, in the words you would use to fix it.
+   Distance comes from your torso height - 0.18 is where both this game and
+   Sparks want you, measured on Hugo's own phone (doc 14).
+   Side comes from the hips' own x in the MIRRORED picture, the same space the
+   finish-line quiz reads a raised hand in, so the two never disagree. In a
+   mirrored view your own right is the right of the screen, so a player sitting
+   left of centre is told to move right. UNVERIFIED on a real body - it is the
+   one line here most likely to be the wrong way round. */
+const FIT_TORSO_HI = 0.215, FIT_TORSO_LO = 0.150, FIT_X = 0.16;
+function coach(r){
+  const hp = mid(L.lhip, L.rhip);
+  if(!r || !hp)              return {k:'none', big:'Step into the picture', say:'Step into the picture.', ok:false};
+  if(r.torso > FIT_TORSO_HI) return {k:'back', big:'Step back',             say:'Step back.',             ok:false};
+  if(r.torso < FIT_TORSO_LO) return {k:'near', big:'Come closer',           say:'Come a bit closer.',     ok:false};
+  if(hp.x < 0.5 - FIT_X)     return {k:'rgt',  big:'To your right',         say:'A little to your right.',ok:false};
+  if(hp.x > 0.5 + FIT_X)     return {k:'lft',  big:'To your left',          say:'A little to your left.', ok:false};
+  if(!legsSeen)              return {k:'legs', big:'Whole legs in frame',   say:'I need to see your legs.', ok:false};
+  if(squatDepth >= 0.35)     return {k:'tall', big:'Stand up straight',     say:'Stand up straight.',     ok:false};
+  return {k:'ok', big:'Locked in', say:'Locked in. Here we go.', ok:true};
+}
+
+/* ---- the painting you are asked to remember ---- */
+function drawInto(cv, im){
+  const g = cv.getContext('2d');
+  g.clearRect(0,0,cv.width,cv.height);
+  if(im && im !== 'failed' && im.naturalWidth){
+    const r = Math.min(cv.width/im.naturalWidth, cv.height/im.naturalHeight);
+    const dw = im.naturalWidth*r, dh = im.naturalHeight*r;
+    try { g.drawImage(im,(cv.width-dw)/2,(cv.height-dh)/2,dw,dh); return true; } catch(e){}
+  }
+  g.fillStyle='#1B2238'; g.fillRect(0,0,cv.width,cv.height);
+  return false;
+}
+function enterStudy(fresh){
+  stopFlag();
+  pickArt();
+  studyFresh = fresh;
+  ui.oCal.hidden = true; ui.oCal.classList.remove('counting');
+  ui.oEnd.hidden = true; ui.hud.hidden = true;
+  ui.studyName.textContent  = quizArt ? quizArt[2] : '';
+  ui.studyTitle.textContent = quizArt ? quizArt[1] : '';
+  ui.studyGo.classList.remove('lit');
+  setStudyGo('Tap when you have it', 'then walk back to your mark');
+  drawInto(ui.studyArt, quizArt ? artImg[quizArt[0]] : null);
+  ui.oStudy.hidden = false;
+  state = 'study';
+  keepAwake();
+}
+function setStudyGo(big, small){
+  ui.studyGo.textContent = big;
+  const s = document.createElement('small');
+  s.textContent = small;
+  ui.studyGo.appendChild(s);
+}
+function leaveStudy(){
+  if(state !== 'study') return;
+  ui.oStudy.hidden = true;
+  ui.studyGo.classList.remove('lit');
+  /* The painting is read at the phone and dismissed at the phone, and only
+     THEN do you walk back. Build 28 asked for a raised hand from the playing
+     mark, which meant either reading the card from two metres away or giving
+     up the position to come and read it - Hugo's words: "you are on the spot".
+     Nothing is asked of you from the mark any more. The gate that follows is
+     the one that cares where you stand, and the voice talks you into it. */
+  if(studyFresh) enterCalibrate(); else enterReady();
+}
+function studyStep(r, dt){
+  // the picture may still be arriving; keep trying, the name is up either way
+  if(quizArt && artImg[quizArt[0]] && artImg[quizArt[0]] !== 'failed'){
+    drawInto(ui.studyArt, artImg[quizArt[0]]);
+  }
+}
+function enterCalibrate(){
+  stopFlag(); quizOpen = false;
+  ui.oCal.classList.remove('counting');
+  ui.calTitle.textContent = 'Finding you';
+  ui.calHint.textContent  = 'Walk back into the picture';
+  ui.calSub.textContent   = 'Hold the wheel with both hands to start';
+  ui.oEnd.hidden = true; ui.oStudy.hidden = true; ui.oCal.hidden = false;
+  state = 'calibrate'; coachKey = ''; hipRef = null; shRef = null; squatDepth = 0; keepAwake();
+  sayNow('Walk back until I can see all of you.');
+}
+
+/* ---- getting back in for a second race ----
+   "One more race" used to start the race on the tap, while you were still
+   bent over the phone. Measured against a first race from the calibration
+   pose: for the first 2.5 s the legs were out of frame, leaning in read as a
+   full squat so the brake sat at 1.00, speed stayed at 0, and ten seconds in
+   you had covered 81 m against 165 m. That is the whole of "the second race
+   is buggy" - nothing in the driving model differs between the two races,
+   which I checked by diffing every value frame by frame.
+   So the second race now waits for you the same way the first one does: it
+   starts when you are standing with your legs in the picture, and it re-reads
+   your body at that moment instead of trusting a pose from before race one. */
+const READY_HOLD = 1.2;     // seconds standing properly before the lights go out
+const READY_CAP  = 12;      // never trap anyone on this screen
+let readyT = 0, readyCap = 0, readyTick = -1;
+function enterReady(){
+  stopFlag();
+  quizOpen = false;
+  ui.oEnd.hidden = true; ui.oCal.hidden = false;
+  ui.calTitle.textContent = 'Walk back';
+  ui.calHint.textContent  = 'The race starts on its own';
+  ui.calSub.textContent   = 'No need to come back to the phone';
+  ui.oCal.classList.remove('counting');
+  ui.oStudy.hidden = true;
+  state = 'ready'; readyT = 0; readyCap = 0; readyTick = -1; coachKey = '';
+  // the standing reference is whatever the last race left behind; start clean,
+  // or a crouch at the finish reads as a squat on the way back in
+  hipRef = null; shRef = null; squatDepth = 0;
+  keepAwake();
+  sayNow('Walk back to your mark.');
+}
+function readyStep(r, dt){
+  readyCap += dt;
+  const c = coach(r);
+  readyT = c.ok ? readyT + dt : 0;
+  if(c.ok){
+    const n = Math.max(1, Math.ceil((READY_HOLD - readyT)/(READY_HOLD/3)));
+    if(n !== readyTick){ readyTick = n; try { blip(520, 0.10, 0.22); } catch(e){} }
+    sayKeyed('ok', c.say);
+    ui.oCal.classList.add('counting');
+    ui.calTitle.textContent = String(n);
+    ui.calHint.textContent  = 'Ready';
+  } else {
+    readyTick = -1;
+    ui.oCal.classList.remove('counting');
+    ui.calTitle.textContent = c.big;
+    ui.calHint.textContent  = 'The race starts on its own';
+    sayKeyed(c.k, c.say);
+  }
+  if(readyT >= READY_HOLD || readyCap > READY_CAP){
+    ui.oCal.classList.remove('counting');
+    coachKey = '';
+    beginRaceFrom(r, false);
+  }
+}
+function calibrate(r,dt){
+  const F = videoFit();
+  const fit = fitGuide(F, dt);
+  // same hysteresis as the drive gate: a limb hovering on one threshold made
+  // the guide strobe between seen and not-seen, which reads as broken tracking
+  const latch = (k, i1, i2) => {
+    const thr = seenLatch[k] ? VIS_KEEP : VIS_GET;
+    return (seenLatch[k] = !!(pt(i1,thr)||pt(i2,thr)));
+  };
+  const kneesSeen  = latch('kn', L.lkn,  L.rkn);
+  const anklesSeen = latch('an', L.lank, L.rank);
+  // knees are no longer a place to put your knee. being seen IS the whole goal,
+  // and it is the only reason standing further back ever mattered.
+  drawGuide(F, fit, kneesSeen);
+
+  // the two hand marks, on the shape as fitted to this body
+  const U = fit ? fit.U : Math.min(F.dw,F.dh)*0.25;
+  const tol = U*0.46;
+  const state = [];
+  for(const c of CHECKS){
+    const tx = fit ? fit.X(c.g) : F.dx+GUIDE[c.g][0]*F.dw;
+    const ty = fit ? fit.Y(c.g) : F.dy+GUIDE[c.g][1]*F.dh;
+    const j = joint(c.i);
+    // an ellipse, taller than it is wide: side-to-side is what tells the two
+    // marks apart, height is the part nobody can judge
+    const d = j ? Math.hypot((j.x-tx)/(tol*1.05), (j.y-ty)/(tol*1.55)) : 99;
+    const near = !!(j && j.v>0.12 && d < 1 && fit);
+    state.push({c:c, tx:tx, ty:ty, j:j, near:near, d:d});
+  }
+
+  // each hand arrives on its own mark and latches there, one at a time
+  for(let k=0;k<2;k++){
+    const g = k ? grip.R : grip.L, st = state[k];
+    const lost = !(st.j && st.j.v>0.12);   // no wrist in view: no information, so change nothing
+    if(lost) continue;
+    if(st.near){
+      g.off=0;
+      if(!g.lock){
+        g.fill=Math.min(GRIP_FILL, g.fill+dt);
+        if(g.fill>=GRIP_FILL){ g.lock=true; try{ blip(k?659:523,0.13,0.24); }catch(e){} }
+      }
+    } else if(g.lock){
+      g.off = (st.d > 1.7) ? g.off+dt : 0;
+      if(g.off>=GRIP_FREE){ g.lock=false; g.fill=0; g.off=0; }
+    } else {
+      g.fill=Math.max(0, g.fill-dt*0.5);   // build fast, forget slowly
+    }
+  }
+  const hands = grip.L.lock && grip.R.lock;
+  // the last hold has to be a real hold: a latched hand drifting off stops the
+  // count, a hand the tracker has merely lost does not
+  const holding = hands && grip.L.off===0 && grip.R.off===0;
+  grip.both = holding ? Math.min(GRIP_BOTH, grip.both+dt) : 0;
+
+  // the wheel sits between the two hand marks, so standing into the shape is taking the wheel
+  const wx=(state[0].tx+state[1].tx)/2, wy=(state[0].ty+state[1].ty)/2;
+  const wr=Math.max(U*0.28, Math.hypot(state[1].tx-state[0].tx, state[1].ty-state[0].ty)/2);
+  drawSetupWheel(wx, wy, wr, grip);
+
+  // the marks themselves
+  for(let k=0;k<state.length;k++){
+    const st = state[k];
+    const g = k ? grip.R : grip.L;
+    drawHandMark(st.tx, st.ty, U*0.136, g.fill/GRIP_FILL, g.lock, k?-1:1);
+    // where that limb actually is, so you can see which way to move
+    const settled = (k?grip.R:grip.L).lock;
+    if(st.j && st.j.v>0.12 && !settled){
+      ctx.save(); ctx.lineCap='round'; ctx.setLineDash([Math.max(6,U*0.080), Math.max(5,U*0.072)]);
+      ctx.strokeStyle='rgba(12,17,34,0.75)'; ctx.lineWidth=Math.max(4,U*0.056);
+      ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
+      ctx.strokeStyle='rgba(246,235,203,0.80)'; ctx.lineWidth=Math.max(2,U*0.028);
+      ctx.beginPath(); ctx.moveTo(st.j.x,st.j.y); ctx.lineTo(st.tx,st.ty); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle='rgba(12,17,34,0.85)';
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.104, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(246,235,203,0.96)';
+      ctx.beginPath(); ctx.arc(st.j.x, st.j.y, U*0.080, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  let title, hint;
+  if(!pose || !fit){    title='Finding you';     hint='Step into the picture'; }
+  else if(!hands){      title='Take the wheel';
+                        hint=(grip.L.lock||grip.R.lock) ? 'Good &mdash; now the other hand'
+                                                        : 'A hand on each mark, one at a time'; }
+  else {                title='That is it';      hint = holding ? 'Hold it&hellip;' : 'Hold still'; }
+
+  ui.calTitle.innerHTML = title;
+  ui.calHint.innerHTML = hint;
+  // the same words out loud, so none of this has to be read from the mark
+  if(!pose || !fit){ const c = coach(r); sayKeyed(c.k, c.say); }
+  else if(!hands)  sayKeyed('wheel', 'Now take the wheel. A hand on each mark.');
+  else             sayKeyed('hold',  'Hold it.');
+  ui.calSub.innerHTML = kneesSeen ? 'Legs tracked &mdash; march to drive'
+                        : (anklesSeen ? 'Feet tracked &mdash; march to drive'
+                                      : 'Legs not in frame &mdash; step back until they show');
+
+  const kv = (i)=>{ const q = pose&&pose[i]; return (q&&q.visibility!==undefined)?q.visibility.toFixed(2):'--'; };
+  ui.calDiag.innerHTML =
+      'build ' + BUILD + ' &middot; cam ' + (F.vw?F.vw+'x'+F.vh:'--') + (F.vw&&F.vw>F.vh ? ' LANDSCAPE' : '')
+    + ' &middot; torso ' + (r? r.torso.toFixed(2):'--')
+    + '<br>kn ' + kv(25) + '/' + kv(26) + ' &middot; marks '
+    + state.map(x=>x.near?'Y':'n').join('') + (kneesSeen?' kn+':' kn-')
+    + ' &middot; grip ' + (grip.L.lock?'L':'-') + (grip.R.lock?'R':'-')
+    + ' ' + grip.L.fill.toFixed(2) + '/' + grip.R.fill.toFixed(2)
+    + ' &middot; both ' + grip.both.toFixed(2);
+
+  if(holding && grip.both >= GRIP_BOTH) beginRaceFrom(r);
+}
+
+let lastT=0, renderDt=1/60;
+/* Answered with a hand because the hands are already the controls. The view
+   is mirrored, so the hand you raise is on the side of the option you mean -
+   side is taken from the wrist's own on-screen x, which keeps it consistent
+   with the two hand marks on the setup screen. Buttons are still there to
+   tap, because a hand read that fails should never trap you on this screen. */
+/* Three options now, so three gestures: the hand on the left picks the left
+   one, the hand on the right picks the right one, and both hands pick the
+   middle. Both-hands used to mean "nothing selected", so it is held a little
+   longer than a single hand - people do put both hands up while they think. */
+const QOPT = () => [document.getElementById('quizA'),
+                    document.getElementById('quizB'),
+                    document.getElementById('quizC')];
+/* BUILD 38 - two questions, three tap choices each: first the TITLE, then the
+   ARTIST. Hugo: "you're not raising hands, you're just selecting... tapping".
+   The raised-hand answer is gone: by the end screen you are at the phone, and
+   walking up to it with your arms moving could answer by accident.
+   Decoys come from THIS race's own boards wherever possible (see the 61.7%
+   note that used to sit here: a name you had never seen is no decoy), and
+   top up from the whole pool only when the boards ran short. */
+function quizDecoys(field){
+  const want = quizArt[field], out = [];
+  const add = (a) => { if(a[field] !== want && !out.some(x => x[field] === a[field])) out.push(a); };
+  const own = artSet.slice();
+  for(let i=own.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=own[i]; own[i]=own[j]; own[j]=t; }
+  for(const a of own){ if(out.length < 2) add(a); }
+  const pool = ART.slice();
+  while(out.length < 2 && pool.length) add(pool.splice(Math.floor(Math.random()*pool.length),1)[0]);
+  return out;
+}
+function quizAsk(stage){
+  quizStage = stage; quizBusy = false; quizDone = false;
+  const field = (stage === 'title') ? 1 : 2;
+  quizOpts = [quizArt, ...quizDecoys(field)];
+  for(let i=quizOpts.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+    const t=quizOpts[i]; quizOpts[i]=quizOpts[j]; quizOpts[j]=t; }
+  quizRight = quizOpts.indexOf(quizArt);
+  QOPT().forEach((el,i)=>{ el.className='quizOpt';
+    el.querySelector('span').textContent = quizOpts[i] ? quizOpts[i][field] : ''; });
+  document.getElementById('quizQ').textContent = (stage === 'title')
+    ? 'What is it called?' : 'Who painted it?';
+  document.getElementById('quizHint').textContent = (stage === 'title')
+    ? 'Tap your answer  -  1 of 2' : 'Tap your answer  -  2 of 2';
+  quizOpen = true;
+}
+function quizRead(dt){ /* answered by tapping since build 38 */ }
+function quizAnswer(i){
+  if(quizDone || quizBusy || !quizOpts || !quizOpts[i]) return;
+  const O = QOPT();
+  O.forEach(el=>{ el.className='quizOpt'; });
+  const right = (i === quizRight);
+  if(right) quizScore++;
+  O[i].classList.add(right ? 'right' : 'wrong');
+  if(!right) O[quizRight].classList.add('right');
+  blip(right?880:190, right?0.26:0.3, 0.3, right?'triangle':'sawtooth');
+  recPush({ k:'quiz', t:+performance.now().toFixed(1), stage:quizStage, right });
+  if(quizStage === 'title'){
+    quizBusy = true;
+    document.getElementById('quizQ').textContent = right
+      ? 'Right - ' + quizArt[1] : 'It was ' + quizArt[1];
+    document.getElementById('quizHint').textContent = 'Now: who painted it?';
+    const tok = quizToken;
+    setTimeout(()=>{ if(tok === quizToken && state === 'over') quizAsk('artist'); }, 1400);
+    return;
+  }
+  quizDone = true; quizOpen = false;
+  document.getElementById('quizQ').textContent = quizArt[1] + ', by ' + quizArt[2];
+  document.getElementById('quizHint').textContent =
+      quizScore === 2 ? 'Both right. Finished and remembered - the full win.'
+    : quizScore === 1 ? 'One of two. Half the painting stayed with you.'
+                      : 'You finished, but the painting got away.';
+}
+/* ---- the recording ------------------------------------------------
+   Lifted from Sparks (sparks.html), where it is how real bugs got found
+   instead of guessed at. Build 33 adds nothing else.
+
+   Every camera frame keeps the time the CAMERA captured it, the separate
+   time the estimate came back, and all 33 landmarks with their own
+   confidence. Gaps where frames never arrived, and moments the body was
+   lost and found, are marked. On top of Sparks' recording this one also
+   logs the game's own state once per drawn frame - speed, cadence, which
+   limb is driving, steering, lane position, jump, boost, brake, squat - so
+   a report like "it accelerates without marching" or "the right side is
+   harder to come back from" can be checked against what actually happened.
+
+   It lives in memory only and disappears when the page closes. It becomes
+   a file only if the player taps Save recording, which downloads it to the
+   phone. Nothing is sent anywhere. */
+const REC_CAP = 60000;
+const rec = [];
+let recDropped = 0, lostSince = null, lastFrameAt = 0, recHeaded = false;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  if(recHeaded) return; recHeaded = true;
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'racing', file:'vangogh-lab3.html', build:BUILD,
+    orientation: (window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'f = camera frame: cap = video.currentTime (s, camera clock), ready = performance.now() (ms) when the estimate returned, lm = 33 x [x,y,z,visibility]. g = game state once per drawn frame, t = performance.now() (ms). spd in world units/s; km/h = spd/200*3.6*1.6. x = lane position, |x|>1 is off the road. src = limb driving the throttle. cad = steps/min.',
+    consts:{ maxSpeed, FULL_CADENCE, COAST_SLOW, ROLL_KEEP, STEER_FULL, STEER_DEAD, ROUGH_LIMIT, ROUGH_BITE, ROUGH_GRIP,
+             JUMP_HOLD, JUMP_LINE, JUMP_FLOOR, JUMP_LAND, CORNER_BOOST, LINE_BOOST,
+             SQUAT_DEPTH, SQUAT_DEAD } });
+}
+function recGame(){
+  // before the first race there may be no track yet; never let the recorder
+  // be the thing that throws inside the frame loop
+  const sg = segments.length ? findSeg(position+playerZ) : null;
+  recPush({ k:'g', t:+performance.now().toFixed(1), st:state,
+    spd:Math.round(speed), cad:+(cadence||0).toFixed(1), src:driveSrc, legs:legsSeen?1:0,
+    steer:+steer.toFixed(3), sraw:+steerRaw.toFixed(3), x:+playerX.toFixed(3),
+    jT:+jumpT.toFixed(2), jmp:jumped?1:0, bst:+boost.toFixed(2), brk:+brakeRamp.toFixed(2),
+    sq:+squatDepth.toFixed(2), dist:+distance.toFixed(1), seg:sg?sg.index:null, curve:sg?+(sg.curve||0).toFixed(2):null });
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = lastT ? Math.min(0.1,(now-lastT)/1000) : 0;
+  lastT=now; renderDt=dt||1/60;
+  if(video.readyState<2||!landmarker) return;
+  if(video.currentTime!==lastVideoTime){
+    const vt=video.currentTime;
+    if(lastFrameAt && now-lastFrameAt > 120) recPush({ k:'gap', t:+now.toFixed(1), ms:Math.round(now-lastFrameAt) });
+    lastFrameAt=now;
+    lastVideoTime=vt;
+    let fresh=false;
+    try {
+      const res=landmarker.detectForVideo(video,now);
+      pose=(res&&res.landmarks&&res.landmarks[0])?res.landmarks[0]:null;
+      fresh=true;
+    } catch(e){}
+    if(fresh){
+      recHeader();
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+                                        +(p.z||0).toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+vt.toFixed(4), ready:+performance.now().toFixed(1), st:state, lm });
+      if(!pose && lostSince === null){ lostSince = now; recPush({ k:'lost', t:+now.toFixed(1) }); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:+now.toFixed(1), out:Math.round(now-lostSince) }); lostSince = null; }
+    }
+  }
+  const r=readPose(dt, now);
+
+  if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); recGame(); return; }
+  if(state==='ready'){ drawMirror(0.5); readyStep(r,dt); recGame(); return; }
+  if(state==='study'){ studyStep(r, dt); return; }
+
+  if(state==='race'){
+    acc+=dt;
+    while(acc>step){ update(step,r,now); acc-=step; if(state!=='race') break; }
+    render();
+    recGame();
+    return;
+  }
+  if(state==='over'){ render(); if(quizOpen) quizRead(dt); }
+}
+
+/* ---- wiring ---- */
+let chosenLaps = 1;
+document.querySelectorAll('.mode').forEach(function(m){
+  m.addEventListener('click', function(){
+    document.querySelectorAll('.mode').forEach(function(x){ x.classList.remove('sel'); });
+    m.classList.add('sel');
+    chosenLaps = parseInt(m.getAttribute('data-laps'),10);
+    LAPS = chosenLaps;
+  });
+});
+document.getElementById('bStart').addEventListener('click', begin);
+document.getElementById('bGo').addEventListener('click', function(){
+  beginRaceFrom(readPose(0, performance.now()), state !== 'ready');
+});
+document.getElementById('bMore').addEventListener('click', function(){ enterStudy(false); });
+document.getElementById('bRec').addEventListener('click', function(){
+  if(recDropped) recPush({ k:'dropped', n:recDropped });
+  const lines = rec.map(function(o){ return JSON.stringify(o); }).join('\n');
+  const blob = new Blob([lines], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'racing-b' + BUILD + '-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+});
+/* Tap anywhere on the card. You are standing at the phone when you read it,
+   so a tap is the honest control here and no gesture is needed. */
+document.getElementById('oStudy').addEventListener('click', leaveStudy);
+document.getElementById('bAgain').addEventListener('click', function(){ enterStudy(true); });
+QOPT().forEach((el,i)=> el.addEventListener('click',()=>quizAnswer(i)));
+/* The weight row remembers itself and gets out of the way once answered or
+   skipped; "change" brings it back. Nothing here blocks starting. */
+const wtRow=document.getElementById('wtRow'), wtIn=document.getElementById('wtIn');
+function wtDone(){
+  wtRow.innerHTML='';
+  const b=document.createElement('button'); b.className='ghost';
+  b.textContent = haveKg() ? (bodyKg()+' kg  -  change') : 'add your weight';
+  b.addEventListener('click', ()=>{ writeLS('vgKg','0'); wtShow(); });
+  wtRow.appendChild(b);
+}
+function wtShow(){
+  wtRow.innerHTML='';
+  const l=document.createElement('label'); l.textContent='Your weight, for the calorie count';
+  const i=document.createElement('input'); i.type='number'; i.inputMode='numeric';
+  i.min='25'; i.max='250'; i.placeholder='kg'; i.id='wtIn';
+  const sk=document.createElement('button'); sk.className='ghost'; sk.textContent='Skip';
+  i.addEventListener('change', ()=>{ const v=parseFloat(i.value);
+    if(isFinite(v)&&v>=25&&v<=250){ writeLS('vgKg', v); } wtDone(); });
+  sk.addEventListener('click', ()=>{ writeLS('vgKgSkip','1'); wtDone(); });
+  wtRow.appendChild(l); wtRow.appendChild(i); wtRow.appendChild(sk);
+}
+if(haveKg() || readLS('vgKgSkip','0')==='1') wtDone(); else wtShow();
+const bn=document.getElementById('buildNo'); if(bn) bn.textContent=BUILD;
+document.getElementById('eBest').textContent=fmtTime(readBestTime());
+showStreak();
+showOrientNote();
+</script>
+</body>
+</html>
