@@ -1,0 +1,1181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#120618">
+<title>Second Line</title>
+<style>
+  :root{ --ink:#120618; --warm:#fff4e6; --dim:#b09ac0;
+         --hot:#ff4d9d; --gold:#ffc23d; --cyan:#3ddfe0; --good:#6ee787; --bad:#ff6b6b; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  /* TYPE BIG ENOUGH TO READ FROM THE MARK. Hugo stands 2-3 m from the
+     phone and cannot read phone-sized text from there, so everything
+     that matters while he is standing back is sized in vh, not px. */
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;justify-content:safe center;padding:3vh 3vw;text-align:center;gap:1.6vh;
+    overflow-y:auto;overscroll-behavior:contain;
+    background:radial-gradient(130% 95% at 50% 15%,#2b0f36 0%,var(--ink) 70%);z-index:5}
+  .ov[hidden]{display:none}
+  h1{font-size:clamp(28px,11vh,80px);margin:0;letter-spacing:.14em;font-weight:400;line-height:1.05}
+  h1 .g{color:var(--hot)}
+  .sub{color:var(--dim);font-size:clamp(14px,3.4vh,24px);line-height:1.45;max-width:34ch;margin:0}
+  .big{font-size:clamp(20px,7vh,56px);letter-spacing:.06em;margin:0;color:var(--gold)}
+  button{font:inherit;font-size:clamp(17px,4vh,30px);letter-spacing:.05em;padding:1.6vh 5vw;
+    border-radius:999px;border:2px solid var(--hot);background:var(--hot);color:#2a0014;cursor:pointer}
+  button.ghost{background:transparent;color:var(--hot)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:2vw;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:clamp(11px,2.3vh,16px);max-width:46ch;line-height:1.4;margin:0}
+  .err{color:var(--bad);font-size:clamp(12px,2.6vh,18px);max-width:34ch;line-height:1.4}
+  #hud{position:fixed;top:0;left:0;right:0;padding:1.4vh 2vw;display:flex;
+    justify-content:space-between;align-items:flex-start;z-index:3;pointer-events:none;
+    font-size:clamp(11px,2.4vh,18px);letter-spacing:.1em;
+    background:linear-gradient(rgba(18,6,24,.8),rgba(18,6,24,0));text-shadow:0 2px 8px #000}
+  #hud[hidden],#band[hidden]{display:none}
+  #hud b{display:block;font-weight:400;color:var(--gold);font-size:clamp(18px,5vh,38px)}
+  /* THE BAND is the one thing he reads while dancing. Nothing else on
+     screen competes with it. */
+  /* A PLATE BEHIND THE BAND. The render showed the cue line crossing
+     the player's own arms and becoming unreadable; a text shadow was
+     not enough against a lit limb. */
+  #band{position:fixed;left:0;right:0;top:40%;transform:translateY(-50%);
+    text-align:center;z-index:4;pointer-events:none;text-shadow:0 3px 14px #000;
+    padding:1.2vh 0 1.6vh;
+    background:linear-gradient(90deg,rgba(18,6,24,0),rgba(18,6,24,.86) 10%,
+                               rgba(18,6,24,.86) 90%,rgba(18,6,24,0))}
+  #bandA{display:block;font-size:clamp(30px,13vh,110px);letter-spacing:.1em;color:var(--gold);line-height:1}
+  #bandB{display:block;font-size:clamp(14px,3.6vh,26px);color:var(--warm);margin-top:1vh}
+  #tenWrap{display:flex;align-items:baseline;gap:1.5vw;justify-content:center}
+  #ten{font-size:clamp(70px,30vh,240px);color:var(--hot);line-height:1}
+  #tenOf{font-size:clamp(18px,5vh,40px);color:var(--dim)}
+  table{border-collapse:collapse;font-size:clamp(13px,3vh,22px)}
+  td{padding:.5vh 2vw}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--gold)}
+  .bar{display:inline-block;width:22vw;max-width:260px;height:1.6vh;min-height:9px;
+    border-radius:999px;background:rgba(255,255,255,.15);overflow:hidden;vertical-align:middle}
+  .bar i{display:block;height:100%;background:var(--cyan)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" hidden>
+  <div><span style="color:var(--dim)">PHASE</span><b id="hPhase">LEARN</b></div>
+  <div class="r" style="text-align:right"><span style="color:var(--dim)">TIME</span><b id="hTime">0:00</b></div>
+</div>
+
+<div id="band" hidden><b id="bandA"></b><span id="bandB"></span></div>
+
+<div class="ov" id="oRot" hidden>
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Sideways. A phone camera is landscape whatever you do with it.</p>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>SECOND<br><span class="g">LINE</span></h1>
+  <p class="sub">Learn four moves. Then dance them to a disco track with nothing on screen telling you the order. One score out of ten.</p>
+  <div class="row"><button id="bStart">Start</button></div>
+  <p class="note" id="loadMsg" hidden>Starting the camera…</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">About four minutes. Nothing leaves your phone — the camera is read on the device and no video is sent anywhere.</p>
+</div>
+
+<div class="ov" id="oFit" hidden>
+  <h1 id="fitBig">FIND YOUR<br><span class="g">SPOT</span></h1>
+  <p class="big" id="fitMsg">Looking for you…</p>
+  <div class="row"><button id="bSkip" class="ghost">Start anyway</button></div>
+  <p class="note">It fits the room it finds. Three of the four moves are on the spot, so a small room is fine — it only needs to see you from head to knees.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <p class="big" id="endTag">YOUR DANCE</p>
+  <div id="tenWrap"><span id="ten">0</span><span id="tenOf">/ 10</span></div>
+  <table id="endRows"></table>
+  <div class="row"><button id="bAgain">Dance again</button><button id="bSave" class="ghost">Save recording</button></div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { FilesetResolver, PoseLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12";
+
+/*====== signal.js ======*/
+/* ---- the landmark reader, lifted from Sparks unchanged -----------
+   Hysteresis: a joint already tracked is kept on a much lower bar than
+   one picked up fresh. One threshold for both makes tracking strobe
+   between seen and not seen, which reads as a broken game rather than a
+   dim room. */
+const VIS_GET = 0.15;              // confidence to acquire a landmark
+const VIS_KEEP = 0.04;             // confidence to keep one already acquired
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+// A is the player's left, which a mirrored picture puts on the left of
+// the screen, so the player's left really does look like their left.
+
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? VIS_KEEP : VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };       // mirrored, normalised to the frame
+  };
+}
+
+/*====== figure.js ======*/
+/* ==================================================================
+   SECOND LINE — the figure, and the vocabulary derived from it.
+   This block is the single source of truth. The game draws from it and
+   the matcher's targets are derived from it at load time. Nothing that
+   the matcher scores is ever typed twice.
+   ================================================================== */
+
+/* Segment lengths in torso units (torso = shoulder centre to hip centre).
+   From Four Points, which corrected Gap's fore:0.78 — a forearm is SHORTER
+   than an upper arm, and in Gap that was harmless only because an arm there
+   is specified by direction and elbow angle. */
+const SEG = { torso:1.0, upper:0.66, fore:0.52, thigh:0.88, shin:0.86,
+              hipHalf:0.26, shHalf:0.40, head:0.44, foot:0.24 };
+
+const REACH = SEG.upper + SEG.fore;          // 1.18 — shoulder to fingertip
+const LEG   = SEG.thigh + SEG.shin;          // 1.74 — hip to ankle
+const D2R = Math.PI/180;
+
+/* ---- the figure -------------------------------------------------
+   A pose says what a body can be TOLD to do: how low the hips sit, how
+   far apart the feet are, which way each arm points and how bent the
+   elbow is, and which knee is lifted. Everything else is solved.
+
+   Body frame: origin at hip centre, +x to the player's right as the
+   MIRRORED picture shows it, +y UP, one unit = one torso.            */
+function buildFigure(p){
+  const hipDrop = p.hipDrop || 0;                       // 0 tall, 1 = deepest squat
+  const squat   = hipDrop * 0.62;                       // hips fall this many torsos
+  const hipY    = 0;                                    // the frame's own origin
+  /* FORWARD PITCH. Nobody squats deep with a vertical spine — the torso
+     tips forward to keep the weight over the feet, and the camera sees the
+     torso's projection, cos(pitch) of the real thing. The figure carries
+     it so the matcher EXPECTS it: without this an honest deep squat is
+     punished by the very feature that exists to catch a player folding at
+     the waist instead of bending their knees. */
+  const pitch   = (p.pitch || 0) * Math.PI/180;
+  const shY     = SEG.torso * Math.cos(pitch);
+  const hip = { A:{x:-SEG.hipHalf,y:hipY}, B:{x:SEG.hipHalf,y:hipY} };
+  const sh  = { A:{x:-SEG.shHalf, y:shY},  B:{x:SEG.shHalf, y:shY} };
+
+  /* legs. The ankle sits a full leg below the hip when standing, and rises
+     by `squat` as the hips drop, because the feet stay on the floor. Stance
+     width pushes the ankles out, which also shortens the vertical drop. */
+  const half = (p.stance || 0.30);
+  const drop = LEG - squat;
+  const ankleY = -Math.sqrt(Math.max(0.04, drop*drop - Math.max(0, half-SEG.hipHalf)**2));
+  const ank = { A:{x:-half,y:ankleY}, B:{x:half,y:ankleY} };
+
+  /* A LIFTED KNEE IS NOT SOLVED BY THE HINGE.
+     The hinge biases the knee OUTWARD, which is right for a squat and
+     badly wrong for a march: it threw the knee more than a torso width
+     out to the side, and the contact sheet showed a figure kicking
+     sideways rather than stepping. A knee lifted in front of the body
+     points at the camera, so it foreshortens — the knee rises toward
+     the hip and stays near it, and the shin hangs almost straight
+     down. Placed directly here, and the hinge left to the legs that
+     are actually bearing weight. */
+  const lifted = {};
+  for(const s of ['A','B']){
+    if(p.knee !== s) continue;
+    const side = (s==='A' ? -1 : 1);
+    const th = Math.max(0, Math.min(1, p.kneeHigh==null ? 0.75 : p.kneeHigh));
+    const k = { x: hip[s].x + side*(0.10 + 0.14*th), y: hip[s].y - SEG.thigh*(1 - 0.78*th) };
+    lifted[s] = k;
+    // the shin swings back under the body, so the bend is visible head on
+    ank[s] = { x: k.x - side*0.16*th, y: k.y - SEG.shin*(1 - 0.26*th) };
+  }
+  const kn = {};
+  for(const s of ['A','B'])
+    kn[s] = lifted[s] || hinge(hip[s], SEG.thigh, ank[s], SEG.shin, (s==='A'?-1:1), {x:(s==='A'?-1:1),y:0});
+
+  /* arms. Each is a direction from the shoulder plus an elbow bend.
+     dir is degrees measured from straight DOWN, positive swinging outward,
+     so 0 is hanging, 90 is straight out sideways, 180 is straight overhead. */
+  const wr = {}, el = {};
+  for(const s of ['A','B']){
+    const a   = p.arm[s];
+    const out = (s==='A'? -1 : 1);
+    const th  = a.dir * D2R;
+    const ext = REACH * (a.ext === undefined ? 1 : a.ext);   // 1 straight, <1 bent
+    wr[s] = { x: sh[s].x + out * Math.sin(th) * ext,
+              y: sh[s].y - Math.cos(th) * ext };
+    /* the elbow bulges AWAY from the body, which is the direction a human
+       elbow actually goes. Gap picked the inward fold and drew arms buried
+       inside the torso in three artwork poses. */
+    el[s] = hinge(sh[s], SEG.upper, wr[s], SEG.fore, out, { x: out, y: -0.25 });
+  }
+  const nose = { x:(sh.A.x+sh.B.x)/2, y: shY + SEG.head };
+  return { hip, sh, kn, ank, el, wr, nose,
+           hipC:{x:0,y:hipY}, shC:{x:(sh.A.x+sh.B.x)/2, y:shY} };
+}
+
+/* Where a joint sits when the bones either side are fixed and the ends
+   pinned. `bulge` is a DIRECTION, not a height comparison: Four Points
+   found that picking the fold by height drew a squat with its knee in the
+   air, and picking it by lateral position (Gap's way) is only right for a
+   standing figure seen head on. */
+function hinge(p, r1, q, r2, side, bulge){
+  const dx = q.x - p.x, dy = q.y - p.y;
+  const d = Math.hypot(dx, dy);
+  if(d < 1e-6) return { x:p.x + r1*(side||1), y:p.y };
+  if(d >= r1 + r2) return { x:p.x + dx/d*r1, y:p.y + dy/d*r1 };
+  if(d <= Math.abs(r1 - r2)) return { x:p.x + dx/d*r1, y:p.y + dy/d*r1 };
+  const a = (r1*r1 - r2*r2 + d*d) / (2*d);
+  const h = Math.sqrt(Math.max(0, r1*r1 - a*a));
+  const bx = p.x + dx*a/d, by = p.y + dy*a/d;
+  const ux = -dy/d*h, uy = dx/d*h;
+  const s1 = { x:bx+ux, y:by+uy }, s2 = { x:bx-ux, y:by-uy };
+  const score = s => (s.x - (p.x+q.x)/2)*bulge.x + (s.y - (p.y+q.y)/2)*bulge.y;
+  return score(s1) >= score(s2) ? s1 : s2;
+}
+
+/*====== figmotion.js ======*/
+function poseAt(id, p, { size=1, off=0 }={}){
+  const s = Math.sin(2*Math.PI*p), c = Math.cos(2*Math.PI*p);
+  const A = { hipDrop:0, stance:0.30, pitch:0, arm:{A:{dir:20,ext:0.5},B:{dir:20,ext:0.5}} };
+  if(id==='STRUT'){
+    A.knee = s > 0 ? 'B' : 'A';
+    A.kneeHigh = 0.35 + 0.55*size*Math.abs(s);
+    A.arm.A = { dir: 22 + off + 14*size*s,  ext: 0.50 };
+    A.arm.B = { dir: 22 + off - 14*size*s,  ext: 0.50 };
+    A.pitch = 4;
+  } else if(id==='PARASOL'){
+    A.arm.A = { dir: 150 + off + 26*size*c, ext: 1.00 };
+    A.arm.B = { dir: 20  + off,             ext: 0.44 };
+    A.hipDrop = 0.06 + 0.06*size*Math.abs(s);
+    A.stance = 0.28;
+  } else if(id==='DIP'){
+    A.hipDrop = 0.10 + 0.62*size*(0.5 - 0.5*c);
+    A.pitch   = 6 + 20*size*(0.5 - 0.5*c);
+    A.stance  = 0.46;
+    A.arm.A = { dir: 46 - off - 10*size*c, ext: 0.96 };
+    A.arm.B = { dir: 46 - off - 10*size*c, ext: 0.96 };
+  } else if(id==='SHOUT'){
+    A.arm.A = { dir: 152 + off, ext: 1.00 };
+    A.arm.B = { dir: 152 + off, ext: 1.00 };
+    A.hipDrop = 0.10;
+    A.stance  = 0.40 + 0.22*size*Math.abs(s);
+    A.sway    = 0.45*size*s;
+  }
+  return A;
+}
+function landmarks(id, p, o={}){
+  const A = poseAt(id, p, o);
+  const f = buildFigure(A);
+  const dx = A.sway || 0;
+  const L = { shA:f.sh.A, shB:f.sh.B, elA:f.el.A, elB:f.el.B, wrA:f.wr.A, wrB:f.wr.B,
+              hipA:f.hip.A, hipB:f.hip.B, knA:f.kn.A, knB:f.kn.B,
+              ankA:f.ank.A, ankB:f.ank.B, nose:f.nose };
+  if(dx){ // the sway moves the hips and legs, not the shoulders
+    for(const k of ['hipA','hipB','knA','knB','ankA','ankB']) L[k] = { x:L[k].x+dx, y:L[k].y };
+  }
+  return L;
+}
+
+/*====== moves.js ======*/
+/* ==================================================================
+   SECOND LINE 2 — four moves, each a MOVEMENT that repeats on the beat.
+
+   The correction that killed version 1: it scored the beats where the
+   body STOPPED, which turns a parade dance into a sequence of freezes.
+   Nothing here is held. Every move is a cycle, and what is scored is
+   whether the cycle is the right one, lands on the beat, and is full
+   sized.
+
+   AND THE CORRECTION FROM THE COUNCIL: three of four reviewers said,
+   independently, that a camera with unreliable ankles cannot tell a
+   step-touch from a knee lift, because both are lower-body moves that
+   leave the arms free. So the four moves are separated BY THE ARMS.
+   The legs still carry the exercise; the arms carry the recognition.
+   ================================================================== */
+
+/* Each move has:
+   - sig: the ARM SIGNATURE. Static over the cycle, and what the move is
+     recognised by. Angles and shoulder-width ratios only, never a torso
+     divisor (a forward bend shortens the projected torso and version 1
+     paid for that twice).
+   - cyc: the CYCLIC SIGNAL. One number per frame that rises and falls
+     once per beat. Its peak is the LANDING, which is what the beat score
+     is measured against, and its range is the SIZE.                   */
+const MOVES = [
+  { id:'STRUT', name:'Strut', beats:1,
+    cue:'Knees up, arms pumping low',
+    say:'Strut. Knees up, arms pumping low at your sides.', cyc:'kneeSkew' },
+
+  { id:'PARASOL', name:'Parasol', beats:2,
+    cue:'One arm up and circling',
+    say:'Parasol. One arm straight up, circling. Other hand on your hip.', cyc:'armSwing' },
+
+  { id:'DIP', name:'Dip', beats:1,
+    cue:'Down and up, arms pressing down',
+    say:'Dip. Down and back up on the beat, arms pressing down.', cyc:'hipDrop' },
+
+  { id:'SHOUT', name:'Shout', beats:2,
+    cue:'Arms up wide, step side to side',
+    say:'Shout. Both arms up and wide, stepping side to side.', cyc:'sway' },
+];
+
+/* THE SIGNATURES ARE DERIVED, NEVER TYPED.
+   The first version of this file typed four numbers per move by eye.
+   Measured against a dancer actually performing them, self-scores came
+   back 0.218, 0.166, 0.000 and 0.813, and DIP was misread as STRUT —
+   the typed signature was not the thing the body produces. Doc 01:
+   never type a quantity the figure already determines. Each signature
+   is now the mean of the arm signature over one full cycle of the move
+   as the game itself draws it, and the cyclic range is derived the same
+   way, so the nominal size is the figure's own.                        */
+function deriveMoves(figFn, N){
+  N = N || 48;
+  for(const m of MOVES){
+    const acc = { armHi:0, armWide:0, elbow:0, asym:0 };
+    let lo = Infinity, hi = -Infinity;
+    for(let i=0;i<N;i++){
+      const L = figFn(m.id, i/N);
+      const g = armSig(L);
+      for(const k in acc) acc[k] += g[k]/N;
+      const v = CYC[m.cyc](L);
+      lo = Math.min(lo,v); hi = Math.max(hi,v);
+    }
+    m.sig = acc;
+    m.range = hi - lo;          // the full-sized amplitude, derived
+    /* and WHERE in the cycle it lands, also derived. Each move peaks at
+       its own phase and the scorer has to know which. */
+    let best = -Infinity, bp = 0;
+    for(let i=0;i<N;i++){ const v = CYC[m.cyc](figFn(m.id, i/N));
+      if(v > best){ best = v; bp = i/N; } }
+    m.landPhase = bp;
+  }
+  return MOVES;
+}
+
+/* ---- the features -------------------------------------------------
+   All scale free and position free. Divided by SHOULDER WIDTH, which a
+   forward bend does not change, never by the torso, which it does. */
+const DEG = 180/Math.PI;
+const shW = L => Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
+function jointAngle(p, j, q){
+  const a = Math.atan2(p.y-j.y, p.x-j.x), b = Math.atan2(q.y-j.y, q.x-j.x);
+  let d = Math.abs(a-b)*DEG % 360;
+  return d > 180 ? 360-d : d;
+}
+/* ARM SIGNATURE, four numbers.
+     armHi    mean wrist height above the shoulders, in shoulder widths
+     armWide  mean wrist spread from the body centre
+     elbow    mean elbow angle, 180 straight
+     asym     how unequal the two wrist heights are                    */
+function armSig(L){
+  const w = shW(L);
+  const shY = (L.shA.y + L.shB.y)/2, cx = (L.shA.x + L.shB.x)/2;
+  const hiA = (L.wrA.y - shY)/w, hiB = (L.wrB.y - shY)/w;
+  return {
+    armHi:  (hiA + hiB)/2,
+    armWide:(Math.abs(L.wrA.x-cx) + Math.abs(L.wrB.x-cx))/2/w,
+    elbow:  (jointAngle(L.shA,L.elA,L.wrA) + jointAngle(L.shB,L.elB,L.wrB))/2,
+    asym:   Math.min(1, Math.abs(hiA-hiB)/1.2),
+  };
+}
+/* CYCLIC SIGNALS, one per move. Each is in shoulder widths or a ratio,
+   and each rises to a peak once per cycle at the moment the move LANDS. */
+const CYC = {
+  kneeSkew: L => (L.knB.y - L.knA.y)/shW(L),                 // one knee up
+  armSwing: L => ((L.shA.y+L.shB.y)/2 - Math.max(L.wrA.y,L.wrB.y))/shW(L),
+  hipDrop:  L => -(((L.hipA.y+L.hipB.y)/2) - ((L.knA.y+L.knB.y)/2))/shW(L),
+  sway:     L => ((L.hipA.x+L.hipB.x)/2 - (L.shA.x+L.shB.x)/2)/shW(L),
+};
+/* how far apart two arm signatures are, 0 identical */
+const SIG_TOL = { armHi:0.55, armWide:0.45, elbow:38, asym:0.55 };
+function sigDist(a, b){
+  let s = 0;
+  for(const k in SIG_TOL) s += Math.min(1.8, Math.abs(a[k]-b[k])/SIG_TOL[k])**2;
+  return Math.sqrt(s/4);
+}
+const sigScore = d => Math.max(0, 1 - d*d);
+
+const NEEDS = ['shA','shB','wrA','wrB','elA','elB','hipA','hipB','knA','knB'];
+
+/*====== score.js ======*/
+/* ---- SCORING CONTINUOUS MOVEMENT ---------------------------------
+   Three things, measured across a window rather than at frozen moments,
+   and averaged into one number out of ten.
+
+   RIGHT MOVE  the arm signature, averaged over the window
+   ON THE BEAT the cyclic signal's PEAKS against the beat grid
+   FULL SIZED  the cyclic signal's RANGE against the player's own best
+               from the learn phase, not against a fixed standard, so it
+               scores effort and not body type                         */
+
+const WIN_IN = 90, WIN_OUT = 220;        // ms, beat-landing tolerance
+const beatCredit = d => { const a=Math.abs(d);
+  if(a<=WIN_IN) return 1; if(a>=WIN_OUT) return 0;
+  const u=(a-WIN_IN)/(WIN_OUT-WIN_IN); return 1-u*u; };
+
+/* PEAKS. The landing of a cycle.
+
+   The first version tested prominence against the IMMEDIATELY ADJACENT
+   samples, and found zero peaks in a perfect performance: at 18.7 fps a
+   508 ms cycle gives about nine samples, so near the top consecutive
+   samples differ by a few percent of the range while the test demanded
+   28% of it. Prominence is measured against the surrounding TROUGHS,
+   not the neighbours, so this uses a window a bit under half a cycle.
+
+   Parabolic interpolation on three samples puts the peak BETWEEN
+   frames. That is how a 53 ms frame interval still locates a landing to
+   a few milliseconds — and why v1's eighth-note resolution floor was
+   wrong, which its own sub-millisecond error bars already disproved. */
+function peaks(sig, range, cycle){
+  const half = cycle*0.40, out = [];
+  for(let i=1;i<sig.length-1;i++){
+    const b = sig[i].v;
+    if(!(b > sig[i-1].v && b >= sig[i+1].v)) continue;
+    let lo = Infinity, isMax = true;
+    for(let j=0;j<sig.length;j++){
+      if(Math.abs(sig[j].t - sig[i].t) > half) continue;
+      if(sig[j].v > b) { isMax = false; break; }
+      lo = Math.min(lo, sig[j].v);
+    }
+    if(!isMax || b - lo < range*0.25) continue;
+    if(out.length && sig[i].t - out[out.length-1].t < cycle*0.55) continue;
+    const a=sig[i-1].v, c=sig[i+1].v, den=(a-2*b+c);
+    const d = den ? 0.5*(a-c)/den : 0;
+    const dt = (sig[i+1].t - sig[i-1].t)/2;
+    out.push({ t: sig[i].t + Math.max(-1,Math.min(1,d))*dt, v:b });
+  }
+  return out;
+}
+function scoreWindow(frames, move, opts={}){
+  const { bpm=118, beatPhase=0, playerBest=null, bias=0 } = opts;
+  const beat = 60000/bpm, cycle = beat*move.beats;
+  const usable = frames.filter(f => NEEDS.every(k=>f.L[k]));
+  if(usable.length < 6) return { unscored:true, why:'not enough body' };
+
+  // RIGHT MOVE
+  const acc={armHi:0,armWide:0,elbow:0,asym:0};
+  for(const f of usable){ const g=armSig(f.L); for(const k in acc) acc[k]+=g[k]/usable.length; }
+  const move_ = sigScore(sigDist(acc, move.sig));
+
+  // the cyclic signal
+  const sig = usable.map(f=>({ t:f.t, v:CYC[move.cyc](f.L) }));
+  const vs = sig.map(s=>s.v).sort((a,b)=>a-b);
+  const range = vs[vs.length-1] - vs[0];
+
+  // FULL SIZED, against the player's own best for this move
+  const ref = playerBest || move.range;
+  const size = Math.max(0, Math.min(1.15, range/Math.max(1e-6, ref)));
+
+  // ON THE BEAT: every peak against the nearest beat of the grid.
+  // The sample times are already corrected backwards by the pipeline
+  // delay, so this compares one clock domain to itself.
+  const pk = peaks(sig, range, cycle);
+  let bsum=0, bn=0;
+  /* EVERY MOVE LANDS AT A DIFFERENT PHASE OF ITS OWN CYCLE, and that
+     phase is derived from the figure, not assumed to be zero. Measured:
+     STRUT's signal peaks a quarter of a cycle after the downbeat and
+     DIP's a half, so comparing all four to the grid at phase 0 scored
+     every one of them 0.00 — including a perfect performance. */
+  const land = (move.landPhase || 0) * cycle;
+  /* BIAS is the player's own measured landing offset, taken over the
+     whole learn phase and subtracted here. It absorbs everything
+     constant: the pipeline delay, whatever it really is, plus the
+     player's own habit of landing early or late. It does NOT absorb
+     variance, and the council was right that the two are different
+     things — but the constant part was the part that was guessed. */
+  const offs = [];
+  for(const p of pk){
+    const rel = p.t - beatPhase - land - bias;
+    const near = Math.round(rel/cycle)*cycle;
+    const off = rel - near;
+    offs.push(off); bsum += beatCredit(off); bn++;
+  }
+  const expected = (frames[frames.length-1].t - frames[0].t)/cycle;
+  // peaks you never produced cost you: credit per beat PRESENTED
+  const beats_ = expected > 0.5 ? bsum/Math.max(bn, expected*0.75) : (bn?bsum/bn:0);
+
+  return { unscored:false, move:move_, beat:Math.max(0,Math.min(1,beats_)),
+           size, range, peaks:pk.length, expected, gotSig:acc, offs };
+}
+/* ONE NUMBER OUT OF TEN — and the mean of three parts is not it.
+
+   Measured: a plain mean gave 8/10 to a player moving at a fifth of
+   full size and 7/10 to one holding the right arms and not dancing at
+   all, because two good components float a dead one. So the worst part
+   caps the whole, which is the rule Gap already uses on features.
+
+   And the beat score is GATED BY SIZE. A body that is barely moving
+   produces peaks out of noise, and crediting those for landing on the
+   beat is the purest form of scoring nothing. Below a quarter size
+   there is no landing to be on time for.                              */
+const SIZE_FLOOR = 0.25;
+function outOfTen(parts){
+  const m = parts.reduce((a,p)=>a+p.move,0)/parts.length;
+  const sRaw = parts.reduce((a,p)=>a+Math.min(1,p.size),0)/parts.length;
+  const gate = Math.max(0, Math.min(1, (sRaw - SIZE_FLOOR)/(0.55 - SIZE_FLOOR)));
+  const b = (parts.reduce((a,p)=>a+p.beat,0)/parts.length) * gate;
+  const mean = (m + b + sRaw)/3;
+  const worst = Math.min(m, b, sRaw);
+  /* THE FLOOR WAS 0.25 AND IT PAID A NON-PLAYER THREE OUT OF TEN.
+     Measured: standing completely still scored 3/10, because the arm
+     signature of a motionless body still looks like whichever move it
+     is nearest. 0.15 puts standing still at 2 and leaves a
+     half-hearted but real performance at 6. */
+  const capped = Math.min(mean, 0.15 + 0.85*worst);
+  return { ten: Math.max(1, Math.round(capped*10)), move:m, beat:b, size:sRaw, capped };
+}
+
+/*====== camera.js ======*/
+/* ================= camera, pose, recording ================= */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+const REC_CAP = 40000; const rec = []; let recDropped = 0, lostSince = null;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'secondline2', build:BUILD,
+    orientation:(window.innerHeight>window.innerWidth)?'portrait':'landscape',
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    bpm:BPM, routine:ROUTINE, routineBeats:ROUTINE_BEATS, learnReps:LEARN_REPS,
+    chainBars:CHAIN_BARS, danceMs:DANCE_MS,
+    poseLatencyMs:POSE_LATENCY_MS,
+    latencyNote:'ASSUMED, not measured. One declared input. Simulated across 150-250 ms with the player asynchrony stacked on top: worst case 0.969 of the beat score. Re-judge when the gate gives the real figure.',
+    tune:{ WIN_IN, WIN_OUT, SIZE_FLOOR, SIG_TOL },
+    moves: MOVES.map(m=>({ id:m.id, beats:m.beats, sig:m.sig, range:m.range, landPhase:m.landPhase })),
+    coords:'MediaPipe normalised to the camera frame; the scorer reads them mirrored, aspect corrected and y-up' });
+}
+
+/* ================= canvas, orientation, fit ================= */
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){ DPR = Math.min(2, devicePixelRatio||1); W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); }
+/* window, NOT the canvas: c.clientWidth is 0 until the first layout, so a
+   page opened already sideways evaluated 0 > 0, decided it was upright and
+   stuck on TURN YOUR PHONE with no resize event ever coming to fix it. */
+function landscapeOK(){ return innerWidth > innerHeight; }
+function checkRotation(){ if(ui && ui.oRot) ui.oRot.hidden = landscapeOK(); }
+addEventListener('resize', ()=>{ resize(); checkRotation(); });
+addEventListener('orientationchange', ()=>{ resize(); checkRotation(); });
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw||!vh) return { dx:0,dy:0,dw:W,dh:H,vw:0,vh:0 };
+  const sc = Math.min(W/vw, H/vh);
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+function frameAR(){ const vw=video.videoWidth||4, vh=video.videoHeight||3; return vw/vh; }
+// a raw normalised landmark -> canvas pixels
+function pxRaw(p){ const f=videoFit(); return { x:f.dx+p.x*f.dw, y:f.dy+p.y*f.dh }; }
+
+/* ---- one pose becomes one reading ------------------------------
+   Mirrored, aspect corrected and flipped to +y up, which is the figure's
+   own convention — so a landmark read off the camera and a landmark the
+   game drew are the same kind of thing and the features cannot be fed one
+   while being derived from the other. */
+function readPose(p){
+  const ar = frameAR(), L = {}, have = {};
+  for(const k in J){ const q = read(p, J[k]);
+    if(q){ L[k] = { x:q.x*ar, y:-q.y }; have[k] = true; } }
+  if(L.hipA && L.hipB) L.hipC = { x:(L.hipA.x+L.hipB.x)/2, y:(L.hipA.y+L.hipB.y)/2 };
+  if(L.shA && L.shB)  L.shC  = { x:(L.shA.x+L.shB.x)/2,  y:(L.shA.y+L.shB.y)/2 };
+  return { L, have };
+}
+let travelOrigin = null;
+function travelOf(L){
+  if(!L.hipC || !L.shA || !L.shB) return 0;
+  const sw = Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
+  if(travelOrigin === null) travelOrigin = L.hipC.x;
+  return (L.hipC.x - travelOrigin) / sw;
+}
+
+/*====== game.js ======*/
+/* ================= SECOND LINE — learn it, then dance it ================= */
+const BUILD = 'secondline2-1';
+const BPM = 118, BEAT = 60000/BPM, BAR = BEAT*4;
+
+/* THE ROUTINE. Eight counts: two bars, one move per half-bar, in a fixed
+   order the player learns. Four moves, each twice per cycle of the song. */
+const ROUTINE = ['STRUT','PARASOL','DIP','SHOUT'];
+const ROUTINE_BEATS = 4;                       // beats per move in the dance
+const LEARN_REPS = 4, CHAIN_BARS = 8, DANCE_MS = 60000;
+
+/* ---- SPEAK. Hugo cannot read phone-sized text from where he stands, so
+   everything that matters is said out loud as well as shown large. */
+let voiceOn = true, lastSaid = '', lastSaidAt = 0;
+function say(text, force){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  const now = performance.now();
+  if(!force && text === lastSaid && now - lastSaidAt < 4000) return;
+  lastSaid = text; lastSaidAt = now;
+  try {
+    if(force) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.03; u.pitch = 1.0; u.volume = 1;
+    speechSynthesis.speak(u);
+  } catch(e){}
+}
+
+/* ---- state ---- */
+let state='idle', phase='', samples=[], lastD=null, lastRaf=0, lastFrameAt=0;
+let t0=0, learnIdx=0, learnReps=0, learnBest={}, chainStart=0, danceStart=0;
+let danceParts=[], curMove=null, curMoveT=0, lostBars=0, hintUntil=0, ten=null;
+let bandA='', bandB='', beatPhase=0, beatBias=0, biasPool=[];
+const ui={};
+for(const id of ['oStart','oFit','oEnd','oRot','hud','band','bandA','bandB','hPhase','hTime',
+                 'loadMsg','errMsg','fitMsg','fitBig','ten','endRows','endTag','endNote'])
+  ui[id]=document.getElementById(id);
+
+/* ---- the fit gate: it fits the room, it does not demand a distance ----
+   Hugo plays in rooms of very different sizes. This game has no target
+   field, so the only requirement is that the camera can see him from
+   head to knees. There is no maximum closeness beyond that, and the
+   override is always on. */
+function fitState(raw){
+  if(!raw) return { ok:false, why:'nobody' };
+  const g={}; for(const k of ['nose','shA','shB','hipA','hipB','knA','knB']){
+    const q=read(raw,J[k]); if(q) g[k]=q; }
+  if(!(g.shA&&g.shB&&g.hipA&&g.hipB)) return { ok:false, why:'nobody' };
+  if(!(g.knA||g.knB)) return { ok:false, why:'knees' };
+  const shY=(g.shA.y+g.shB.y)/2, hipY=(g.hipA.y+g.hipB.y)/2;
+  const torso=Math.abs(hipY-shY);
+  const headY = g.nose ? g.nose.y : shY - torso*0.44;
+  if(headY < 0.03) return { ok:false, why:'high' };
+  const kneeY = Math.max(g.knA?g.knA.y:0, g.knB?g.knB.y:0);
+  if(kneeY > 0.985) return { ok:false, why:'low' };
+  // arms overhead need room: SHOUT puts wrists about 1.2 torsos above the shoulders
+  if(shY - torso*1.25 < 0.02) return { ok:false, why:'arms' };
+  return { ok:true, torso };
+}
+const FIT_SAY = {
+  nobody:['STEP INTO THE PICTURE','I cannot see you yet. Step in front of the phone.'],
+  knees :['STEP BACK','I cannot see your knees. Step back a little.'],
+  high  :['STEP BACK','Your head is at the top of the picture. Step back.'],
+  low   :['STEP BACK','Your knees are off the bottom. Step back a little.'],
+  arms  :['STEP BACK','No room above you for arms up. Step back, or tilt the phone up.'],
+};
+
+/* ---- the sliding window the scorer reads ---- */
+function windowFrames(fromT, toT){
+  return samples.filter(s=>s.t>=fromT && s.t<=toT).map(s=>({ t:s.t, L:s.L }));
+}
+/* THE SIDE GUARD RUNS ON EVERY FRAME THAT FEEDS THE SCORER, not only on
+   one. In version 1 it sat inside the per-frame score and the velocity
+   trace was never checked, so a run of swapped landmarks inside the
+   detection window was invisible. Found by DeepSeek, confirmed in the
+   code, fixed here: a swapped frame never enters the window at all. */
+function sidesOk(L){
+  if(!(L.shA&&L.shB&&L.hipA&&L.hipB)) return false;
+  const sw = L.shB.x - L.shA.x, hw = L.hipB.x - L.hipA.x;
+  const span = Math.max(Math.abs(sw), 1e-6);
+  if(sw <= 0 || hw <= -span*0.2) return false;              // labels swapped
+  const torsoV = Math.abs((L.shA.y+L.shB.y)/2 - (L.hipA.y+L.hipB.y)/2);
+  if(!torsoV || Math.abs(sw)/torsoV < 0.52) return false;   // turned side on
+  return true;
+}
+
+/*====== game2.js ======*/
+/* ================= the phases ================= */
+function setBand(a,b){ bandA=a; bandB=b||''; ui.bandA.textContent=a; ui.bandB.textContent=bandB;
+  ui.band.hidden = !a; }
+
+function startLearn(){
+  state='play'; phase='learn'; learnIdx=0; learnReps=0; learnBest={};
+  t0=performance.now(); ui.hud.hidden=false;
+  biasPool=[]; beatBias=0;
+  startMusic(); beatPhase = musicT0Perf; mix('learn');
+  nextLearnMove(true);
+}
+function nextLearnMove(first){
+  const m = MOVES.find(x=>x.id===ROUTINE[learnIdx]);
+  curMove = m; curMoveT = performance.now(); learnReps = 0;
+  setBand(m.name.toUpperCase(), m.cue);
+  say((first?'First move. ':'Next. ') + m.say, true);
+}
+/* A LEARN REP IS JUDGED AND THEN NAMED. Telling a player they matched,
+   or did not, teaches nothing — all four reviewers said so independently
+   and Perplexity named the outcome: silent, confident wrongness. So the
+   feedback says WHICH PART was wrong. */
+function learnFault(r, m){
+  if(!r || r.unscored) return ['CAN YOU STEP BACK', 'I lost part of you.'];
+  const want = m.sig, got = r.gotSig;
+  if(!got) return null;
+  const d = k => got[k] - want[k];
+  const cands = [
+    [Math.abs(d('armHi'))/0.55,  d('armHi')<0 ? ['ARMS HIGHER','Get your arms higher.'] : ['ARMS LOWER','Bring your arms down.']],
+    [Math.abs(d('asym'))/0.55,   d('asym')<0 ? ['ONE ARM UP','One arm up, not both.'] : ['BOTH ARMS','Both arms the same.']],
+    [Math.abs(d('armWide'))/0.45,d('armWide')<0? ['ARMS WIDER','Open your arms wider.'] : ['ARMS IN','Bring your arms in.']],
+    [Math.abs(d('elbow'))/38,    d('elbow')<0 ? ['STRAIGHTEN YOUR ARMS','Straighten your arms.'] : ['BEND YOUR ELBOWS','Bend your elbows more.']],
+  ].sort((a,b)=>b[0]-a[0]);
+  if(cands[0][0] > 0.85) return cands[0][1];
+  if(r.size < 0.55) return ['BIGGER','Make it bigger.'];
+  if(r.beat < 0.5)  return ['ON THE BEAT','Land it on the beat.'];
+  return null;
+}
+function learnTick(now){
+  const m = curMove, cycle = BEAT*m.beats;
+  const since = now - curMoveT;
+  const demo = ((since/cycle)%1+1)%1;
+  if(since < 2200){ setBand(m.name.toUpperCase(), 'Watch'); return { demo, copying:false }; }
+  const w = windowFrames(now - cycle*2, now);
+  if(w.length < 8) return { demo, copying:true };
+  const r = scoreWindow(w, m, { bpm:BPM, beatPhase:learnBeatPhase(), playerBest:learnBest[m.id] });
+  if(!r.unscored){
+    learnBest[m.id] = Math.max(learnBest[m.id]||0, r.range);   // their own best
+    const ok = r.move>=0.62 && r.size>=0.55 && r.beat>=0.45;
+    recPush({ k:'learn', t:nowClock(), mv:m.id, rep:learnReps, ok:ok?1:0,
+              move:+r.move.toFixed(3), beat:+r.beat.toFixed(3), size:+r.size.toFixed(3),
+              range:+r.range.toFixed(3), peaks:r.peaks });
+    if(ok){
+      learnReps++;
+      if(r.offs) for(const o of r.offs) biasPool.push(o);   // their own landing offset
+      setBand('GOOD · '+learnReps+' of '+LEARN_REPS, m.cue);
+      if(learnReps>=LEARN_REPS){
+        say('Got it.', true);
+        learnIdx++;
+        if(learnIdx>=ROUTINE.length){ startChain(); return { demo, copying:true }; }
+        nextLearnMove(false);
+      }
+      curMoveT = now - 2200;                 // keep demonstrating, skip the watch
+    } else {
+      const f = learnFault(r, m);
+      if(f){ setBand(f[0], m.cue); say(f[1]); }
+      else setBand(m.name.toUpperCase(), m.cue);
+    }
+  }
+  return { demo, copying:true };
+}
+const learnBeatPhase = () => beatPhase;
+
+function startChain(){
+  phase='chain'; chainStart=performance.now();
+  mix('chain');
+  setBand('ALL FOUR', 'Together now — eight counts');
+  say('Now all four together. Strut, parasol, dip, shout. Eight counts.', true);
+}
+function chainTick(now){
+  const since = now - chainStart;
+  const idx = Math.floor(since/(BEAT*ROUTINE_BEATS)) % ROUTINE.length;
+  const m = MOVES.find(x=>x.id===ROUTINE[idx]);
+  if(m !== curMove){ curMove = m; setBand(m.name.toUpperCase(), m.cue); say(m.name); }
+  if(since > BAR*CHAIN_BARS){ startDance(); }
+  return { demo: ((since/(BEAT*m.beats))%1+1)%1, copying:true };
+}
+
+function startDance(){
+  /* The dance starts on a bar line of the grid everything has been
+     running on since the first move, so the beat the scorer judges and
+     the beat the player hears are one beat. */
+  const now = performance.now();
+  /* MEASURE THE PLAYER'S OWN OFFSET instead of trusting 200 ms. Every
+     good rep of the learn phase contributed the signed distance from
+     its landing to the grid; the median of those is whatever is
+     actually constant in this room, on this phone, for this player. */
+  if(biasPool.length >= 6){
+    const v = biasPool.slice().sort((a,b)=>a-b);
+    const med = v.length%2 ? v[(v.length-1)/2] : (v[v.length/2-1]+v[v.length/2])/2;
+    beatBias = Math.max(-BEAT*0.35, Math.min(BEAT*0.35, med));
+  }
+  const bars = Math.ceil((now - beatPhase)/BAR);
+  phase='dance'; danceStart = beatPhase + bars*BAR;
+  danceParts=[]; lostBars=0; hintUntil=0; mix('dance');
+  setBand('DANCE', 'From memory now');
+  say('Now dance it. From memory. Go.', true);
+  setTimeout(()=>{ if(phase==='dance') setBand('',''); }, 2600);
+}
+function danceTick(now){
+  const since = now - danceStart;
+  if(since < 0) return { demo:0, copying:true, hint:false };
+  const idx = Math.floor(since/(BEAT*ROUTINE_BEATS)) % ROUTINE.length;
+  const m = MOVES.find(x=>x.id===ROUTINE[idx]);
+  if(m !== curMove){ curMove = m; curMoveT = now; }
+  // score one window per move slot, once the slot has run
+  const slotStart = danceStart + Math.floor(since/(BEAT*ROUTINE_BEATS))*(BEAT*ROUTINE_BEATS);
+  if(now - slotStart > BEAT*ROUTINE_BEATS*0.92 && (!danceParts.length || danceParts[danceParts.length-1].slot !== slotStart)){
+    const w = windowFrames(slotStart, now);
+    const r = scoreWindow(w, m, { bpm:BPM, beatPhase, playerBest:learnBest[m.id], bias:beatBias });
+    r.slot = slotStart; r.id = m.id;
+    danceParts.push(r);
+    recPush({ k:'slot', t:nowClock(), mv:m.id, unscored:!!r.unscored,
+              move:r.move?+r.move.toFixed(3):null, beat:r.beat?+r.beat.toFixed(3):null,
+              size:r.size?+r.size.toFixed(3):null, peaks:r.peaks||0,
+              offs:(r.offs||[]).map(o=>+o.toFixed(1)) });
+    /* LOST? The music never stops. After two bars of not doing the move
+       at all, the next move fades in for a moment and then goes again.
+       You only lose the bars you missed. */
+    const bad = r.unscored || r.move < 0.35;
+    lostBars = bad ? lostBars+1 : 0;
+    if(lostBars >= 2){ hintUntil = now + 2000; lostBars = 0;
+      const nxt = MOVES.find(x=>x.id===ROUTINE[(idx+1)%ROUTINE.length]);
+      say(nxt.name); }
+  }
+  if(since > DANCE_MS) endDance();
+  return { demo: ((since/(BEAT*m.beats))%1+1)%1, copying:true, hint: now < hintUntil };
+}
+function endDance(){
+  state='over'; phase=''; stopMusic(); setBand('',''); ui.hud.hidden=true;
+  const scored = danceParts.filter(p=>!p.unscored);
+  ten = scored.length ? outOfTen(scored)
+      : { ten:1, move:0, beat:0, size:0 };
+  ui.ten.textContent = String(ten.ten);
+  ui.endTag.textContent = ten.ten>=8 ? 'YOU DANCED IT' : ten.ten>=5 ? 'YOUR DANCE' : 'KEEP GOING';
+  const bar = v => '<span class="bar"><i style="width:'+Math.round(Math.max(0,Math.min(1,v))*100)+'%"></i></span>';
+  ui.endRows.innerHTML =
+    '<tr><td class="k">right move</td><td class="v">'+bar(ten.move)+'</td></tr>'+
+    '<tr><td class="k">on the beat</td><td class="v">'+bar(ten.beat)+'</td></tr>'+
+    '<tr><td class="k">full size</td><td class="v">'+bar(ten.size)+'</td></tr>'+
+    '<tr><td class="k">unscored</td><td class="v">'+(danceParts.length-scored.length)+' of '+danceParts.length+'</td></tr>';
+  ui.endNote.textContent = 'It cannot judge style or smoothness. A ten means the right moves, '+
+    'on the beat, at full size — measured against your own best from the learn phase.';
+  ui.oEnd.hidden = false;
+  say('You scored ' + ten.ten + ' out of ten.', true);
+  recPush({ k:'dance_end', t:nowClock(), ten:ten.ten, beatBias:+beatBias.toFixed(1),
+            biasSamples:biasPool.length, move:+ten.move.toFixed(3),
+            beat:+ten.beat.toFixed(3), size:+ten.size.toFixed(3),
+            slots: danceParts.map(p=>({ id:p.id, unscored:!!p.unscored,
+              move:p.move?+p.move.toFixed(3):null, beat:p.beat?+p.beat.toFixed(3):null,
+              size:p.size?+p.size.toFixed(3):null })) });
+}
+
+/*====== game3.js ======*/
+/* ================= drawing ================= */
+const BONES=[['shA','elA'],['elA','wrA'],['shB','elB'],['elB','wrB'],['shA','shB'],
+             ['shA','hipA'],['shB','hipB'],['hipA','hipB'],['hipA','knA'],['knA','ankA'],
+             ['hipB','knB'],['knB','ankB']];
+function drawMirror(dim){
+  ctx.fillStyle='#120618'; ctx.fillRect(0,0,W,H);
+  const f=videoFit();
+  if(f.vw){ ctx.save(); ctx.globalAlpha=dim; ctx.translate(f.dx+f.dw,f.dy); ctx.scale(-1,1);
+    ctx.drawImage(video,0,0,f.dw,f.dh); ctx.restore(); }
+}
+/* THE PLAYER'S OWN BODY, drawn from the RAW landmarks and mirrored the
+   same way the video is. The first version drew it from the processed
+   reading — mirrored, aspect corrected, y-up — through a helper that
+   expects raw normalised coordinates, so the player's figure landed off
+   the screen entirely. The render caught it; nothing else would have. */
+function drawPlayer(raw, alpha){
+  if(!raw) return;
+  const f = videoFit(); if(!f.vw) return;
+  const P = {};
+  for(const k in J){ const q = read(raw, J[k]); if(q) P[k] = { x:f.dx+(1-q.x)*f.dw, y:f.dy+q.y*f.dh }; }
+  ctx.save(); ctx.globalAlpha=alpha; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='rgba(255,244,230,.95)'; ctx.lineWidth=Math.max(3,Math.min(W,H)*0.011);
+  for(const [x,y] of BONES){ if(!P[x]||!P[y]) continue;
+    ctx.beginPath(); ctx.moveTo(P[x].x,P[x].y); ctx.lineTo(P[y].x,P[y].y); ctx.stroke(); }
+  if(P.nose){ ctx.beginPath(); ctx.arc(P.nose.x,P.nose.y,Math.min(W,H)*0.022,0,7); ctx.stroke(); }
+  ctx.restore();
+}
+/* THE DEMO DANCER. Drawn from the same figure the scorer derives its
+   signatures from, so what is shown and what is scored cannot drift
+   apart — the one-constructor rule this project learned four times. */
+function drawDemo(id, phase, bx, by, bw, bh, alpha, colour){
+  const L = figLandmarks(id, phase);
+  let lo=1e9,hi=-1e9,xl=1e9,xh=-1e9;
+  for(const k in L){ lo=Math.min(lo,L[k].y); hi=Math.max(hi,L[k].y);
+                     xl=Math.min(xl,L[k].x); xh=Math.max(xh,L[k].x); }
+  /* Fit the box on both axes, and width against the WIDEST pose of the
+     whole set rather than this one, so the figure does not change size
+     between moves or mid-cycle. */
+  const sc = Math.min(bh/Math.max(0.1,(hi-lo)*1.08), bw/Math.max(0.1,DEMO_SPAN*1.08));
+  /* Centred on the HIPS, not on the bounding box: centring on the box
+     slid the whole body sideways whenever an arm went up, so the four
+     moves sat in four different places. */
+  const hx = (L.hipA.x + L.hipB.x)/2;
+  const cx = bx + bw/2 - hx*sc, cy = by + bh/2 + ((hi+lo)/2)*sc;
+  const P = k => ({ x: cx + L[k].x*sc, y: cy - L[k].y*sc });
+  ctx.save(); ctx.globalAlpha=alpha; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle=colour; ctx.lineWidth=Math.max(3,sc*0.05);
+  for(const [x,y] of BONES){ if(!L[x]||!L[y]) continue;
+    const p=P(x),q=P(y); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); }
+  const n=P('nose'); ctx.beginPath(); ctx.arc(n.x,n.y,sc*0.13,0,7); ctx.stroke();
+  ctx.restore();
+}
+function drawBeat(now){
+  const b=(now-(beatPhase||now))/BEAT, ph=((b%1)+1)%1, pulse=Math.pow(1-ph,3);
+  const f=videoFit(), cx=f.dx+f.dw/2, y=Math.min(H-26,f.dy+f.dh-20);
+  for(let i=0;i<4;i++){
+    const on=(Math.floor(b)%4)===i, r=on?7+pulse*11:5;
+    ctx.beginPath(); ctx.arc(cx+(i-1.5)*Math.min(44,W*0.05), y, r, 0, 7);
+    ctx.fillStyle = on? 'rgba(255,194,61,'+(0.5+pulse*0.5)+')' : 'rgba(255,244,230,.2)';
+    ctx.fill();
+  }
+}
+
+/* ================= disco ================= */
+let actx=null, master=null, pump=null, lay={}, schedTimer=null, lastBeatSched=-1, songT0=0, musicT0Perf=0;
+function initAudio(){
+  try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return; }
+  master=actx.createGain(); master.gain.value=1.2; master.connect(actx.destination);
+  pump=actx.createGain(); pump.gain.value=1; pump.connect(master);
+  for(const k of ['kick','hat','open','clap','bass','strings','stab','lead'])
+    { const g=actx.createGain(); g.gain.value=1; g.connect(k==='kick'||k==='hat'||k==='open'||k==='clap'?master:pump); lay[k]=g; }
+}
+function vox(dest,type,f,t,dur,peak,det){
+  const o=actx.createOscillator(),g=actx.createGain();
+  o.type=type; o.frequency.setValueAtTime(f,t); if(det) o.detune.setValueAtTime(det,t);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(peak,t+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+dur+0.05);
+}
+function nz(dur){ const n=Math.max(1,Math.floor(actx.sampleRate*dur));
+  const b=actx.createBuffer(1,n,actx.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<n;i++) d[i]=Math.random()*2-1; return b; }
+function hit(dest,t,dur,peak,hz,type){
+  const s=actx.createBufferSource(); s.buffer=nz(dur);
+  const f=actx.createBiquadFilter(); f.type=type||'highpass'; f.frequency.value=hz;
+  const g=actx.createGain(); g.gain.setValueAtTime(peak,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  s.connect(f); f.connect(g); g.connect(dest); s.start(t); s.stop(t+dur+0.03);
+}
+/* Four on the floor, open hat on the off beat, claps on 2 and 4, an
+   octave-walking bass and string stabs. Disco, as asked. */
+const ROOT=[110.00,146.83,164.81,130.81];     // Am Dm Em C
+const CH=[[0,3,7,10],[0,3,7,10],[0,3,7,10],[0,4,7,11]];
+const semi=n=>Math.pow(2,n/12);
+function schedBeat(bi,t){
+  if(!actx) return;
+  const bar=Math.floor(bi/4), beat=bi%4, root=ROOT[bar%4], B=BEAT/1000;
+  const k=actx.createOscillator(),g=actx.createGain();
+  k.type='sine'; k.frequency.setValueAtTime(150,t); k.frequency.exponentialRampToValueAtTime(45,t+0.09);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.52,t+0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.26);
+  k.connect(g); g.connect(lay.kick); k.start(t); k.stop(t+0.3);
+  pump.gain.cancelScheduledValues(t); pump.gain.setValueAtTime(0.34,t);
+  pump.gain.linearRampToValueAtTime(1,t+B*0.6);
+  hit(lay.hat,t+B*0.25,0.03,0.18,8500);
+  hit(lay.open,t+B*0.5,0.14,0.20,6500);          // the disco open hat
+  if(beat===1||beat===3) hit(lay.clap,t,0.10,0.40,1500,'bandpass');
+  for(let i=0;i<4;i++){                           // octave bass
+    const f = root/2 * (i%2?2:1);
+    vox(lay.bass,'sawtooth',f,t+B*i*0.25,B*0.2,0.26);
+  }
+  if(beat===0||beat===2) for(const iv of CH[bar%4])
+    vox(lay.stab,'square',root*semi(iv),t+(beat===2?B*0.5:0),B*0.26,0.05);
+  for(const iv of CH[bar%4]) vox(lay.strings,'sawtooth',root*2*semi(iv),t,B*3.4,0.028,7);
+  const PEN=[0,3,5,7,10,12];
+  vox(lay.lead,'triangle',root*2*semi(PEN[(bi*3)%PEN.length]),t+B*0.5,B*0.4,0.07);
+}
+function scheduler(){
+  if(!actx) return;
+  const nb=(actx.currentTime-songT0)/(BEAT/1000);
+  while(lastBeatSched<nb+2){ lastBeatSched++; if(lastBeatSched<0) continue;
+    schedBeat(lastBeatSched, songT0+lastBeatSched*BEAT/1000); }
+}
+function startMusic(){
+  if(!actx){ musicT0Perf = performance.now(); return; }
+  lastBeatSched=-1; songT0=actx.currentTime+0.12;
+  /* THE BEAT GRID AND THE MUSIC ARE THE SAME GRID. The scorer runs on
+     performance.now(); the track runs on the audio clock. Mapping one
+     onto the other here is the whole reason a landing can be judged
+     against a sound the player actually heard. */
+  musicT0Perf = performance.now() + (songT0 - actx.currentTime)*1000;
+  if(schedTimer) clearInterval(schedTimer); schedTimer=setInterval(scheduler,25); scheduler(); }
+/* The track builds: drums while you learn, the whole thing when you dance. */
+const MIX = { learn:{ kick:1,hat:.7,open:.3,clap:.5,bass:.5,strings:0,stab:0,lead:0 },
+              chain:{ kick:1,hat:1, open:.8,clap:1, bass:1, strings:.5,stab:.6,lead:0 },
+              dance:{ kick:1,hat:1, open:1, clap:1, bass:1, strings:1, stab:1, lead:1 } };
+function mix(stage){ if(!actx) return; const m=MIX[stage]||MIX.dance;
+  for(const k in m) if(lay[k]) lay[k].gain.setTargetAtTime(m[k], actx.currentTime, 0.25); }
+function stopMusic(){ if(schedTimer) clearInterval(schedTimer); schedTimer=null;
+  if(actx) for(const k in lay) lay[k].gain.setTargetAtTime(0,actx.currentTime,0.12); }
+
+/*====== game4.js ======*/
+/* ================= the loop ================= */
+const figLandmarks = (id,p,o)=>landmarks(id,p,o||{});
+const CSSVAR = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const DEMO_COLOUR = CSSVAR('--gold') || '#ffc23d';
+/* The widest the demo ever gets, across every move and every phase —
+   derived, so no move is drawn at a different scale from the others
+   and none of them overflows its panel. */
+const DEMO_SPAN = (()=>{ let w=0;
+  for(const m of MOVES) for(let i=0;i<48;i++){
+    const L=figLandmarks(m.id,i/48); let lo=1e9,hi=-1e9;
+    for(const k in L){ lo=Math.min(lo,L[k].x); hi=Math.max(hi,L[k].x); }
+    w=Math.max(w,hi-lo); }
+  return w; })();
+const POSE_LATENCY_MS = 200;     /* ASSUMED. One declared input, nothing
+   tuned against it; simulated 150-250 with player asynchrony stacked,
+   worst case 0.969 of the beat score. Replace when the gate measures it. */
+let clockT0 = 0;
+const nowClock = () => performance.now() - clockT0;
+const SAMPLE_CAP = 1200;
+
+function pushSample(now, r, raw){
+  const ok = sidesOk(r.L);
+  /* RECORD EVERY FRAME. Doc 14 became the most useful document in this
+     project because there were real recordings to read; a game that
+     only records its verdict can only ever be argued with. */
+  const q = {};
+  for(const k of NEEDS_REC){ const v = raw && read(raw, J[k]);
+    if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.visibility||0).toFixed(2) ]; }
+  recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, mv:curMove&&curMove.id,
+            ok:ok?1:0, p:q });
+  if(!ok) return;                           // a swapped frame never enters
+  samples.push({ t: now - POSE_LATENCY_MS, L: r.L });
+  if(samples.length > SAMPLE_CAP) samples.splice(0, samples.length - SAMPLE_CAP);
+}
+const NEEDS_REC = ['nose','shA','shB','elA','elB','wrA','wrB','hipA','hipB','knA','knB','ankA','ankB'];
+
+function hudTick(now){
+  ui.hPhase.textContent = phase==='learn' ? 'LEARN' : phase==='chain' ? 'TOGETHER' : 'DANCE';
+  const left = phase==='dance' ? Math.max(0, DANCE_MS-(now-danceStart)) : 0;
+  ui.hTime.textContent = phase==='dance'
+    ? Math.floor(left/60000)+':'+String(Math.floor(left/1000)%60).padStart(2,'0')
+    : (learnIdx+1)+' of '+ROUTINE.length;
+}
+
+let halted = false;
+function frame(){
+  requestAnimationFrame(frame);
+  if(halted) return;                      // harness only: freeze the canvas
+  const now = performance.now();
+  lastRaf = now;
+
+  /* ---- pose ---- */
+  let raw = null;
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    try { const res = landmarker.detectForVideo(video, now);
+          raw = (res && res.landmarks && res.landmarks[0]) || null; } catch(e){}
+    if(raw){ pose = raw; lastFrameAt = now; }
+    else if(now - lastFrameAt > 600) pose = null;
+  }
+  const r = pose ? readPose(pose) : null;
+  if(r && state==='play') pushSample(now, r, pose);
+  lastD = r ? r.L : null;
+
+  /* ---- fit gate ---- */
+  if(state==='fit'){
+    const f = fitState(pose);
+    const msg = f.ok ? ['READY','Hold it there.'] : (FIT_SAY[f.why] || FIT_SAY.nobody);
+    ui.fitBig.innerHTML = f.ok ? 'READY' : 'FIND YOUR<br><span class="g">SPOT</span>';
+    ui.fitMsg.textContent = msg[0];
+    say(msg[1]);
+    if(f.ok){ if(!fitSince) fitSince = now; if(now - fitSince > 1400){ ui.oFit.hidden=true; startLearn(); } }
+    else fitSince = 0;
+  }
+
+  /* ---- draw ---- */
+  let tick = null;
+  if(state==='play'){
+    if(phase==='learn') tick = learnTick(now);
+    else if(phase==='chain') tick = chainTick(now);
+    else if(phase==='dance') tick = danceTick(now);
+  }
+  drawMirror(state==='play' && phase==='dance' ? 0.80 : 0.55);
+  drawPlayer(pose, 0.95);
+
+  /* THE DEMO DANCER, on the right, where Hugo asked for it. It is shown
+     through the learn and the chain, and in the dance only when he has
+     lost the thread — two bad slots bring it back for two seconds and
+     the music never stops. */
+  if(tick){
+    const showDemo = phase!=='dance' || tick.hint;
+    if(showDemo && curMove){
+      const f = videoFit();
+      /* The panel is whatever the letterboxed video leaves to the right
+         — on a 4:3 frame in a landscape window that is a real column.
+         If the frame fills the window there is none, and the demo goes
+         over the picture instead. */
+      const gap = W - (f.dx + f.dw);
+      const wide = gap > W*0.20;
+      const bw = wide ? gap : W*0.32, bx = W - bw;
+      const pad = Math.min(bw,H)*0.07;
+      if(wide){ ctx.save(); ctx.globalAlpha=0.6; ctx.fillStyle='#1d0c26';
+        ctx.fillRect(bx,0,bw,H); ctx.restore(); }
+      const a = phase==='dance' ? 0.92 : (tick.copying ? 0.72 : 1.0);
+      drawDemo(curMove.id, tick.demo, bx+pad, pad, bw-pad*2, H-pad*2, a, DEMO_COLOUR);
+    }
+  }
+  /* THE BAND STOPS AT THE EDGE OF THE PICTURE. Its plate is a DOM
+     element over the whole window, and the render showed it lying
+     across the demo column and dimming the dancer the player is
+     supposed to be copying. */
+  if(ui.band && !ui.band.hidden){
+    const f = videoFit(), gap = W - (f.dx + f.dw);
+    ui.band.style.right = (gap > W*0.20 ? gap : 0) + 'px';
+  }
+  if(state==='play' && (phase==='chain'||phase==='dance')) drawBeat(now);
+  if(state==='play') hudTick(now);
+}
+
+/* ================= startup ================= */
+let fitSince = 0;
+const bStart=document.getElementById('bStart'), bSkip=document.getElementById('bSkip'),
+      bAgain=document.getElementById('bAgain'), bSave=document.getElementById('bSave');
+
+async function begin(){
+  bStart.disabled = true; ui.loadMsg.hidden = false; ui.errMsg.hidden = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'user', width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30} }, audio:false });
+    video.srcObject = stream; await video.play();
+    ui.loadMsg.textContent = 'Loading the tracker…';
+    await loadTracker();
+  } catch(e){
+    ui.errMsg.hidden=false; bStart.disabled=false; ui.loadMsg.hidden=true;
+    ui.errMsg.textContent = 'Could not start: ' + (e && e.message ? e.message : e) +
+      '. The camera needs a https page and permission.';
+    return;
+  }
+  initAudio(); if(actx && actx.state==='suspended') try{ await actx.resume(); }catch(e){}
+  clockT0 = performance.now();
+  recHeader();
+  ui.oStart.hidden = true; ui.oFit.hidden = false;
+  state='fit'; fitSince=0;
+  say('Stand back until I can see you from head to knees.', true);
+}
+bStart.addEventListener('click', begin);
+bSkip.addEventListener('click', ()=>{ ui.oFit.hidden=true; startLearn(); });
+bAgain.addEventListener('click', ()=>{
+  ui.oEnd.hidden=true; samples.length=0; danceParts=[]; ten=null;
+  learnIdx=0; learnBest={}; state='fit'; fitSince=0; ui.oFit.hidden=false;
+});
+bSave.addEventListener('click', ()=>{
+  const blob = new Blob([rec.map(o=>JSON.stringify(o)).join('\n')], {type:'application/x-ndjson'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'secondline2-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+});
+
+resize(); checkRotation();
+deriveMoves(figLandmarks, 48);   // signatures from the motion the game draws, never typed
+requestAnimationFrame(frame);
+
+/* ---- harness hook. The renderer drives the game through its own
+   figure, so a screen cannot be painted from one body while the scorer
+   derives its targets from another. */
+window.__sl = {
+  fig:(id,p,o)=>landmarks(id,p,o||{}), MOVES, ROUTINE, BEAT, BPM,
+  jump:s=>{ if(s==='chain') startChain(); else if(s==='dance') startDance(); else if(s==='end') endDance(); },
+  fit:raw=>fitState(raw), draw:drawDemo, halt:()=>{halted=true},
+  peek:()=>({ state, phase, learnIdx, learnReps, move:curMove&&curMove.id, slots:danceParts.length, ten }),
+};
+</script>
+</body>
+</html>
