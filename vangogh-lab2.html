@@ -278,7 +278,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 33;          // bump on every deploy; shown on the start card
+const BUILD = 34;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -289,7 +289,32 @@ const LAB = true;          // the experimental build: jump recovery, painting bo
    bouncy march 0.13, and the smallest real jump 4.05. Hip speed alone is
    useless here - a frantic bounce reaches 3.37 against a small jump's 3.75 -
    but the both-feet signal separates them by 30x. */
-const JUMP_V       = 1.5;   // torsos/sec, both limbs together
+const JUMP_V       = 1.5;   // torsos/sec, both limbs together (no longer used by the
+                            // detector - kept for the history in the comment above)
+/* BUILD 34 - found from Hugo's first recording, not guessed.
+   Build 33's race: 92 s off the road, 64 clear jump attempts in the body data,
+   and the game counted 3. Replaying his landmarks through the rule reproduced
+   exactly those 3. The cause:
+   - his ankles were BELOW THE BOTTOM OF THE PICTURE in 100% of race frames
+     (median y 1.11, where 1.0 is the edge). He stood at torso 0.35; tracking
+     worked in Sparks at 0.18, and the camera gave a landscape 960x720 frame.
+   - MediaPipe still reports off-picture ankles, as guesses, at middling
+     confidence (median 0.57). The rule accepted ankles at VIS_KEEP 0.04, so it
+     chose those guesses over his knees, which were in the picture at 0.82.
+     Guessed ankles do not jump.
+   The rule now uses landmarks that are actually in the picture at any
+   distance worth playing from: BOTH HIPS and BOTH KNEES rising together. A
+   march lifts the knees one at a time; a jump lifts them together, which is
+   what separates the two. Replayed against his race:
+     as shipped (ankles)               3 caught off the road, 0 false on it
+     hips alone > 1.2                  46 off, 1 on
+     hips > 1.2 AND knees > 0.6        34 off, 0 on     <- this
+   About 11x the jumps, with no false trigger anywhere on the road - and a
+   false trigger on the road does nothing anyway, because a jump only acts
+   past |x| 0.92. Velocities are in his own torso lengths per second, so this
+   is the same rule at any distance. */
+const JUMP_HIP_V   = 1.2;   // torsos/sec, both hips rising
+const JUMP_KNEE_V  = 0.6;   // torsos/sec, both knees rising at the same time
 /* What a jump does off the road, as of build 32. Hugo, after playing 31: the
    jump "literally takes the car from the side to the centre. That is not the
    purpose." Build 31 slid the car sideways at 6.2 lanes/sec to x = 0 in about
@@ -1223,20 +1248,17 @@ function readPose(dt, now){
          Feet first, knees when the feet are cropped out of frame, which on a
          phone in portrait is most of the time. */
       jumped = false;
-      const ja = pt(L.lank,VIS_KEEP), jb = pt(L.rank,VIS_KEEP);
-      const jc = pt(L.lkn,VIS_KEEP),  jd = pt(L.rkn,VIS_KEEP);
-      const p0 = (ja&&jb) ? ja : jc, p1 = (ja&&jb) ? jb : jd;
-      if(p0 && p1){
-        if(limbPrev.a !== undefined && dt > 0){
-          const v0 = (limbPrev.a - p0.y)/base.torso/dt;
-          const v1 = (limbPrev.b - p1.y)/base.torso/dt;
-          /* two frames in a row. A real jump gives 16-18 frames of this and a
-             frantic bounce gave exactly 1, so one frame is noise - and on the
-             knees fallback that single frame was a false trigger. */
-          if(Math.min(v0, v1) > JUMP_V) jumpRun++; else jumpRun = 0;
+      const jh0 = pt(L.lhip,VIS_KEEP), jh1 = pt(L.rhip,VIS_KEEP);
+      const jk0 = pt(L.lkn,VIS_KEEP),  jk1 = pt(L.rkn,VIS_KEEP);
+      if(jh0 && jh1 && jk0 && jk1){
+        if(limbPrev.h0 !== undefined && dt > 0){
+          const vh = Math.min(limbPrev.h0 - jh0.y, limbPrev.h1 - jh1.y)/base.torso/dt;
+          const vk = Math.min(limbPrev.k0 - jk0.y, limbPrev.k1 - jk1.y)/base.torso/dt;
+          // two frames in a row, as before: one frame is noise
+          if(vh > JUMP_HIP_V && vk > JUMP_KNEE_V) jumpRun++; else jumpRun = 0;
           if(jumpRun >= 2) jumped = true;
         }
-        limbPrev.a = p0.y; limbPrev.b = p1.y;
+        limbPrev.h0 = jh0.y; limbPrev.h1 = jh1.y; limbPrev.k0 = jk0.y; limbPrev.k1 = jk1.y;
       } else { limbPrev = {}; jumpRun = 0; }
       stepPair(tag, pr[0], pr[1], now, dt);
       driveSrc = SRC_NAME[tag];
