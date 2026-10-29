@@ -280,7 +280,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 40;          // bump on every deploy; shown on the start card
+const BUILD = 41;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -2922,7 +2922,18 @@ function sayKeyed(key, text){
    mirrored view your own right is the right of the screen, so a player sitting
    left of centre is told to move right. UNVERIFIED on a real body - it is the
    one line here most likely to be the wrong way round. */
-const FIT_TORSO_HI = 0.215, FIT_TORSO_LO = 0.150, FIT_X = 0.16;
+/* BUILD 41 - Hugo: build 40's spot (torso 0.15-0.215) is over two metres from
+   the phone; too far for a room. He asked for about a metre and a half. The
+   game only needs your KNEES (marching and jumping read hips and knees), so
+   your spot is now "as close as you like, with your knees in the picture":
+   the lower knee above KNEE_IN of the frame height. On his build-38 races
+   (torso 0.40) his knees sat just BELOW the frame (median y 1.02 - guessed,
+   not seen); in build 33 at torso 0.354 they were in. By his proportions
+   (knees ~0.75 torso below the hips) that puts the spot at a torso of about
+   0.30-0.33 - roughly 1.5 m, against ~2.7 m for the old 0.18.
+   FIT_TORSO_HI is now only a sanity cap. */
+const FIT_TORSO_HI = 0.42, FIT_TORSO_LO = 0.150, FIT_X = 0.16;
+const KNEE_IN = 0.95;     // the lower knee must be above this fraction of the frame
 function coach(r){
   const hp = mid(L.lhip, L.rhip);
   if(!r || !hp)              return {k:'none', big:'Step into the picture', say:'Step into the picture.', ok:false};
@@ -2936,8 +2947,10 @@ function coach(r){
   if(hp.x > 0.5 + FIT_X)     return {k:'lft',  big:'To your left',          say:'A little to your left.', ok:false};
   // legsSeen is only computed once a calibration exists, so before the first
   // race it is always false: look at the knees and ankles directly (build 40)
-  const legsInView = legsSeen || !!(pt(L.lkn,VIS_GET) || pt(L.rkn,VIS_GET) || pt(L.lank,VIS_GET) || pt(L.rank,VIS_GET));
-  if(!legsInView)            return {k:'legs', big:'Whole legs in frame',   say:'I need to see your legs.', ok:false};
+  const kn = [pt(L.lkn,VIS_GET), pt(L.rkn,VIS_GET)].filter(Boolean);
+  if(!kn.length)             return {k:'legs', big:'Show me your knees',    say:'Step back a little, so I can see your knees.', ok:false};
+  if(Math.max(...kn.map(q=>q.y)) > KNEE_IN)
+                             return {k:'back', big:'Step back a little',    say:'Step back a little, so I can see your knees.', ok:false};
   if(squatDepth >= 0.35)     return {k:'tall', big:'Stand up straight',     say:'Stand up straight.',     ok:false};
   return {k:'ok', big:'Locked in', say:'Locked in. Here we go.', ok:true};
 }
@@ -3002,7 +3015,7 @@ function enterCalibrate(){
   ui.oEnd.hidden = true; ui.oStudy.hidden = true; ui.oCal.hidden = false;
   state = 'calibrate'; coachKey = ''; hipRef = null; shRef = null; squatDepth = 0; markT = 0; markTorso = null;
   placeT = 0; placeOff = 0; placed = false; keepAwake();
-  sayNow('Walk back until I can see all of you.');
+  sayNow('Walk back until I can see your knees.');
 }
 
 /* ---- getting back in for a second race ----
