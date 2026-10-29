@@ -278,7 +278,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 34;          // bump on every deploy; shown on the start card
+const BUILD = 35;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -375,9 +375,24 @@ const maxSpeed = segmentLength*27;   // slower again; the track is shortened to 
 const accel = maxSpeed/11, coast = -maxSpeed/4.5, offRoadDecel = -maxSpeed/4;
 const ACCEL_FALLOFF = 0.60;   // the faster you are, the harder the next km/h is
 const offRoadLimit = maxSpeed/2, centrifugal = 0.15;
-const FULL_CADENCE = 48;    // a 1Hz march reads ~120, so full speed now comes at a
-                            // 0.4Hz shuffle. Deliberately minimal for now; the
-                            // plan is to raise it again once the rest settles.
+/* BUILD 35 - speed follows how fast you march. Hugo: "it has auto
+   acceleration... the only thing you need to do is squat to brake. It
+   shouldn't be like that."
+   His first recording showed why. Full speed came at 48 steps/min and his
+   on-road median was 48, so the throttle sat pinned at maximum for 50% of the
+   race and marching harder did nothing; and the target never fell below 12%
+   of top speed, so standing still still drove the car at 19 km/h.
+   Now: full speed at FULL_CADENCE 80, and no floor - stand still and the car
+   rolls to a stop. Against his recorded pace:
+                       his 25% / median / 75% / 90%    pinned    standing
+     as shipped (48)     127   156   156   156          50%       19 km/h
+     80, no floor         90   114   141   156          14%        0
+     100, no floor        78    99   123   143           4%        0
+   80 for the first level: his gentle pace runs with the rivals (90-100 km/h),
+   his usual pace pulls ahead, a hard march reaches the top. 100 would make his
+   usual pace merely keep up - a later level, not this one.
+   A 1 Hz march reads about 120 steps/min. */
+const FULL_CADENCE = 80;
 /* How effort turns into speed. Below 1 this bends in the player's favour: a
    gentle march already gets most of the speed, while the gradient and the
    quick response to stopping both survive, which a lower FULL_CADENCE alone
@@ -869,7 +884,7 @@ const STUDY_BOARD = 3;      // which board carries it again: (3+0.5)/6 = 58% of 
 const BRAKE_ARM_SPEED = 0.22;   // fraction of top speed that counts as under way
 const BRAKE_ARM_MAX   = 10;     // seconds, after which it arms regardless
 /* Calories. Taken from CADENCE, not from drive: drive is capped at 1 and
-   FULL_CADENCE is only 48, so a slow shuffle already pins drive at full and a
+   FULL_CADENCE was only 48 then (80 from build 35), so a slow shuffle pinned drive at full and a
    score built on it gave 30 kcal for a shuffle against 33 for a hard march -
    measured. Steps per minute keeps rising after the car has stopped getting
    faster, which is exactly what a workout score should follow.
@@ -1576,8 +1591,14 @@ function update(dt, reading, now){
   effortBase += (drive - effortBase) *
                 Math.min(1, dt/(drive > effortBase ? EFFORT_BASE : EFFORT_BASE*4));
   }
-  let target = maxSpeed*(0.12 + 0.88*Math.pow(drive, DRIVE_CURVE));
-  if(boost>0){ target = Math.max(target, maxSpeed*1.3); boost -= dt; }
+  // no floor: no steps, no speed
+  let target = maxSpeed*Math.pow(drive, DRIVE_CURVE);
+  /* The corner boost used to raise the target to 1.3x top speed whatever you
+     were doing - four seconds of acceleration you did not have to earn with
+     your legs, which is the other half of "it drives itself". It now
+     multiplies YOUR marching speed: the same shove as before at a full march,
+     nothing if you are standing still. */
+  if(boost>0){ target = Math.max(target, 1.3*target); boost -= dt; }
   const gap = target - speed;
   if(gap > 0){
     // a boost overrides the taper, so it still feels like a shove
