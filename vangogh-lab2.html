@@ -277,7 +277,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 31;          // bump on every deploy; shown on the start card
+const BUILD = 32;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -289,11 +289,24 @@ const LAB = true;          // the experimental build: jump recovery, painting bo
    useless here - a frantic bounce reaches 3.37 against a small jump's 3.75 -
    but the both-feet signal separates them by 30x. */
 const JUMP_V       = 1.5;   // torsos/sec, both limbs together
-const JUMP_HOLD    = 0.55;  // seconds of assisted recovery per jump
-const JUMP_PULL    = 6.2;   // how hard it drags you back toward the middle.
-                            // Was 2.6 with a stronger value reserved for the
-                            // mounds; the mounds are gone, so every off-road
-                            // jump gets what they used to give.
+/* What a jump does off the road, as of build 32. Hugo, after playing 31: the
+   jump "literally takes the car from the side to the centre. That is not the
+   purpose." Build 31 slid the car sideways at 6.2 lanes/sec to x = 0 in about
+   a quarter of a second, whatever you were doing - a teleport, not driving.
+   What he wants: you keep driving, and the jump brings you back onto the road
+   ALONG A LINE, faster than you could without it, and leaves the car near the
+   edge for you to carry on from.
+   So for JUMP_HOLD the ground is smooth and your steering has full grip, and
+   on top of your steering there is a nudge toward the road worth JUMP_LINE of
+   full lock. It goes through the same formula as steering - lateral movement
+   scales with forward speed - so the car traces a diagonal back onto the
+   tarmac instead of jumping sideways. JUMP_FLOOR keeps it moving when the
+   rough has already slowed you. The nudge stops at JUMP_LAND, just inside the
+   kerb, and from there the car is yours. */
+const JUMP_HOLD    = 1.2;   // seconds of smooth ground, full grip and nudge
+const JUMP_LINE    = 1.0;   // the nudge, in units of full steering lock
+const JUMP_FLOOR   = 0.45;  // the nudge acts as if at least this fraction of top speed
+const JUMP_LAND    = 0.85;  // lane position where the nudge lets go (1 = the kerb)
 const JUMP_RELIEF  = 0.5;   // off-road speed drain is cut to this while recovering
 /* OFF THE ROAD IS ROUGH GROUND, and that is the whole mechanic.
    Build 29 put discrete swirl mounds along the verge to jump over. Wrong read
@@ -1576,16 +1589,22 @@ function update(dt, reading, now){
   }
   if(!off && wasOff && !legsWarned) hideCall();
   wasOff = off;
-  /* A jump while you are off the lane drags you back to the road. It does
-     nothing when you are already on it, so it cannot be used as a shortcut
-     through corners - only as a way out of trouble. */
+  /* A jump while you are off the lane carries you back onto the road along a
+     line. It does nothing when you are already on it, so it cannot be used as
+     a shortcut through corners - only as a way out of trouble. */
   if(jumped && Math.abs(playerX) > 0.92){
     jumpT = JUMP_HOLD; blip(880,0.18,0.30);
     if(!legsWarned) hideCall();            // the JUMP prompt has been answered
   }
   if(jumpT > 0){
     jumpT -= dt;
-    playerX -= Math.sign(playerX) * Math.min(Math.abs(playerX), JUMP_PULL*dt);
+    const over = Math.abs(playerX) - JUMP_LAND;
+    if(over > 0){
+      const line = JUMP_LINE*dt*2.6*Math.max(speed/maxSpeed, JUMP_FLOOR);
+      playerX -= Math.sign(playerX) * Math.min(over, line);
+    } else {
+      jumpT = 0;                               // back on the tarmac: yours again
+    }
   }
   playerX = Math.max(-2,Math.min(2,playerX));
 
@@ -2305,12 +2324,11 @@ function drawPlayerCar(){
      On screen only: overtaking uses playerX against each rival's lane, which is
      in track space and has not changed, so every gap is exactly as wide. */
   const y=H*0.86+bob+jy, w=W*0.36, h=w*0.60;
-  /* During a jump the game steers you back to the middle of the road - it
-     always did, measured landing at x = 0 every time - but the car body kept
-     showing YOUR steering, so it never looked like the car was doing it. Now
-     the body turns toward the centre while the jump carries it there, which
-     makes the reward visible. Straight again the moment it arrives. */
-  const shownSteer = (jumpT > 0 && Math.abs(playerX) > 0.02) ? -Math.sign(playerX)*1.6 : steer;
+  /* During a jump the body shows what the car is actually doing: your own
+     steering plus the jump's nudge toward the road. So it reads as the car
+     turning back onto the tarmac, and it straightens the moment it lands. */
+  const shownSteer = (jumpT > 0 && Math.abs(playerX) > JUMP_LAND)
+    ? Math.max(-1.6, Math.min(1.6, steer - Math.sign(playerX)*JUMP_LINE)) : steer;
   ctx.save(); ctx.translate(x,y); ctx.rotate(shownSteer*0.075);
   ctx.fillStyle='rgba(0,0,0,0.45)';
   ctx.beginPath(); ctx.ellipse(0,h*0.16,w*0.58,h*0.17,0,0,Math.PI*2); ctx.fill();
