@@ -82,7 +82,7 @@ canvas{display:block;width:100%;height:100%}
   background:rgba(242,246,255,.06);box-shadow:0 18px 60px rgba(0,0,0,.6)}
 .study .nm{font-family:var(--display);font-weight:700;color:var(--amber);
   font-size:clamp(26px,7.5vw,48px);line-height:1.05;text-align:center;letter-spacing:.01em}
-.study .ti{color:var(--fg);opacity:.8;font-size:clamp(13px,3.4vw,19px);text-align:center;font-style:italic}
+.study .ti{color:var(--fg);opacity:.95;font-size:clamp(17px,4.6vw,26px);font-weight:600;text-align:center;font-style:italic}
 .study .cue{color:var(--muted);font-size:clamp(10px,2.6vw,13px);letter-spacing:.22em;
   text-transform:uppercase;text-align:center}
 .study .cnt{font-family:var(--display);font-weight:700;color:var(--fg);opacity:.85;
@@ -241,13 +241,14 @@ button[disabled]{opacity:.5;cursor:default}
 
 
 <div class="study" id="oStudy" hidden>
-  <div class="cue" id="studyCue">Remember the painter</div>
+  <div class="cue" id="studyCue">Remember the painting and the painter</div>
   <canvas id="studyArt" width="520" height="340"></canvas>
   <div class="nm" id="studyName"></div>
   <div class="ti" id="studyTitle"></div>
   <div class="go" id="studyGo">Raise a hand<small>when you have it</small></div>
 </div>
 
+<canvas id="confetti" style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:60" hidden></canvas>
 <div class="overlay" id="oEnd" hidden>
   <div class="card">
     <canvas id="endFlag" width="560" height="340"></canvas>
@@ -279,7 +280,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 38;          // bump on every deploy; shown on the start card
+const BUILD = 39;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -1112,7 +1113,8 @@ const LEGS_SAY = {
   lft:  ['STEP LEFT',    'TO THE MIDDLE',         'Step to your left.'],
   none: ['STEP IN',      'WHERE I CAN SEE YOU',   'Step back into the picture.'],
 };
-let hipRef = null, shRef = null;
+let hipRef = null, shRef = null, refTorso = 0;
+const REF_SHRINK = 0.10;   // see build 39 note in readPose
 let pxPrev = 0, pxVel = 0, yawSm = 0;
 let limbPrev = {}, jumpT = 0, jumpOff = 0, jumped = false, jumpRun = 0;
 let rumble = 0, offRuns = 0, wasOff = false;
@@ -1263,7 +1265,13 @@ function readPose(dt, now){
        DOWN over REF_DOWN. It also stops makeBase's hipY:0.55 fallback from
        reaching the brake, which a bad calibration read could otherwise turn
        into a phantom squat for the whole race. */
-    if(hipRef===null){ hipRef = hp.y; shRef = sh.y; }
+    if(hipRef===null){ hipRef = hp.y; shRef = sh.y; refTorso = torso; }
+    /* Build 39: walking away from the camera moves your shoulders down the
+       picture exactly like a squat. While your body is shrinking in the frame
+       faster than REF_SHRINK (walking back: 13-17%; a real brake never past 7%
+       on his recording) the reference simply follows you. */
+    refTorso += (torso - refTorso)*Math.min(1, dt/0.6);
+    if(refTorso > 0 && (refTorso - torso)/refTorso > REF_SHRINK){ hipRef = hp.y; shRef = sh.y; }
     const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y < ref ? REF_UP : REF_DOWN));
     hipRef = follow(hipRef, hp.y);
     shRef  = follow(shRef,  sh.y);
@@ -2900,6 +2908,10 @@ const FIT_TORSO_HI = 0.215, FIT_TORSO_LO = 0.150, FIT_X = 0.16;
 function coach(r){
   const hp = mid(L.lhip, L.rhip);
   if(!r || !hp)              return {k:'none', big:'Step into the picture', say:'Step into the picture.', ok:false};
+  // bent over the phone, the shoulders sit BELOW the hips and |hip - shoulder|
+  // looked like the right distance (build 38's repeat race started that way)
+  const shc = mid(L.lsh, L.rsh);
+  if(!shc || hp.y - shc.y < 0.05) return {k:'tall', big:'Stand up straight', say:'Stand up straight.', ok:false};
   if(r.torso > FIT_TORSO_HI) return {k:'back', big:'Step back',             say:'Step back.',             ok:false};
   if(r.torso < FIT_TORSO_LO) return {k:'near', big:'Come closer',           say:'Come a bit closer.',     ok:false};
   if(hp.x < 0.5 - FIT_X)     return {k:'rgt',  big:'To your right',         say:'A little to your right.',ok:false};
@@ -2967,7 +2979,7 @@ function enterCalibrate(){
   ui.calHint.textContent  = 'Walk back into the picture';
   ui.calSub.textContent   = 'Hold the wheel with both hands to start';
   ui.oEnd.hidden = true; ui.oStudy.hidden = true; ui.oCal.hidden = false;
-  state = 'calibrate'; coachKey = ''; hipRef = null; shRef = null; squatDepth = 0; keepAwake();
+  state = 'calibrate'; coachKey = ''; hipRef = null; shRef = null; squatDepth = 0; markT = 0; markTorso = null; keepAwake();
   sayNow('Walk back until I can see all of you.');
 }
 
@@ -2982,6 +2994,39 @@ function enterCalibrate(){
    So the second race now waits for you the same way the first one does: it
    starts when you are standing with your legs in the picture, and it re-reads
    your body at that moment instead of trusting a pose from before race one. */
+/* BUILD 39 - "it just starts with a brake", again. His build 38 recording
+   shows the cause, and it is not the brake: BOTH start gates let the race
+   begin before he was on his mark.
+   - First race: a hand latched on its mark and then "lost: change nothing"
+     kept the start count running with NO body in view (15 of 110 frames in
+     the last 4 s had a pose). The race began with no pose at all, so the
+     calibration fell back to a 0.18 torso against his real 0.40 - doubling
+     every squat reading and every jump for the whole race.
+   - Repeat race: he was bent over the phone (shoulders BELOW hips), and
+     coach() read |hip - shoulder| = 0.157 as "the right distance". Started
+     2.3 s after the ready screen opened, calibrated on that pose.
+   In both he then walked back to his mark: shoulders moving down the picture
+   from 0.07 to 0.36 read as a squat 2-4x deeper than a full one, the brake
+   armed at 3-4 s and stopped the car dead.
+   So a race now starts only when onMark() holds: a body seen THIS frame,
+   upright (shoulders above hips), not up at the phone (torso < START_TORSO_MAX;
+   his racing torso is 0.36-0.40, at the phone 0.5-0.9), and steady - torso
+   within START_DRIFT of its 0.6 s average for START_STEADY seconds. Measured
+   on his recording: walking back drifts 13-17% (median), marching on the
+   spot stays under 6% (99th percentile). */
+const START_TORSO_MAX = 0.55;
+const START_DRIFT     = 0.08;
+const START_STEADY    = 0.8;
+let markT = 0, markTorso = null;
+function onMark(r, dt){
+  const sh = mid(L.lsh, L.rsh), hp = mid(L.lhip, L.rhip);
+  const ok = !!(pose && r && sh && hp && hp.y - sh.y > 0.05 && r.torso < START_TORSO_MAX);
+  if(!ok){ markT = 0; markTorso = null; return false; }
+  if(markTorso === null) markTorso = r.torso;
+  markTorso += (r.torso - markTorso)*Math.min(1, dt/0.6);
+  if(Math.abs(r.torso - markTorso)/markTorso > START_DRIFT) markT = 0; else markT += dt;
+  return markT >= START_STEADY;
+}
 const READY_HOLD = 1.2;     // seconds standing properly before the lights go out
 const READY_CAP  = 12;      // never trap anyone on this screen
 let readyT = 0, readyCap = 0, readyTick = -1;
@@ -2994,7 +3039,7 @@ function enterReady(){
   ui.calSub.textContent   = 'No need to come back to the phone';
   ui.oCal.classList.remove('counting');
   ui.oStudy.hidden = true;
-  state = 'ready'; readyT = 0; readyCap = 0; readyTick = -1; coachKey = '';
+  state = 'ready'; readyT = 0; readyCap = 0; readyTick = -1; coachKey = ''; markT = 0; markTorso = null;
   // the standing reference is whatever the last race left behind; start clean,
   // or a crouch at the finish reads as a squat on the way back in
   hipRef = null; shRef = null; squatDepth = 0;
@@ -3019,7 +3064,8 @@ function readyStep(r, dt){
     ui.calHint.textContent  = 'The race starts on its own';
     sayKeyed(c.k, c.say);
   }
-  if(readyT >= READY_HOLD || readyCap > READY_CAP){
+  const mark = onMark(r, dt);
+  if((readyT >= READY_HOLD || readyCap > READY_CAP) && mark){
     ui.oCal.classList.remove('counting');
     coachKey = '';
     beginRaceFrom(r, false);
@@ -3133,7 +3179,12 @@ function calibrate(r,dt){
     + ' ' + grip.L.fill.toFixed(2) + '/' + grip.R.fill.toFixed(2)
     + ' &middot; both ' + grip.both.toFixed(2);
 
-  if(holding && grip.both >= GRIP_BOTH) beginRaceFrom(r);
+  // the hands on the wheel are not enough: you have to be standing on your mark
+  const mark = onMark(r, dt);
+  if(holding && grip.both >= GRIP_BOTH){
+    if(mark) beginRaceFrom(r);
+    else if(r && r.torso >= START_TORSO_MAX) sayKeyed('back', 'Step back to your mark.');
+  }
 }
 
 let lastT=0, renderDt=1/60;
@@ -3182,6 +3233,44 @@ function quizAsk(stage){
   quizOpen = true;
 }
 function quizRead(dt){ /* answered by tapping since build 38 */ }
+/* BUILD 39 - Hugo: when you finish and get both right, a celebration; when
+   you don't, "next time" - something to come back for. Both right: a burst
+   of gold and blue stars over the end screen, a rising four-note fanfare and
+   a spoken line. Otherwise: no fanfare, an encouraging line out loud. */
+function quizCelebrate(score){
+  const say = score === 2 ? 'Brilliant! You finished the race and remembered the painting.'
+            : score === 1 ? 'So close. One of two. Next time you will have them both.'
+                          : 'The painting got away this time. Take a longer look before the next race.';
+  try { sayNow(say); } catch(e){}
+  if(score !== 2) return;
+  [523, 659, 784, 1047].forEach((f,i)=> setTimeout(()=>{ try { blip(f, 0.22, 0.30, 'triangle'); } catch(e){} }, 120 + i*140));
+  const cv = document.getElementById('confetti'); if(!cv) return;
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  cv.width = innerWidth*dpr; cv.height = innerHeight*dpr; cv.hidden = false;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const cols = ['#F2C84B','#E8A33D','#7FB2D9','#F6EBCB'];
+  const P = Array.from({length:110}, (_,i)=>({
+    // from the answers, where you are looking, up over the whole screen
+    x: innerWidth*(0.15 + 0.7*Math.random()), y: innerHeight*0.82,
+    vx: (Math.random()-0.5)*560, vy: -620 - Math.random()*620,
+    r: 3 + Math.random()*6, c: cols[i%cols.length], a: Math.random()*6, va: (Math.random()-0.5)*8 }));
+  const t0 = performance.now(); let last = t0;
+  (function tick(now){
+    const dt = Math.min(0.05, (now-last)/1000); last = now;
+    const age = (now - t0)/1000;
+    g.clearRect(0, 0, innerWidth, innerHeight);
+    g.globalAlpha = Math.max(0, Math.min(1, (3.6 - age)/0.8));
+    for(const p of P){
+      p.vy += 620*dt; p.x += p.vx*dt; p.y += p.vy*dt; p.a += p.va*dt;
+      g.save(); g.translate(p.x, p.y); g.rotate(p.a); g.fillStyle = p.c;
+      g.beginPath();                       // a five-point star, like the ones in the sky
+      for(let k=0;k<10;k++){ const rr = k%2 ? p.r*0.45 : p.r; const an = k*Math.PI/5;
+        g.lineTo(Math.cos(an)*rr, Math.sin(an)*rr); }
+      g.closePath(); g.fill(); g.restore();
+    }
+    if(age < 3.6 && state === 'over') requestAnimationFrame(tick); else { g.clearRect(0,0,innerWidth,innerHeight); cv.hidden = true; }
+  })(t0);
+}
 function quizAnswer(i){
   if(quizDone || quizBusy || !quizOpts || !quizOpts[i]) return;
   const O = QOPT();
@@ -3202,11 +3291,12 @@ function quizAnswer(i){
     return;
   }
   quizDone = true; quizOpen = false;
+  quizCelebrate(quizScore);
   document.getElementById('quizQ').textContent = quizArt[1] + ', by ' + quizArt[2];
   document.getElementById('quizHint').textContent =
-      quizScore === 2 ? 'Both right. Finished and remembered - the full win.'
-    : quizScore === 1 ? 'One of two. Half the painting stayed with you.'
-                      : 'You finished, but the painting got away.';
+      quizScore === 2 ? 'Both right! Finished and remembered - the full win.'
+    : quizScore === 1 ? 'One of two - so close. Next time you will have both.'
+                      : 'The painting got away this time. Take a longer look next race.';
 }
 /* ---- the recording ------------------------------------------------
    Lifted from Sparks (sparks.html), where it is how real bugs got found
