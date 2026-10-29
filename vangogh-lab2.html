@@ -271,13 +271,14 @@ button[disabled]{opacity:.5;cursor:default}
     </div>
     <button id="bMore">One more race</button>
     <button id="bAgain" class="ghost">Back to start</button>
+    <button id="bRec" class="ghost">Save recording</button>
   </div>
 </div>
 
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 32;          // bump on every deploy; shown on the start card
+const BUILD = 33;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -1365,6 +1366,7 @@ function showCall(word,sub,cls){
 function hideCall(){ ui.call.className='call'; }
 
 function startRace(fresh){
+  recPush({ k:'race_start', t:+performance.now().toFixed(1), fresh:!!fresh, laps:chosenLaps });
   // the art is chosen when the study card opens, not here, so the painting you
   // were shown is the one that ends up on the road
   if(!artSet.length) pickArt();
@@ -1396,6 +1398,8 @@ function startRace(fresh){
   ui.oCal.hidden=true; ui.oEnd.hidden=true; ui.hud.hidden=false;
 }
 function endRace(){
+  recPush({ k:'race_end', t:+performance.now().toFixed(1), finished: finishTime > 0, finishTime,
+            distance:+distance.toFixed(1), lap });
   state='over';
   if(schedTimer){ clearInterval(schedTimer); schedTimer=null; }
   if(engGain) engGain.gain.value=0;
@@ -3007,28 +3011,86 @@ function quizAnswer(i){
     : 'You finished, but the painting got away.';
   blip(right?880:190, right?0.26:0.3, 0.3, right?'triangle':'sawtooth');
 }
+/* ---- the recording ------------------------------------------------
+   Lifted from Sparks (sparks.html), where it is how real bugs got found
+   instead of guessed at. Build 33 adds nothing else.
+
+   Every camera frame keeps the time the CAMERA captured it, the separate
+   time the estimate came back, and all 33 landmarks with their own
+   confidence. Gaps where frames never arrived, and moments the body was
+   lost and found, are marked. On top of Sparks' recording this one also
+   logs the game's own state once per drawn frame - speed, cadence, which
+   limb is driving, steering, lane position, jump, boost, brake, squat - so
+   a report like "it accelerates without marching" or "the right side is
+   harder to come back from" can be checked against what actually happened.
+
+   It lives in memory only and disappears when the page closes. It becomes
+   a file only if the player taps Save recording, which downloads it to the
+   phone. Nothing is sent anywhere. */
+const REC_CAP = 60000;
+const rec = [];
+let recDropped = 0, lostSince = null, lastFrameAt = 0, recHeaded = false;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  if(recHeaded) return; recHeaded = true;
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'racing', file:'vangogh-lab2.html', build:BUILD,
+    orientation: (window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'f = camera frame: cap = video.currentTime (s, camera clock), ready = performance.now() (ms) when the estimate returned, lm = 33 x [x,y,z,visibility]. g = game state once per drawn frame, t = performance.now() (ms). spd in world units/s; km/h = spd/200*3.6*1.6. x = lane position, |x|>1 is off the road. src = limb driving the throttle. cad = steps/min.',
+    consts:{ maxSpeed, FULL_CADENCE, STEER_FULL, STEER_DEAD, ROUGH_LIMIT, ROUGH_BITE, ROUGH_GRIP,
+             JUMP_HOLD, JUMP_LINE, JUMP_FLOOR, JUMP_LAND, CORNER_BOOST, LINE_BOOST,
+             SQUAT_DEPTH, SQUAT_DEAD } });
+}
+function recGame(){
+  // before the first race there may be no track yet; never let the recorder
+  // be the thing that throws inside the frame loop
+  const sg = segments.length ? findSeg(position+playerZ) : null;
+  recPush({ k:'g', t:+performance.now().toFixed(1), st:state,
+    spd:Math.round(speed), cad:+(cadence||0).toFixed(1), src:driveSrc, legs:legsSeen?1:0,
+    steer:+steer.toFixed(3), sraw:+steerRaw.toFixed(3), x:+playerX.toFixed(3),
+    jT:+jumpT.toFixed(2), jmp:jumped?1:0, bst:+boost.toFixed(2), brk:+brakeRamp.toFixed(2),
+    sq:+squatDepth.toFixed(2), dist:+distance.toFixed(1), seg:sg?sg.index:null, curve:sg?+(sg.curve||0).toFixed(2):null });
+}
 function frame(now){
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.1,(now-lastT)/1000) : 0;
   lastT=now; renderDt=dt||1/60;
   if(video.readyState<2||!landmarker) return;
   if(video.currentTime!==lastVideoTime){
-    lastVideoTime=video.currentTime;
+    const vt=video.currentTime;
+    if(lastFrameAt && now-lastFrameAt > 120) recPush({ k:'gap', t:+now.toFixed(1), ms:Math.round(now-lastFrameAt) });
+    lastFrameAt=now;
+    lastVideoTime=vt;
+    let fresh=false;
     try {
       const res=landmarker.detectForVideo(video,now);
       pose=(res&&res.landmarks&&res.landmarks[0])?res.landmarks[0]:null;
+      fresh=true;
     } catch(e){}
+    if(fresh){
+      recHeader();
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+                                        +(p.z||0).toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+vt.toFixed(4), ready:+performance.now().toFixed(1), st:state, lm });
+      if(!pose && lostSince === null){ lostSince = now; recPush({ k:'lost', t:+now.toFixed(1) }); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:+now.toFixed(1), out:Math.round(now-lostSince) }); lostSince = null; }
+    }
   }
   const r=readPose(dt, now);
 
-  if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); return; }
-  if(state==='ready'){ drawMirror(0.5); readyStep(r,dt); return; }
+  if(state==='calibrate'){ drawMirror(0.5); calibrate(r,dt); recGame(); return; }
+  if(state==='ready'){ drawMirror(0.5); readyStep(r,dt); recGame(); return; }
   if(state==='study'){ studyStep(r, dt); return; }
 
   if(state==='race'){
     acc+=dt;
     while(acc>step){ update(step,r,now); acc-=step; if(state!=='race') break; }
     render();
+    recGame();
     return;
   }
   if(state==='over'){ render(); if(quizOpen) quizRead(dt); }
@@ -3049,6 +3111,16 @@ document.getElementById('bGo').addEventListener('click', function(){
   beginRaceFrom(readPose(0, performance.now()), state !== 'ready');
 });
 document.getElementById('bMore').addEventListener('click', function(){ enterStudy(false); });
+document.getElementById('bRec').addEventListener('click', function(){
+  if(recDropped) recPush({ k:'dropped', n:recDropped });
+  const lines = rec.map(function(o){ return JSON.stringify(o); }).join('\n');
+  const blob = new Blob([lines], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'racing-b' + BUILD + '-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+});
 /* Tap anywhere on the card. You are standing at the phone when you read it,
    so a tap is the honest control here and no gesture is needed. */
 document.getElementById('oStudy').addEventListener('click', leaveStudy);
