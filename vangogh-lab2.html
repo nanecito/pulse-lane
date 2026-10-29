@@ -278,7 +278,7 @@ button[disabled]{opacity:.5;cursor:default}
 <script type="module">
 import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
 
-const BUILD = 36;          // bump on every deploy; shown on the start card
+const BUILD = 37;          // bump on every deploy; shown on the start card
 const LAB = true;          // the experimental build: jump recovery, painting boards, art quiz
 /* JUMP TO RECOVER. Running wide is slow to crawl back from, and a correction
    held over seconds is exactly what 150-250ms of camera lag ruins. A jump is
@@ -1053,6 +1053,17 @@ const SRC_NAME = {kn:'knees', an:'ankles'};   // legs only: hands never drive
 let srcLost = 0;
 let angSm = null, angPrev = 0, angSpd = 0;
 let legsSeen = false, legsGone = 0, legsWarned = false;
+// build 37: what the voice says in the race when it loses your legs, by the
+// coach's verdict. Anything else (legs only, standing up) is told to step back.
+let legsSayK = '', legsSayT = 0;
+const LEGS_REPEAT = 3.0;   // seconds between repeats while the legs stay lost
+const LEGS_SAY = {
+  back: ['STEP BACK',    'UNTIL I SEE YOUR LEGS', 'Step back.'],
+  near: ['COME CLOSER',  'A LITTLE',              'Come a bit closer.'],
+  rgt:  ['STEP RIGHT',   'TO THE MIDDLE',         'Step to your right.'],
+  lft:  ['STEP LEFT',    'TO THE MIDDLE',         'Step to your left.'],
+  none: ['STEP IN',      'WHERE I CAN SEE YOU',   'Step back into the picture.'],
+};
 let hipRef = null, shRef = null;
 let limbPrev = {}, jumpT = 0, jumped = false, jumpRun = 0;
 let rumble = 0, offRuns = 0, wasOff = false;
@@ -1434,7 +1445,7 @@ function startRace(fresh){
   signAlpha=0; lastSignCorner=null;
   position=0; speed=0; playerX=0; boost=0; shake=0;
   stepTimes=[]; cadence=0; limbUp={}; rest={}; lastLift=null;
-  legsSeen=false; legsGone=0; legsWarned=false; hipRef=null; shRef=null;
+  legsSeen=false; legsGone=0; legsWarned=false; legsSayK=''; hipRef=null; shRef=null;
   limbPrev={}; jumpT=0; jumped=false; jumpRun=0; angSm=null; angPrev=0; angSpd=0; srcLost=0; driveSrc='none';
   quizOpen=false; quizDone=false; quizHold=0; quizSide=0;
   brakeArmed=false; kcal=0;
@@ -1574,18 +1585,31 @@ function update(dt, reading, now){
   /* The hands no longer drive, so losing your legs now means losing the car.
      That has to be said out loud rather than just felt as the car going quiet.
      Half a second of grace so a single dropped frame says nothing. */
+  /* BUILD 37 - Hugo: "I can't read it... just tell the voice to step back, to
+     step to the left... to come back into a perfect framing." The box said the
+     same thing whatever was wrong, once, in type too small to read from the
+     mark. Now the start-screen coach decides WHICH way to move, the voice says
+     it, and says it again every LEGS_REPEAT seconds until the legs are back -
+     then "Good." so you know without looking. In the race a missing pair of
+     legs with nothing else wrong almost always means you are too close or your
+     knees have dropped below the picture (his first recording: torso 0.354 all
+     race), so that case is told to step back. */
   if(legsSeen){
-    if(legsWarned) hideCall();
-    legsGone = 0; legsWarned = false;
+    if(legsWarned){ hideCall(); sayNow('Good.'); }
+    legsGone = 0; legsWarned = false; legsSayK = '';
   } else {
     legsGone += dt;
     if(legsGone > 0.5){
+      const c = coach(reading);
+      const k = LEGS_SAY[c.k] ? c.k : 'back';
+      const w = LEGS_SAY[k];
       // re-asserted every frame: a corner call landing mid-dropout would
       // otherwise replace the warning and then expire, leaving nothing
-      showCall('STEP BACK', 'INTO THE FRAME', 'warn');
+      showCall(w[0], w[1], 'warn');
       callTimer = 0;                 // no expiry; it goes when the legs return
-      if(!legsWarned){ legsWarned = true; blip(300, 0.18, 0.28, 'square');
-                       sayNow('Step back into the frame.'); }
+      if(!legsWarned){ legsWarned = true; blip(300, 0.18, 0.28, 'square'); }
+      const t = performance.now()/1000;
+      if(k !== legsSayK || t - legsSayT > LEGS_REPEAT){ legsSayK = k; legsSayT = t; sayNow(w[2]); }
     }
   }
 
