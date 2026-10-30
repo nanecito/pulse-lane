@@ -1201,11 +1201,23 @@ const REST_HAND = { x: 0.46, y: -0.32 };
    legs, and a spark that drifts past arm's length quietly breaks that
    promise and turns into a lunge nobody asked for. Caught as a PASSED at
    nearest 0.63 on a spark the player could not physically have reached. */
-/* reach is MEASURED: shoulder->wrist p99 over 10,868 frames of Hugo's own
-   recordings, in his torso units. The nominal 1.44 this replaces understated
-   his arm by 21%, which made the game call sparks unreachable that he could
-   reach standing, and demand room it did not need. */
-const ARM = { shX: 0.40, shY: 1.00, reach: 1.74 };
+/* P99 OF A JOINT DISTANCE IS A MAXIMUM, NOT A WORKING REACH, and the first
+   version of this file got that wrong. His measured shoulder->wrist p99 is
+   1.74 torsos, so 1.74 went in here and the arm rows were placed out to 1.53
+   of it. He then played it: arm sparks sat a median 1.26 from the shoulder
+   against the main field's 1.03, and CLEAN on arm sparks fell from 76% to
+   47%. Accuracy collapses near full extension - he was landing on the rim of
+   sparks he could only just touch.
+
+   The main field's proven envelope is the number to trust: over a whole
+   three-minute run its arm sparks never once sat past 1.25 from his
+   shoulder, and three in four came out CLEAN. So this is back to the
+   nominal 1.44, which sits just above that proven envelope and caps how far
+   a non-leg spark may DRIFT from the shoulder.
+
+   The lesson, and it generalises: the frame allowing a width is not a reason
+   to use it. */
+const ARM = { shX: 0.40, shY: 1.00, reach: 1.44 };
 
 /* Would this drift ever walk the spark into the dead zone around a resting
    hand? Amplitude is measured as the chord from where the hand started to
@@ -1374,10 +1386,10 @@ const TARGETS = [
   { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
   { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
   { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
-  { id:'wide-L',  name:'WIDE LEFT',   bx:-1.75, by: 0.70, legs:false },
-  { id:'wide-R',  name:'WIDE RIGHT',  bx: 1.75, by: 0.70, legs:false },
-  { id:'mid-L',   name:'MID LEFT',    bx:-1.70, by: 0.20, legs:false },
-  { id:'mid-R',   name:'MID RIGHT',   bx: 1.70, by: 0.20, legs:false },
+  { id:'wide-L',  name:'WIDE LEFT',   bx:-1.55, by: 0.70, legs:false },
+  { id:'wide-R',  name:'WIDE RIGHT',  bx: 1.55, by: 0.70, legs:false },
+  { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.20, legs:false },
+  { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
   { id:'side-L',  name:'SIDE LEFT',   bx:-1.65, by:-0.55, legs:true },
   { id:'side-R',  name:'SIDE RIGHT',  bx: 1.65, by:-0.55, legs:true },
   { id:'low-L',   name:'LOW LEFT',    bx:-1.35, by:-0.90, legs:true },
