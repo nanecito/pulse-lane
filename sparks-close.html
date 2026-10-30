@@ -1,0 +1,2900 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#07080f">
+<title>Sparks Close</title>
+<style>
+  :root{
+    --ink:#07080f; --field:#0e1020; --warm:#f6f1e6; --dim:#8a90ad;
+    --spark:#ffb02e; --spark-l:#ffd98a; --cyan:#4fd6e0;
+    --good:#7fc08a; --part:#ffb02e; --bad:#d4635a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  /* A LANDSCAPE PHONE IS SHORT. With the browser bar there, the page is
+     about 350 css pixels tall, and the start screen is 457 — so the Start
+     button sat just below the fold with overflow:visible, which cannot be
+     scrolled to. The game was unstartable. Two fixes, both needed:
+     the overlay scrolls, and `safe center` keeps the TOP reachable when the
+     content is taller than the box (plain centring pushes the overflow off
+     the start edge where nothing can reach it). */
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;justify-content:safe center;padding:24px 22px;
+    text-align:center;gap:14px;overflow-y:auto;overscroll-behavior:contain;
+    background:radial-gradient(120% 90% at 50% 18%,#171a33 0%,var(--ink) 72%);z-index:5}
+  .ov > *{flex-shrink:0}
+  .ov[hidden]{display:none}
+  h1{font-size:clamp(34px,13vw,64px);margin:0;letter-spacing:.16em;font-weight:400}
+  #endScore{font-size:clamp(40px,16vw,74px)}
+  h1 .g{color:var(--spark)}
+  .sub{color:var(--dim);font-size:15px;line-height:1.55;max-width:30ch;margin:0}
+  .how{text-align:left;max-width:32ch;color:var(--warm);font-size:15px;line-height:1.6;
+    margin:0;padding:0;list-style:none}
+  .how li{margin:7px 0;padding-left:20px;position:relative}
+  .how li:before{content:'';position:absolute;left:0;top:.62em;width:8px;height:8px;
+    border-radius:50%;background:var(--spark)}
+  button{font:inherit;font-size:18px;letter-spacing:.06em;padding:15px 34px;border-radius:999px;
+    border:1px solid var(--spark);background:var(--spark);color:#2a1a00;cursor:pointer}
+  button.ghost{background:transparent;color:var(--spark)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:13px;max-width:32ch;line-height:1.5;margin:0}
+  .err{color:var(--bad);font-size:14px;max-width:32ch;line-height:1.5}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 16px;display:flex;
+    justify-content:space-between;align-items:flex-start;font-size:14px;
+    letter-spacing:.08em;color:var(--warm);z-index:3;pointer-events:none;
+    background:linear-gradient(rgba(7,8,15,.74),rgba(7,8,15,0));
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  /* an id selector beats the [hidden] attribute, so without this the score
+     and the legwork bar sit on top of the start and setup screens */
+  #hud[hidden],#legs[hidden],#streak[hidden]{display:none}
+  #streak{position:fixed;top:64px;left:0;right:0;text-align:center;z-index:3;
+    pointer-events:none;text-shadow:0 2px 10px rgba(0,0,0,.9)}
+  #streak b{display:block;font-weight:400;font-size:30px;color:var(--spark-l);letter-spacing:.04em}
+  #streak span{font-size:11px;letter-spacing:.2em;color:var(--dim)}
+  /* Why the sparks stopped. A dead screen reads as a broken game; a line
+     that names the reason reads as an instruction. */
+  #room{position:fixed;left:16px;right:16px;top:50%;transform:translateY(-50%);
+    text-align:center;z-index:4;pointer-events:none;
+    text-shadow:0 2px 12px rgba(0,0,0,.95)}
+  #room b{display:block;font-weight:400;font-size:clamp(26px,8vh,40px);
+    letter-spacing:.14em;color:var(--spark)}
+  #room span{display:block;font-size:13px;line-height:1.45;color:#e7e3f0;
+    max-width:40ch;margin:5px auto 0}
+  #room #roomHow{color:var(--spark-l);letter-spacing:.06em;margin-top:3px}
+  #hud .r{text-align:right}
+  #hud b{font-weight:400;color:var(--spark);font-size:22px;display:block}
+  /* the legs meter is the whole point of the game, so it is on screen the
+     whole time rather than revealed at the end */
+  #legs{position:fixed;left:16px;right:16px;bottom:env(safe-area-inset-bottom,0);
+    margin-bottom:14px;z-index:3;pointer-events:none}
+  #legsBar{height:7px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
+  #legsFill{height:100%;width:0%;background:var(--cyan);transition:width .25s linear}
+  #legsTxt{font-size:11px;letter-spacing:.18em;color:var(--dim);margin-top:6px;text-align:center;
+    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  .tag{display:inline-block;border:1px solid var(--spark);color:var(--spark);
+    border-radius:999px;padding:3px 12px;font-size:11px;letter-spacing:.16em;margin-bottom:8px}
+  table{border-collapse:collapse;font-size:14px;color:var(--warm)}
+  td{padding:4px 10px}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--spark)}
+  td.v.bad{color:var(--bad)}
+  td.v.good{color:var(--good)}
+  /* and it should not need scrolling in the first place */
+  @media (max-height:470px){
+    .ov{padding:10px 18px;gap:7px}
+    h1{font-size:clamp(22px,6.4vh,34px);letter-spacing:.12em}
+    .sub{font-size:13px;line-height:1.4;max-width:52ch}
+    .how{font-size:13px;line-height:1.38;max-width:62ch}
+    .how li{margin:3px 0}
+    button{font-size:16px;padding:11px 28px}
+    .note{font-size:11.5px;line-height:1.35;max-width:60ch}
+    /* the end screen carries a table and two buttons; without this the
+       Again button lands below the fold on a landscape phone */
+    #endScore{font-size:clamp(24px,7.5vh,38px)}
+    .tag{font-size:11px;padding:3px 10px}
+    table{font-size:12px}
+    td{padding:1px 9px}
+    #endNote{font-size:11px;line-height:1.3;max-width:70ch}
+  }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<div id="hud" hidden>
+  <div><span style="color:var(--dim)" id="hSec">&nbsp;</span><b id="hTime">3:00</b></div>
+  <div class="r"><span style="color:var(--dim)">SCORE</span><b id="hScore">0</b></div>
+</div>
+<div id="streak" hidden><b id="hStreak"></b><span id="hStreakN"></span></div>
+<div id="legs" hidden>
+  <div id="legsBar"><div id="legsFill"></div></div>
+  <div id="legsTxt">LEGWORK</div>
+</div>
+
+<div id="room" hidden>
+  <b>STEP BACK</b>
+  <span id="roomSub">sparks are landing outside the picture</span>
+  <span id="roomHow"></span>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>SP<span class="g">A</span>RKS <span class="g">CLOSE</span></h1>
+  <p class="sub">Sparks light up around you. Go and get them.</p>
+  <ul class="how">
+    <li>About a metre and a half back &mdash; knees and feet in the picture.</li>
+    <li>Sweep a hand through the spark. A poke does not count &mdash; the swing is what scores.</li>
+    <li>The low ones want a lunge, not a bend at the waist. The bar at the bottom is watching your legs.</li>
+    <li>A run is three minutes. The music fills out while you keep landing them.</li>
+  </ul>
+  <div class="row"><button id="bStart">Start</button></div>
+  <p class="note" id="loadMsg" hidden>Waking the camera&hellip;</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Phone sideways and propped up, about a metre and a half back. This is the small-room Sparks &mdash; the full-size one is at sparks.html. Nothing leaves your device.</p>
+</div>
+
+<div class="ov" id="oFit" hidden style="background:transparent;justify-content:flex-end;padding-bottom:40px">
+  <p class="sub" id="fitMsg">Step back until your feet are inside the frame.</p>
+  <div class="row"><button id="bGo" class="ghost">Start anyway</button></div>
+</div>
+
+<div class="ov" id="oRot" hidden style="z-index:9">
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Sparks is played sideways. Your camera sees a wide picture &mdash; held sideways it fills the screen instead of sitting in a band across the middle, and you appear about three times bigger with no change to where you stand.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <div class="tag" id="endTag">RUN COMPLETE</div>
+  <h1 id="endScore">0</h1>
+  <table><tbody id="endRows"></tbody></table>
+  <div class="row">
+    <button id="bAgain">Again</button>
+    <button id="bRec" class="ghost">Save recording</button>
+  </div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/*==SCORER_START==*/
+/* ------------------------------------------------------------------
+   Sparks: targets, the strike scorer, and the legwork gate. The offline
+   harness cuts this exact block out of this file on every run and
+   measures it, so what is measured is what ships. Do not duplicate any
+   of it anywhere else.
+
+   Everything here is SCALE FREE and POSITION FREE. No feature is a raw
+   pixel distance and no feature is an absolute height. Lengths are
+   divided by the player's own torso; sweeps are angles at the player's
+   own shoulder. A tall player and a short player doing the same thing
+   produce the same numbers.
+
+   Normalised landmark coordinates run 0..1 over a frame that is NOT
+   square, so a unit of x is not the same physical length as a unit of y.
+   Every distance in here is taken in ASPECT CORRECTED space (iso), using
+   the aspect ratio carried in each sample. Gap does not do this; its
+   features are angles and same-direction ratios where the distortion
+   largely cancels. Here it would not, because a sweep crosses directions.
+   ------------------------------------------------------------------ */
+
+const TUNE = {
+  /* --- the strike --------------------------------------------------- */
+  HIT_R:        0.42,  // torso units: how near the limb must pass the spark
+  CENTRE_R:     0.17,  // inside this, full credit for where it passed
+  SWEEP_IN:     52,    // degrees of angular sweep at the shoulder for full credit
+  SWEEP_OUT:    20,    // below this, a poke: no amplitude credit at all
+  CHORD_IN:     0.80,  // torso units of net hand displacement for full credit
+  CHORD_OUT:    0.32,
+
+  /* --- velocity: differenced over a window, NEVER frame to frame -----
+     At 30 fps a 130 ms window is three or four frames, so one dropped
+     frame collapses it toward the noise floor. Defining the window in
+     time does not rescue it: a span containing no new spatial updates
+     computes a velocity of zero, which is indistinguishable from a limb
+     that genuinely was not moving. So the window carries a minimum valid
+     sample count, and a window that fails it yields NO VELOCITY AND NO
+     SCORE — not a zero.                                                */
+  VEL_WIN_MS:   150,
+  VEL_WIN_MAX:  220,  // the window may widen this far to find its samples
+  VEL_MIN_N:    3,
+
+  /* --- onset ------------------------------------------------------- */
+  ONSET_V:      0.90, // torso/sec under which the hand counts as not moving
+  ONSET_MAX_MS: 1400, // how far back the onset search will look
+
+  /* --- is the arc actually observed -------------------------------
+     The arc is reconstructed from the samples between the onset and the
+     strike, so that interval has to have been watched. A gap in it is not a
+     small error, it is the difference between measuring a swing and
+     measuring the two ends of a hole. At 10% dropped frames an earlier
+     version of this file turned honest swings into MISSED, because the onset
+     search, finding no still sample to walk back to, returned the earliest
+     MOVING sample instead — an onset invented at the edge of the data, a
+     short chord, and a player blamed for it. An arc that was not watched is
+     UNSCORED. */
+  ARC_MIN_N:    4,    // samples required between onset and strike
+  ARC_MAX_GAP:  150,  // ms: the largest hole allowed inside that interval
+  /* A hole in the middle of the pass through the zone does not end the pass.
+     Breaking on the first missing wrist frame made the nearest approach come
+     out at the EDGE of the radius instead of at the centre, because the pass
+     was one sample long, and honest full-length swings were scored as misses
+     with full amplitude and almost no centrality. */
+  /* A pass ends when the hand is SEEN outside the radius, and not before.
+     Ending it on a long hole instead threw away the evidence: a wrist lost
+     for 193 ms entered at the rim, reappeared dead centre at 0.04 torso, and
+     the pass had already been cut at the hole — so an honest strike was
+     scored on the rim it entered at and came back MISSED. The hole is a
+     reason to be uncertain about the middle, not a reason to discard what
+     was seen after it. Whether the hand might have left and returned
+     unobserved is unknowable; that it was inside both before and after is
+     observed, and the simpler reading is believed. The uncertainty about
+     the unwatched middle is handled below, by giving it to the player. */
+  /* Centrality is a claim about the deepest the hand got, and a hole in the
+     middle of the pass hides exactly that. With a fifth of the frames
+     missing, a full honest sweep was observed grazing the rim, scored
+     centrality 0.06 and came back MISSED with amplitude 1.0.
+
+     A fixed limit on the hole was the wrong instrument: 150 ms sounds small
+     but the hand crosses the whole zone in about 200, so a hole under the
+     limit still hides the middle of it. The uncertainty is computable
+     instead. Over a hole of g seconds at v torso/sec the hand could have got
+     v*g/2 closer than anything seen, so that much is given to the player —
+     never charging them for an interval nobody watched.
+
+     Only the hole in EXCESS of this device's own frame interval counts,
+     measured from the median gap in the window rather than assumed, so a
+     normally sampled pass gets no benefit at all and a camera dropping
+     frames does not quietly inflate everyone's scores. Past PASS_OBS_GAP of
+     excess the pass is not observed enough to judge and goes UNSCORED. */
+  PASS_OBS_GAP: 250,  // ms of EXCESS hole past which the pass is unjudgeable
+
+  /* Before a MISS may be declared, the window has to have been watched well
+     enough that a strike could not have hidden in it. A miss is a claim about
+     the player; UNSCORED is a claim about the camera, and when half the
+     frames never arrive the second is the true one. At 50% dropped frames
+     honest swings were being called misses on four to nine observations of a
+     window that holds about fifty. */
+  MISS_MIN_N:   14,   // observations of a hand required to declare a miss
+  MISS_MAX_GAP: 250,  // ms: a bigger hole than this could have hidden a strike
+
+  /* --- verdicts ---------------------------------------------------- */
+  PASS_FULL:    0.74,
+  PASS_PART:    0.48,
+  REP_QUALITY:  0.68,
+
+  /* --- the legwork gate, part one: per spark -----------------------
+     ONE quantity, and a directional one: how far the hips travelled TOWARD
+     the spark, in torso units. Two separate thresholds on lateral travel and
+     on hip height were wrong, because which of the two an honest movement
+     uses is decided by where the spark happens to be — a spark near the
+     floor is answered mostly by dropping and one out to the side mostly by
+     shifting, so demanding both fails honest play on almost every spark.
+     Projecting the hip displacement onto the direction of the spark asks the
+     question that actually matters, did you take your body there, and it
+     cannot be answered by bobbing or by swaying on the spot.
+
+     A graded zone rather than a threshold, because a weak but real lunge is
+     coasting and should be paid partly rather than refused. Both bounds come
+     from the sweep, not from taste: no credit at or below where a planting
+     player's hips land (their 95th percentile across five effort levels,
+     nine ways of folding, three swing durations and four noise levels), full
+     credit at the median of a player who takes their body there. */
+  LEG_NONE:     0.08, // hip travel toward the spark earning no credit
+  LEG_FULL:     0.28, // and the travel earning full credit
+
+  /* What counts as a repetition is DERIVED from that zone rather than typed
+     as a third number about the same quantity: the credit a strike has to
+     earn for the legs to have done the work. 0.28 of the zone puts the gate
+     at 0.136 torso. Across 424 cheating strikes and 239 honest ones, spanning
+     five effort levels, nine ways of folding, three swing durations and four
+     noise levels: no planting player passed it, and about 1% of honest
+     movement failed it. */
+  LEG_REP_CREDIT: 0.28,
+
+  /* On a spark marked legs the task IS taking your body there, so this is
+     the share of the points the strike alone is worth. The rest is in the
+     hips. */
+  LEG_STRIKE_SHARE: 0.25,
+
+  /* --- the legwork gate, part two: the session floor ---------------
+     A per-spark gate alone is not enough. Half these sparks are high or wide
+     and are honestly reachable with an arm, so a player can hold a real
+     score while barely using their legs: measured at 66% of an honest
+     player's score with the per-spark gate working perfectly. The run itself
+     has to clear a floor regardless of which sparks were hit.
+
+     The floor is a RATE, not a total, and it is charged PER LEG SPARK
+     PRESENTED. A fixed total cannot work once a run is not a fixed length:
+     the same number that an eight spark test run cleared comfortably would
+     be trivial over a three minute track and brutal over a short one. Per
+     leg spark it scales with whatever the track asks for, and it ignores the
+     high and wide sparks, which are honestly armable and whose hips should
+     not be expected to move at all.
+
+     Both numbers come from the floor sweep: 15% under the 5th percentile of
+     what a player who takes their body to every spark actually travels. */
+  HIP_PER_LEG:  0.74, // torso units of hip path per leg spark presented
+  LAT_PER_LEG:  0.21, // and of lateral hip travel
+
+  /* The floor is not a label, it is a multiplier. This is the share of the
+     score that survives doing no legwork at all; the rest is earned by the
+     run clearing the floor, and it slides rather than switching, so a partial
+     effort is paid partly. Coasting is forgiving. Standing still is not. */
+  FLOOR_KEEP:   0.40,
+  /* And what it takes to call a run cleared, as a fraction of its sparks. */
+  CLEAR_REPS:   0.75,
+
+  /* --- judging ----------------------------------------------------- */
+  JUDGE_PRE:    140,  // the interval opens this far before the spark lights
+  JUDGE_POST:   140,  // and closes this far after it dies
+  JUDGE_MIN:    4,    // readable observations required inside that interval
+  /* The session odometer advances only when the hips are this far from where
+     it last recorded them. Accumulating frame to frame does not work: hip
+     centre jitter is about 0.015 torso per frame, and over a 22 second run
+     that integrates to 7.6 torso of travel for a player standing perfectly
+     still — measured, not supposed. An anchor with a step larger than the
+     noise cannot be walked anywhere by noise, while real travel crosses it
+     repeatedly.
+
+     The hip is fed to it SMOOTHED, over HIP_SMOOTH samples. Smoothing a
+     swinging wrist is refused elsewhere in this file, because the endpoints
+     of the swing are the measurement and a filter moves them. The hip
+     odometer is the opposite case: it is an integral over twenty seconds, so
+     averaging a sixth of a second of it costs nothing and divides the jitter
+     by the root of the count. Without it, at 0.035 torso of landmark noise a
+     player standing perfectly still banked 11 torso of travel — measured. */
+  HIP_STEP:     0.08,
+  HIP_SMOOTH:   5,
+
+  /* --- the reader -------------------------------------------------- */
+  VIS_GET:      0.15, // confidence to acquire a landmark
+  VIS_KEEP:     0.04, // confidence to keep one already acquired
+};
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+// A is the player's left, which a mirrored picture puts on the left of the
+// screen, so the player's left really does look like their left.
+
+const DEG = 180 / Math.PI;
+function wrap(d){ return ((d + 180) % 360 + 360) % 360 - 180; }
+function midp(a, b){ return { x:(a.x + b.x)/2, y:(a.y + b.y)/2 }; }
+
+// Aspect corrected. x is stretched by the frame's aspect ratio so that a
+// distance means the same thing in every direction.
+function iso(p, ar){ return { x: p.x * ar, y: p.y }; }
+function idist(a, b, ar){ return Math.hypot((b.x-a.x)*ar, b.y-a.y); }
+function iang(a, b, ar){ return Math.atan2(b.y - a.y, (b.x - a.x)*ar) * DEG; }
+
+// The landmark reader, lifted from Gap unchanged. Hysteresis: a joint
+// already tracked is kept on a much lower bar than one picked up fresh.
+// One threshold for both makes tracking strobe between seen and not seen,
+// which reads as a broken game rather than a dim room.
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]) { latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v: v };    // mirrored, normalised to the frame
+  };
+}
+
+/* One pose becomes one observation. Carries the limb endpoints, the body
+   frame they are measured against, and the aspect ratio, so the scorer
+   never has to reach outside a sample. Nothing is guessed: a limb whose
+   landmarks are not visible is simply absent. */
+/* ------------------------------------------------------------------ *
+ * THE BODY SCALE                                                       *
+ *                                                                      *
+ * Everything in this scorer is measured in torso units, and until now  *
+ * "a torso" meant the shoulder-to-hip distance MEASURED FRESH EVERY    *
+ * FRAME. That is wrong, and it is wrong in the one place it hurts      *
+ * most: a torso is a 3D segment, the camera sees its projection, and   *
+ * the projection is L·cos(pitch). Lean forward to reach something low  *
+ * and the unit of measurement shrinks — so every distance in torso     *
+ * units inflates, the hit radius closes, and the drawn ring shrinks    *
+ * under the player's hand as they commit to it. At 45 degrees of       *
+ * pitch, a hand 0.30 torso off centre stops counting as a pass at all. *
+ *                                                                      *
+ * The low, legs-required sparks are the ones that make a player bend,  *
+ * so they are the ones this punished — which is exactly backwards: the *
+ * harder the player works, the smaller the target gets.                *
+ *                                                                      *
+ * Scale is a property of HOW FAR THE PLAYER IS FROM THE CAMERA, not of *
+ * what they are doing with their spine. Since the projection can only  *
+ * ever be SHORTER than the real segment, the best estimate of the real *
+ * one is the largest projection seen recently. So: rise instantly (the *
+ * player straightened, or stepped closer — that is real), fall slowly  *
+ * (a short projection is probably a bend, not a step back; give it     *
+ * several seconds to prove otherwise).                                 *
+ *                                                                      *
+ * This is the "tracked standing reference" that doc 01 says to carry   *
+ * over from Gap. Sparks did not carry it, and the simulator could      *
+ * never have caught that: bodyAt() builds every body in a fixed plane  *
+ * with the torso at 1.0 by construction, so in simulation this bug     *
+ * does not exist.                                                      *
+ * ------------------------------------------------------------------ */
+/* A HIGH QUANTILE over a trailing window, not a running maximum.
+
+   The maximum is the right idea and the wrong estimator: a projection can
+   only be shorter than the segment, so the largest recent projection is the
+   best guess at the real one — but landmark noise also makes it larger, and
+   a max RATCHETS onto every noise peak and never comes down. Measured: it
+   biased the scale high enough to turn one borderline bloom from CLIPPED
+   into MISSED, at every pitch including zero, which is the tell — at zero
+   pitch there is nothing to foreshorten, so that was the estimator and not
+   the body. The same mistake as the hip odometer that integrated noise and
+   banked 11 torso of travel from a player standing still.
+
+   The 85th percentile of the last few seconds rejects the noise peaks,
+   still ignores a transient bend, and still follows a player who really
+   does step closer or further away — it just takes a window to do it. */
+const SCALE_WINDOW_MS = 5000;
+const SCALE_Q = 0.85;
+function makeScale(){
+  const buf = [];
+  let scale = null;
+  return {
+    get(){ return scale; },
+    push(torso, t){
+      if(!torso || torso < 0.02) return scale;
+      if(t === undefined || t === null) t = buf.length ? buf[buf.length-1].t : 0;
+      buf.push({ t, v:torso });
+      const cut = t - SCALE_WINDOW_MS;
+      while(buf.length && buf[0].t < cut) buf.shift();
+      const vs = buf.map(b => b.v).sort((a,b) => a - b);
+      scale = vs[Math.min(vs.length - 1, Math.floor(vs.length * SCALE_Q))];
+      return scale;
+    }
+  };
+}
+
+function observe(pose, read, ar, scale, t){
+  const g = {};
+  for(const k in J){ const p = read(pose, J[k]); if(p) g[k] = p; }
+  const o = { ar, limbs:{}, anchors:{}, hip:null, sh:null, torso:0, readable:false };
+  if(g.shA && g.shB && g.hipA && g.hipB){
+    o.sh  = midp(g.shA, g.shB);
+    o.hip = midp(g.hipA, g.hipB);
+    o.torso = idist(o.sh, o.hip, ar);
+  }
+  if(!o.torso || o.torso < 0.02) return o;   // no usable body frame, no claims
+  /* o.torso stays the RAW projection — the fit gate wants that, and the
+     scale tracker is built from it. o.scale is the unit everything is
+     measured in. With no tracker the two are the same, which is the old
+     behaviour and is only correct for a body that never bends. */
+  o.scale = scale ? scale.push(o.torso, t) : o.torso;
+  if(g.wrA) o.limbs.wrA = g.wrA;
+  if(g.wrB) o.limbs.wrB = g.wrB;
+  if(g.shA) o.anchors.wrA = g.shA;           // a hand sweeps about its shoulder
+  if(g.shB) o.anchors.wrB = g.shB;
+  o.readable = !!(o.hip && o.sh && (o.limbs.wrA || o.limbs.wrB));
+  return o;
+}
+
+/* Place a spark. The position is given in BODY FRAME — torso units from
+   the player's own hip centre, gravity aligned, +x to screen right, +y up
+   — so the reach is the same physical task for every body. It is then
+   FROZEN in the camera frame at the moment it lights, so the player has to
+   travel to it. Placed scale free, held still in the world.            */
+function placeTarget(def, o){
+  if(!o || !o.torso) return null;
+  const k = o.scale || o.torso;
+  return { x: o.hip.x + def.bx * k / o.ar, y: o.hip.y - def.by * k };
+}
+
+/* Velocity of one limb at time t, differenced across a window, with the
+   minimum sample count enforced. Returns null — not zero — when the window
+   is too thin to make a claim. */
+function velocityAt(samples, t, key){
+  /* The window is defined in TIME and widens only as far as VEL_WIN_MAX to
+     find its minimum samples. At 30 fps a 150 ms window holds about five
+     frames, so a single dropped frame should not starve it; with the window
+     fixed at 130 ms and no widening, 10% dropped frames left half of all
+     honest strikes unscored, because a missing velocity at the strike takes
+     the whole judgment with it. Widening costs a little smoothing and is
+     reported; past the cap it still declines rather than inventing a zero. */
+  for(const span of [TUNE.VEL_WIN_MS, TUNE.VEL_WIN_MAX]){
+    const half = span / 2;
+    const win = samples.filter(s => s.t >= t - half && s.t <= t + half && s.o.limbs[key]);
+    if(win.length < TUNE.VEL_MIN_N) continue;
+    const a = win[0], b = win[win.length - 1];
+    const dt = (b.t - a.t) / 1000;
+    if(dt <= 0.001) continue;
+    const d = idist(a.o.limbs[key], b.o.limbs[key], a.o.ar) / a.o.scale;
+    return d / dt;
+  }
+  return null;
+}
+
+/* Where the movement started: walk back from contact to the last moment the
+   limb was not moving. The onset is an index into the sample list, not a
+   smoothed estimate, because filtering moves the apparent start and end of
+   a swing and that is exactly the quantity being measured. */
+function findOnset(samples, ci, key){
+  const ct = samples[ci].t;
+  for(let i = ci - 1; i >= 0; i--){
+    if(ct - samples[i].t > TUNE.ONSET_MAX_MS) break;
+    if(!samples[i].o.limbs[key]) continue;
+    const v = velocityAt(samples, samples[i].t, key);
+    if(v === null) continue;
+    if(v < TUNE.ONSET_V) return i;
+  }
+  // No still sample to walk back to. There is NO fallback here on purpose:
+  // returning the earliest moving sample would invent an onset at the edge of
+  // whatever happened to be visible, and the short arc that follows gets
+  // charged to the player as a miss.
+  return null;
+}
+
+/* Was the interval between the onset and the strike actually watched, closely
+   enough to call the path between them a swing? */
+function arcObserved(samples, oi, ci, key){
+  let n = 0, last = null, maxGap = 0;
+  for(let i = oi; i <= ci; i++){
+    const s = samples[i];
+    if(!s || !s.o.limbs[key]) continue;
+    if(last !== null) maxGap = Math.max(maxGap, s.t - last);
+    last = s.t; n++;
+  }
+  return { ok: n >= TUNE.ARC_MIN_N && maxGap <= TUNE.ARC_MAX_GAP, n, maxGap };
+}
+
+/* Credit inside a tolerance zone: full inside the inner bound, sliding to
+   nothing at the outer, nothing past it. The implementation's tolerance is
+   not the player's accuracy. */
+function zone(v, inB, outB){
+  if(inB > outB){ if(v >= inB) return 1; if(v <= outB) return 0; return (v - outB) / (inB - outB); }
+  if(v <= inB) return 1; if(v >= outB) return 0; return (outB - v) / (outB - inB);
+}
+
+/* The arc, measured between two observations rather than accumulated along
+   the path. Accumulated path length grows with landmark jitter in
+   proportion to the number of samples, so a noisy stationary hand would
+   report a long path. A net sweep and a net chord are differences between
+   two positions: noise adds spread but does not accumulate. */
+function arcBetween(samples, oi, ci, key){
+  const a = samples[oi].o, b = samples[ci].o;
+  if(!a.limbs[key] || !b.limbs[key]) return null;
+  const chord = idist(a.limbs[key], b.limbs[key], a.ar) / a.scale;
+  let sweep = null;
+  if(a.anchors[key] && b.anchors[key]){
+    const u = iang(a.anchors[key], a.limbs[key], a.ar);
+    const v = iang(b.anchors[key], b.limbs[key], b.ar);
+    sweep = Math.abs(wrap(v - u));
+  }
+  return { chord, sweep };
+}
+
+/* Hip travel between two observations, in torso units. A bend at the waist
+   moves the hands a long way while the hips barely shift, and it is the hips
+   that say whether the legs did the work.
+
+   `toward` is the one that gates: the hip displacement projected onto the
+   direction from the hips to the spark. Lateral and vertical are kept too,
+   but only for the recording — they are not what passes or fails. */
+function hipAround(samples, i){
+  // the hip averaged over a few samples either side. Same reason the odometer
+  // smooths: the hips are slow, so a sixth of a second of averaging costs
+  // nothing and takes the root of the count out of the jitter. The wrist is
+  // never treated this way, because the swing's endpoints ARE the measurement.
+  const k = (TUNE.HIP_SMOOTH - 1) / 2;
+  let sx = 0, sy = 0, n = 0;
+  for(let j = Math.round(i - k); j <= Math.round(i + k); j++){
+    const s = samples[j];
+    if(!s || !s.o.readable || !s.o.hip) continue;
+    sx += s.o.hip.x; sy += s.o.hip.y; n++;
+  }
+  return n ? { x:sx/n, y:sy/n } : null;
+}
+
+/* THE DIRECTION THE BODY HAS TO TRAVEL for a spark to be reachable at all.
+   Body frame, y UP.
+
+   Every leg spark sits 1.90-2.33 torsos from a standing shoulder against an
+   arm reach of 1.44, so the arm alone never gets there and the body must
+   close the gap. The shortest way to close it is straight along the line
+   from the SHOULDER to the spark.
+
+   This replaces projecting onto the hip->spark line, which asked for a
+   direction the body does not actually need to travel. The two diverge in
+   proportion to how lateral the spark is, and on the side sparks they very
+   nearly swap emphasis: a straight-down dip is worth 0.87 of the direction
+   the body must go, and only 0.43 of the hip->spark line.
+
+     spark        must-move dir     hip->spark dir    a dip is worth
+     side-L/R     0.50, -0.87       0.90, -0.43       0.87 vs 0.43
+     low-L/R      0.34, -0.94       0.76, -0.65       0.94 vs 0.65
+     deep-L/R     0.12, -0.99       0.49, -0.87       0.99 vs 0.87
+     floor-C      0.17, -0.99       0.00, -1.00       0.99 vs 1.00
+
+   Measured on a real three-minute run: a 0.34-torso drop at a side spark
+   scored 0.07 and failed the gate, while the same player's drops at low and
+   deep sparks passed. The ordering of the error matched the ordering of the
+   failures exactly. */
+function reachDir(bx, by){
+  const sx = bx < 0 ? -ARM.shX : ARM.shX;
+  const vx = bx - sx, vy = by - ARM.shY;
+  const d = Math.hypot(vx, vy);
+  return d > 1e-6 ? { x: vx/d, y: vy/d } : null;
+}
+
+/* aim is the spark's position in BODY frame ({bx, by}), not on screen: the
+   direction wanted is a property of the target and the arm, not of where the
+   hip happened to be when the hand arrived. */
+function hipTravel(samples, oi, ci, aim){
+  const a = samples[oi].o, b = samples[ci].o;
+  if(!a.hip || !b.hip) return null;
+  const h0 = hipAround(samples, oi), h1 = hipAround(samples, ci);
+  if(!h0 || !h1) return null;
+  const dx = (h1.x - h0.x) * a.ar / a.scale;
+  const dy = (h1.y - h0.y) / a.scale;
+  let toward = null;
+  if(aim){
+    const u = reachDir(aim.bx, aim.by);
+    /* dy is SCREEN y, which grows downward; the body frame has y UP. */
+    if(u) toward = dx * u.x + dy * (-u.y);
+  }
+  return { lat:Math.abs(dx), drop:Math.abs(dy), toward };
+}
+
+/* ---------------------------------------------------------------- *
+ * Judge one spark.                                                  *
+ *                                                                   *
+ * Scored against the spark's own TIMESTAMPED WINDOW, not against its *
+ * expiry. The window lives in the corrected capture clock, the same  *
+ * domain the game's events live in, and the caller must not call this*
+ * until the estimates covering the window have actually arrived. Gap *
+ * returned UNSCORED on every wall of a round because it judged       *
+ * before the evidence existed; this is the same trap, worse, because *
+ * a spark's death is a deadline in display time while the strike is  *
+ * reconstructed from delayed samples.                                *
+ * ---------------------------------------------------------------- */
+/* The observations that belong to this spark, as indices into samples. */
+function judgeWindow(t, samples){
+  const lo = t.lightAt - TUNE.JUDGE_PRE, hi = t.dieAt + TUNE.JUDGE_POST;
+  const win = [];
+  for(let i = 0; i < samples.length; i++){
+    const s = samples[i];
+    if(s.t >= lo && s.t <= hi && s.o.readable) win.push(i);
+  }
+  return win;
+}
+
+/* The strike: the FIRST contiguous pass through the hit radius.
+
+   Taking the nearest approach across the whole window scores the wrong
+   moment: a hand that arrives at the spark and stays sits at its nearest
+   point long after the swing is over, so the onset search finds a stationary
+   hand one sample away and the arc comes back as nothing. In simulation that
+   made the same movement score 1.00 on one side and 0.00 on the other,
+   decided by where the noise happened to put the minimum.
+
+   Its ENTRY is when the hand got there, and that is what the timing is
+   measured to. Its DEEPEST point is the end of the swing, and that is what
+   the arc is measured to.
+
+   Both hands are eligible. The player decides which hand to use, not the
+   game; the earlier pass wins.
+
+   Lives in its own function because the judgment and the is-it-ready check
+   both need it, and two copies of this would drift apart. */
+function findPass(t, samples, win){
+  /* The spark is read AT THE SAMPLE'S OWN CAPTURE TIME, not where it is
+     being drawn now. This is the whole reason a drifting spark can be
+     scored at all: both sides of the comparison sit in the same clock
+     domain, so the pipeline delay cancels out of the geometry. Reading
+     t.at — a fixed point — or the render-time position would charge the
+     player the latency times the drift speed on every swing. */
+  const distAt = (i, key) => {
+    const s = samples[i], p = s.o.limbs[key];
+    return p ? idist(p, sparkPos(t, s.t), s.o.ar) / s.o.scale : null;
+  };
+  let hit = null, nearest = Infinity, everVisible = false;
+  for(const key of ['wrA','wrB']){
+    let k0 = -1, k1 = -1, exited = false;
+    for(let k = 0; k < win.length; k++){
+      const d = distAt(win[k], key);
+      if(d === null) continue;          // invisible: the pass bridges it
+      everVisible = true;
+      if(d < nearest) nearest = d;
+      if(d <= TUNE.HIT_R){
+        if(k0 < 0) k0 = k;
+        k1 = k;
+      }
+      else if(k0 >= 0){ exited = true; break; }   // seen, and outside: over
+    }
+    if(k0 < 0) continue;
+    let bd = Infinity, bi = win[k0];
+    for(let k = k0; k <= k1; k++){
+      const d = distAt(win[k], key);
+      if(d !== null && d < bd){ bd = d; bi = win[k]; }
+    }
+    if(!hit || k0 < hit.k0)
+      hit = { key, k0, entryI: win[k0], bestI: bi, lastI: win[k1], d: bd, exited };
+  }
+  return { hit, nearest, everVisible };
+}
+
+/* Is there enough evidence to judge NOW, rather than waiting for the spark to
+   expire?
+
+   This exists for feel, not for correctness. Judging only at expiry means a
+   player who strikes early waits out the rest of the lifetime plus the
+   pipeline delay before anything happens — up to 1.2 seconds between their
+   hand going through the spark and the game reacting. A reward that late is
+   not a reward. It also leaves the spark sitting there after it has been hit.
+
+   It must not change any verdict, only when the same verdict arrives. So it
+   waits for exactly what the judgment needs and nothing less: a pass that has
+   demonstrably ENDED, the velocity window around the entry filled, and an
+   onset to measure back to. Short of that it declines and the caller falls
+   back to the expiry deadline. */
+function readyToJudge(t, samples){
+  if(!samples.length) return false;
+  const newestT = samples[samples.length - 1].t;
+  const { hit } = findPass(t, samples, judgeWindow(t, samples));
+  if(!hit) return false;                       // no strike seen yet
+  const need = TUNE.VEL_WIN_MAX / 2 + 60;
+  /* The pass has to have ended for a reason that can be SEEN: the hand was
+     observed outside the radius, or the hole since it was last inside grew
+     past what a pass may bridge. Running out of samples is not evidence the
+     pass ended — the hand may still be travelling deeper, and the deepest
+     point is what centrality is measured from. Accepting that as an ending
+     judged five strikes out of 2304 on a truncated pass, each one scoring
+     LOWER than the truth: one honest movement came back MISSED at quality
+     0.20 that the full window scored CLEAN at 1.00. */
+  if(!hit.exited) return false;
+  // the velocity window centred on the entry has to be filled
+  if(newestT - samples[hit.entryI].t < need) return false;
+  if(velocityAt(samples, samples[hit.entryI].t, hit.key) === null) return false;
+  return findOnset(samples, hit.entryI, hit.key) !== null;
+}
+
+function judgeTarget(t, samples){
+  const win = judgeWindow(t, samples);
+  const blank = { verdict:'UNSCORED', quality:0, amplitude:null, centrality:null,
+                  execMs:null, anticipationMs:null, velocity:null, sweep:null,
+                  chord:null, hip:null, legCredit:null, legsOk:null, rep:false, points:0,
+                  samples:win.length, limb:null, nearest:null, why:null };
+  if(win.length < TUNE.JUDGE_MIN) return Object.assign({}, blank, { why:'too few frames' });
+
+  const { hit, nearest, everVisible } = findPass(t, samples, win);
+
+  // A hand that was never visible is no claim about the player. A hand that
+  // was plainly and continuously visible and was not there is a miss, and it
+  // is theirs. Anything in between is the camera's, not the player's.
+  if(!everVisible) return Object.assign({}, blank, { why:'hands not seen' });
+  /* No pass at all. With several sparks alive the player CHOOSES, and a
+     spark they never went for is not a failure — it is one they passed
+     over. Charging it as a MISSED would break the streak for playing the
+     game the way it is designed to be played, which is the same class of
+     error as blaming the player when the camera loses them.
+
+     MISSED now means one thing only: they went, and the swing did not make
+     it. That is a change to what the scorer MEANS, not just to what it
+     does, and it is the reason this build had to be simulated before it
+     was played.
+
+     The visibility test survives, because it still separates two different
+     facts in the recording: the player was plainly there and chose
+     something else (PASSED), or the camera could not see them and nothing
+     can be said (UNSCORED). */
+  if(!hit){
+    /* To say the player CHOSE not to go, at least one hand has to have been
+       watched well enough that a reach would have been seen. The test is
+       PER HAND, and that matters: counting a sample whenever EITHER wrist
+       was visible let a perfectly visible resting hand vouch for a striking
+       hand the camera had lost. One honest flare strike came back PASSED at
+       nearest 0.63 that way — the hand did reach the spark, and the whole
+       arrival, every frame of it, fell in a hole. Six frames lost in a row
+       is rare, and at a fifth of frames dropped it happens about once in
+       six thousand strikes, which is exactly often enough to matter and
+       exactly rarely enough to never find by playing. */
+    /* BOTH hands, not either. Either one could have been the striking hand,
+       so losing one means the reach could have happened where the camera
+       was not looking. Taking the first hand that passes was still wrong in
+       the way that matters: blind ONLY the striking hand through the whole
+       reach and the game reported the player chose not to go, at nearest
+       0.47, with the motionless resting hand vouching for it. PASSED costs
+       the player exactly what UNSCORED costs, so this is not a fairness
+       bug — it is a lie in the recording, and the recording is the only way
+       any of this gets diagnosed from a real body. */
+    let seen = true;
+    for(const key of ['wrA','wrB']){
+      let n = 0, last = null, maxGap = 0;
+      for(const i of win){
+        const s = samples[i];
+        if(!s.o.limbs[key]) continue;
+        if(last !== null) maxGap = Math.max(maxGap, s.t - last);
+        last = s.t; n++;
+      }
+      if(n < TUNE.MISS_MIN_N || maxGap > TUNE.MISS_MAX_GAP){ seen = false; break; }
+    }
+    if(!seen) return Object.assign({}, blank, { why:'lost a hand',
+      nearest:+nearest.toFixed(4) });
+    return Object.assign({}, blank, { verdict:'PASSED',
+      nearest:+nearest.toFixed(4), samples:win.length });
+  }
+
+  /* Two samples out of the pass, each carrying a different quantity. The
+     ENTRY is when the hand arrived, and it is what the timing is measured to.
+     The DEEPEST point is the end of the swing, and it is what the arc is
+     measured to.
+
+     Measuring the arc to the entry instead undercounts every swing by exactly
+     the hit radius, because entry happens the moment the hand comes within
+     HIT_R of the centre. On a spark 0.85 torso from the resting hand that
+     left 0.43 of travel to show for a full honest lunge, and honest lunges
+     were scored at a quarter amplitude. It stayed hidden while the simulated
+     body stood with its hands on its hips, which made every swing longer than
+     it should have been. */
+  const key = hit.key, entryI = hit.entryI, deepI = hit.bestI;
+
+  /* The onset is found by walking back from the ENTRY, which is inside the
+     moving part of the swing. Walking back from the deepest point instead
+     lands in the stillness after the hand has arrived and parked, so the
+     search stops one sample away and the arc collapses to nothing — the same
+     trap as taking the nearest approach across the whole window, in a
+     different place. */
+  const oi = findOnset(samples, entryI, key);
+  if(oi === null) return Object.assign({}, blank, { why:'no clear start' });
+
+  const vel = velocityAt(samples, samples[entryI].t, key);
+  if(vel === null) return Object.assign({}, blank, { why:'too few frames' });
+
+  // the SWING is onset to entry, and that is the interval that must have been
+  // watched. Whatever the hand does after arriving is not part of the swing.
+  const cover = arcObserved(samples, oi, entryI, key);
+  if(!cover.ok) return Object.assign({}, blank, { why:'swing not seen' });
+
+  // the arc runs to the deepest point, so a hand that keeps going after it
+  // crosses into the zone is credited for the whole of it
+  const arc = arcBetween(samples, oi, deepI, key);
+  if(!arc) return Object.assign({}, blank, { why:'no arc seen' });
+
+  /* How well was the pass itself watched? The span runs from the sample
+     before entry to the one after the last in-radius sample, because the
+     deepest point could have fallen in either of those gaps. */
+  let passGap = 0;
+  {
+    let last = null;
+    for(let i = Math.max(0, hit.entryI - 1); i <= Math.min(samples.length - 1, hit.lastI + 1); i++){
+      const s = samples[i];
+      if(!s.o.limbs[key]) continue;
+      if(last !== null) passGap = Math.max(passGap, s.t - last);
+      last = s.t;
+    }
+  }
+  /* This device's own frame interval, measured rather than assumed — and
+     measured NEAR THE PASS rather than across the whole window.
+
+     Taking it across the window was fine while a spark lived 1.3 s. At
+     3.4-5 s it is not: the window is long, the frame rate wanders through
+     it, and a window truncated by early judging yields a different median
+     from the full one. That difference feeds the slack, which feeds
+     centrality, which crossed a verdict band once in 2,304 trials — early
+     judging is only allowed to change WHEN a verdict arrives, never what it
+     is. The frame interval is a property of the device around the moment
+     in question, not of how long the spark happened to live. */
+  let medGap = 33;
+  {
+    const tp = samples[entryI].t;
+    const near = [], all = [];
+    let lastN = null, lastA = null;
+    for(const i of win){
+      const s = samples[i];
+      if(!s.o.limbs[key]) continue;
+      if(lastA !== null) all.push(s.t - lastA);
+      lastA = s.t;
+      if(Math.abs(s.t - tp) > 700) continue;
+      if(lastN !== null) near.push(s.t - lastN);
+      lastN = s.t;
+    }
+    const use = near.length >= 5 ? near : all;
+    if(use.length){ use.sort((a,b)=>a-b); medGap = use[Math.floor(use.length/2)]; }
+  }
+  const excess = Math.max(0, passGap - medGap);
+  if(excess > TUNE.PASS_OBS_GAP)
+    return Object.assign({}, blank, { why:'gap over the spark', nearest:+hit.d.toFixed(4) });
+
+  const best = { i: entryI, key, d: hit.d };
+
+  // the hand could have been this much deeper inside the hole nobody saw
+  const slack = Math.max(0, vel) * (excess / 1000) / 2;
+  const dEff = Math.max(0, best.d - slack);
+  const centrality = zone(dEff, TUNE.CENTRE_R, TUNE.HIT_R);
+  /* Scored against what THIS spark demands, taken from where it actually
+     was when the hand arrived — it drifts, so its demand drifts with it. */
+  const need = chordNeed(sparkBody(t, samples[entryI].t).bx,
+                         sparkBody(t, samples[entryI].t).by);
+  const cAmp = zone(arc.chord, need.inAt, need.outAt);
+  const sAmp = arc.sweep === null ? null : zone(arc.sweep, TUNE.SWEEP_IN, TUNE.SWEEP_OUT);
+  // Amplitude takes the better of sweep and chord: a sweep straight along the
+  // line of the arm has little angular change but real displacement, and a
+  // sweep across the body has the reverse. Requiring both would fail honest
+  // swings; requiring the mean would too.
+  const amplitude = sAmp === null ? cAmp : Math.max(cAmp, sAmp);
+
+  // The worst of the two caps the score. An average barely notices one of
+  // them being completely wrong, which is how a poke dead on centre would
+  // otherwise pass.
+  const quality = Math.min(amplitude, centrality) * 0.45
+                + ((amplitude + centrality) / 2) * 0.55;
+
+  /* Named hip, not legs: it is hip travel. Called legs, it collided with the
+     spark's own legs flag wherever the two were spread into one record, and
+     the end screen counted every spark as a leg spark. */
+  /* The direction the hips had to travel is taken from where the spark was
+     at ENTRY — the moment the hand arrived. Taking it from the deepest
+     point instead would let a drifting spark change the direction it was
+     asking for in the middle of the swing the player had already
+     committed to, and taking it from the onset would ask for a direction
+     that was already stale by the time they got there. Entry is also where
+     the timing is taken, so the two agree. */
+  const hip = hipTravel(samples, oi, entryI, sparkBody(t, samples[entryI].t));
+  const legCredit = (hip && hip.toward !== null)
+    ? zone(hip.toward, TUNE.LEG_FULL, TUNE.LEG_NONE) : null;
+  const legsOk = !t.legs ? null
+    : (legCredit !== null && legCredit >= TUNE.LEG_REP_CREDIT);
+
+  /* ---------------------------------------------------------------- *
+   * Two numbers that are MEASURED AND RECORDED BUT NOT SCORED.         *
+   *                                                                    *
+   * Doc 11 set the condition: before an execution-speed score ships,   *
+   * measure median error, tail error, and the probability of reversing *
+   * the ranking of two movements with known durations — and if the     *
+   * ranking flips, it does not ship. It flips. Against movements whose *
+   * true duration is known, under expected conditions, the ranking     *
+   * reverses for 11.7% of pairs 25-50 ms apart and 7.9% of pairs       *
+   * 50-75 ms apart, and is only clean past about 125 ms. On a phone    *
+   * dropping a tenth of its frames it reverses 17.9% of pairs even at  *
+   * a 125 ms gap. So execution speed is not shown to the player and    *
+   * earns no points. The constant delay does cancel out of it, exactly *
+   * as predicted: being wrong about the 200 ms by 50 ms moved the      *
+   * median error by 0.2 ms.                                            *
+   *                                                                    *
+   * Anticipation is worse off, for the opposite reason. It compares a  *
+   * corrected body time against an uncorrected display event, so the   *
+   * latency assumption does not cancel: its error moves one-for-one    *
+   * with how wrong POSE_LATENCY_MS is. Measured at -63 ms when the     *
+   * real delay is 150 and +37 ms when it is 250. Since nobody has ever *
+   * measured the real figure, an anticipation score would be a number  *
+   * with an unknown offset. It waits for the gate.                     *
+   *                                                                    *
+   * Both are kept in the recording, where they are diagnostics rather  *
+   * than claims, and where a session can be re-judged once the gate    *
+   * gives the real latency.                                            *
+   * ---------------------------------------------------------------- */
+  const execMs = samples[entryI].t - samples[oi].t;
+  const anticipationMs = samples[oi].t - t.lightAt;
+
+  let verdict;
+  if(quality >= TUNE.PASS_FULL) verdict = 'CLEAN';
+  else if(quality >= TUNE.PASS_PART) verdict = 'CLIPPED';
+  else verdict = 'MISSED';
+
+  /* WHY, in words, for everything that did not pay in full.
+
+     Hugo played this and the blue ones did not count when he went down for
+     them. He could not tell me what they said, because they said nothing.
+     A verdict the player cannot act on is a verdict that cannot be
+     debugged, and a game that only tells you that you failed is a game
+     that makes you guess at your own body. Every shortfall now names
+     itself, both on screen and in the recording. */
+  let why = null;
+  if(verdict !== 'CLEAN'){
+    why = (amplitude < centrality) ? 'too little travel' : 'off centre';
+  }
+
+  // Score and repetition stay separate, as in Gap. A near miss can earn
+  // points. A repetition is work the player actually did, and on a leg spark
+  // that means the hips moved — an arms-only reach scores and is never
+  // counted.
+  const rep = quality >= TUNE.REP_QUALITY && verdict !== 'MISSED'
+              && (t.legs ? legsOk === true : true);
+  /* On a bloom, reaching it is not the job — taking your body there is. A
+     strike that lands with the hips still pays a quarter and counts as no
+     repetition, and that is the single most confusing outcome in the game
+     if it is not said out loud. */
+  if(t.legs && verdict !== 'MISSED' && legsOk !== true)
+    why = 'hips stayed put';
+
+  /* What the spark is worth comes from its TIER, so the thing the player is
+     being pulled toward by the visuals is the thing that actually pays. */
+  const tier = t.tier || TIERS.ember;
+  let points = 0;
+  if(verdict === 'CLEAN') points = tier.points;
+  else if(verdict === 'CLIPPED') points = Math.round(tier.points * 0.45);
+  /* On a spark marked legs, most of what it pays is in the hips. A flat bonus
+     for clearing a threshold was wrong twice over: it paid a planting player
+     the whole strike anyway, which in simulation let a player who never moved
+     their hips hold 83% of the score of one who did, and it paid nothing
+     extra for a deep lunge over a bare one. Graded, and the strike alone is
+     worth a quarter. */
+  if(points && t.legs) points = Math.round(points * (TUNE.LEG_STRIKE_SHARE
+                               + (1 - TUNE.LEG_STRIKE_SHARE) * (legCredit || 0)));
+
+  return { verdict, why, chordNeeded:+need.inAt.toFixed(4), quality:+quality.toFixed(4),
+           amplitude:+amplitude.toFixed(4), centrality:+centrality.toFixed(4),
+           execMs:+execMs.toFixed(1), anticipationMs:+anticipationMs.toFixed(1),
+           velocity:+vel.toFixed(4),
+           sweep: arc.sweep === null ? null : +arc.sweep.toFixed(2),
+           chord:+arc.chord.toFixed(4),
+           hip: hip ? { lat:+hip.lat.toFixed(4), drop:+hip.drop.toFixed(4),
+                        toward: hip.toward === null ? null : +hip.toward.toFixed(4) } : null,
+           nearest:+hit.d.toFixed(4), passGapMs:+excess.toFixed(0),
+           legCredit: legCredit === null ? null : +legCredit.toFixed(4),
+           legsOk, rep, points, samples:win.length, limb:best.key };
+}
+
+/* The session floor: how far the hips actually travelled over a whole run.
+   An odometer with an anchor, not a sum of frame-to-frame steps. Noise cannot
+   walk an anchor anywhere, because it never gets HIP_STEP away from it; real
+   travel crosses that distance again and again. */
+function makeHipMeter(){
+  let anchor = null, hip = 0, lat = 0, buf = [];
+  return {
+    push(o){
+      if(!o.readable || !o.hip || !o.scale) return;
+      buf.push({ x:o.hip.x, y:o.hip.y, ar:o.ar, torso:o.scale });
+      if(buf.length > TUNE.HIP_SMOOTH) buf.shift();
+      if(buf.length < TUNE.HIP_SMOOTH) return;
+      let sx = 0, sy = 0;
+      for(const b of buf){ sx += b.x; sy += b.y; }
+      const p = { x: sx/buf.length, y: sy/buf.length };
+      if(!anchor){ anchor = p; return; }
+      const dx = (p.x - anchor.x) * o.ar / o.torso;
+      const dy = (p.y - anchor.y) / o.torso;
+      const d = Math.hypot(dx, dy);
+      if(d >= TUNE.HIP_STEP){ hip += d; lat += Math.abs(dx); anchor = p; }
+    },
+    /* nLeg is how many sparks that wanted the legs have been PRESENTED, not
+       how many were hit: a player who ignores every one of them has still
+       been asked, and owes the travel. */
+    get(nLeg){
+      const needHip = TUNE.HIP_PER_LEG * (nLeg || 0);
+      const needLat = TUNE.LAT_PER_LEG * (nLeg || 0);
+      const frac = (nLeg > 0)
+        ? Math.min(1, Math.min(hip / needHip, lat / needLat)) : 1;
+      return { hip, lat, frac, needHip, needLat,
+        mult: TUNE.FLOOR_KEEP + (1 - TUNE.FLOOR_KEEP) * frac,
+        ok: nLeg === 0 || (hip >= needHip && lat >= needLat) };
+    },
+    reset(){ anchor = null; hip = 0; lat = 0; buf = []; }
+  };
+}
+
+/* The milestone sequence. Fixed, eight sparks, no progression — the first
+   questions are about the scorer, not about whether a sequence is exciting.
+   Positions are body frame: torso units from the hip centre, +y up.
+   An arm reaches about 1.44 torso units from the shoulder, which sits at
+   y = 1, so a spark past that is not reachable standing still.
+   Hands only in this milestone. Foot sparks add a whole separate tracking
+   question and would not help answer the three questions.
+
+   These sixteen positions were CHOSEN BY SCREENING, not picked by eye. Each
+   one was run through the simulation against four kinds of player, and a
+   position only survived if an honest swing scores CLEAN, a spark marked
+   legs cannot be reached by the arm alone, and the hip travel of a player
+   who takes their body there separates from one who plants and folds. Three
+   earlier candidates were dropped for sitting close enough to the resting
+   hand that nobody had to move at all.
+
+   The envelope is deliberately NOT widened past |bx| 1.35 and by 2.05. The
+   stance a set demands is derived from its most extreme sparks, so a spark
+   further out would push the player back until their body filled 60% of the
+   frame instead of 69% — and a smaller body in frame means more jitter
+   measured in torso units, which is the quantity the matcher actually breaks
+   on. Variety comes from filling the envelope, not from stretching it. */
+/* ------------------------------------------------------------------ *
+ * DRIFT                                                               *
+ *                                                                     *
+ * A spark is no longer a point. It is placed in BODY FRAME at the     *
+ * moment it lights, the body reference is FROZEN at that instant, and *
+ * the body-frame offset drifts linearly from there. The camera-frame  *
+ * position is recomputed from the frozen reference, so the path on    *
+ * screen is fixed and predictable whatever the player does next. A    *
+ * spark that tracked the LIVE body would let a player walk the spark  *
+ * onto their own hand, which is the same cheat the scale-free rule    *
+ * exists to prevent.                                                  *
+ *                                                                     *
+ * The thing that makes drift safe is not the speed. It is that        *
+ * sparkPos() takes a CAPTURE TIMESTAMP. Every comparison in the       *
+ * scorer reads the spark where it was when the body was there, in the *
+ * one clock domain, so the 150-250 ms pipeline delay cancels out of   *
+ * the geometry exactly as it does for a still spark. Reading the      *
+ * spark at render time instead would charge the player the whole      *
+ * latency times the drift speed. Measured, not assumed — see the      *
+ * drift harness.                                                      *
+ * ------------------------------------------------------------------ */
+const DRIFT_MIN = 0.07;
+const DRIFT_MAX = 0.20;   // torso per second
+
+/* Centre to centre, for every pair of sparks alive at the same time, for
+   the whole of their overlap. Two hit radii is 0.84, so at 1.10 no point in
+   the frame can be inside two sparks at once and a single hand pass can
+   never belong to two of them. The ambiguity is removed by construction
+   rather than settled afterwards by a tie-break, because a tie-break would
+   have to guess which spark the player meant. */
+const SEP_MIN = 1.10;
+
+/* The one place a spark object is built. The game and every harness go
+   through this, so a harness can never drift from the thing it measures —
+   which is the defect this project has now recorded four times. */
+function makeSpark(def, obs, o){
+  o = o || {};
+  const life = o.life === undefined ? LIFETIME_MS : o.life;
+  const lightAt = o.lightAt === undefined ? 0 : o.lightAt;
+  const d = o.drift || { vx:0, vy:0 };
+  return { def, legs:def.legs, tier:o.tier || tierOf(def),
+           ref: { hip:{ x:obs.hip.x, y:obs.hip.y }, torso:obs.scale || obs.torso, ar:obs.ar },
+           bx0:def.bx, by0:def.by, vx:d.vx, vy:d.vy,
+           lightAt, dieAt: lightAt + life, life,
+           finale: !!o.finale, judged:null, flash:0, caught:false };
+}
+
+function sparkPos(t, ms){
+  const k = Math.max(0, (ms - t.lightAt) / 1000);
+  const bx = t.bx0 + t.vx * k, by = t.by0 + t.vy * k;
+  return { x: t.ref.hip.x + bx * t.ref.torso / t.ref.ar,
+           y: t.ref.hip.y - by * t.ref.torso };
+}
+function sparkBody(t, ms){
+  const k = Math.max(0, (ms - t.lightAt) / 1000);
+  return { bx: t.bx0 + t.vx * k, by: t.by0 + t.vy * k };
+}
+
+/* ------------------------------------------------------------------ *
+ * TIERS                                                               *
+ *                                                                     *
+ * What a spark is worth, and how loudly it says so. The high-value    *
+ * ones are the visually richest, which is the whole mechanism: the    *
+ * player is pulled toward the effort by what they are looking at,     *
+ * with no instruction anywhere. Low-effort sparks stay plain and dim. *
+ *                                                                     *
+ * The tiers are mapped onto positions that ALREADY passed the         *
+ * placement invariants. No new geometry was invented for this, and    *
+ * that is deliberate: "easy" cannot mean "close", because a spark     *
+ * near the resting hand gives an honest swing no chord to measure and *
+ * could never score CLEAN. Difficulty varies by what the reach costs  *
+ * — same side, across the body, or the legs — not by distance from    *
+ * the hand.                                                           *
+ * ------------------------------------------------------------------ */
+const TIERS = {
+  ember: { id:'ember', points: 55,  glow:0.30, ring:0, shimmer:0,
+           rgb:[255,176, 46], name:'EMBER' },
+  flare: { id:'flare', points:120,  glow:0.62, ring:1, shimmer:0.35,
+           rgb:[255,131, 92], name:'FLARE' },
+  bloom: { id:'bloom', points:260,  glow:1.00, ring:2, shimmer:1,
+           rgb:[ 79,214,224], name:'BLOOM' },
+};
+const tierOf = def => def.legs ? TIERS.bloom
+                    : (def.across ? TIERS.flare : TIERS.ember);
+
+/* A drift that keeps the whole path inside the envelope the stance was
+   derived from. A spark that drifted past |bx| 1.35 or by 2.05 would be
+   asking for a reach the fit gate never made room for, so the velocity is
+   chosen and then CLAMPED against the remaining room in that direction for
+   the whole lifetime, rather than letting it wander out. */
+/* Where a hand hangs when the player is not reaching, in body frame, torso
+   units from the hip centre, y UP. This is a nominal body, not a
+   measurement of anybody, and it exists for one purpose: a spark must never
+   drift so close to a resting hand that an honest swing has no chord left
+   to measure. The simulator carries the same rest pose and the drift
+   harness asserts the two agree, because a constant copied into two places
+   is a constant that will disagree later. */
+const REST_HAND = { x: 0.46, y: -0.32 };
+
+/* A nominal shoulder and the arm that hangs off it, same body, same units,
+   same reason: an EMBER or a FLARE promises it can be struck WITHOUT the
+   legs, and a spark that drifts past arm's length quietly breaks that
+   promise and turns into a lunge nobody asked for. Caught as a PASSED at
+   nearest 0.63 on a spark the player could not physically have reached. */
+/* reach is MEASURED: shoulder->wrist p99 over 10,868 frames of Hugo's own
+   recordings, in his torso units. The nominal 1.44 this replaces understated
+   his arm by 21%, which made the game call sparks unreachable that he could
+   reach standing, and demand room it did not need. */
+const ARM = { shX: 0.40, shY: 1.00, reach: 1.74 };
+
+/* Would this drift ever walk the spark into the dead zone around a resting
+   hand? Amplitude is measured as the chord from where the hand started to
+   where it finished, so a spark sitting near the hand's rest position
+   cannot be struck CLEANLY by anybody — there is no distance to travel.
+   Every static position in TARGETS was validated against exactly this, and
+   drift can quietly un-validate one: three honest lunges came back MISSED
+   at centrality 1.000 and amplitude 0.24, dead centre on a spark that had
+   floated up and in toward the hand. */
+/* How far an honest hand has to travel to reach THIS spark.
+
+   Amplitude used to be scored against one global constant, CHORD_IN 0.80,
+   for every spark on the board. But the honest travel available is a
+   property of where the spark is: 2.42 torso for the overhead row, 0.85
+   for the deep ones. So the arm tiers cleared the bar by 1.13 torso on
+   average and the blooms by 0.126 — deep-L and deep-R by 0.051. A perfect
+   strike on the hardest spark in the game passed by five hundredths of a
+   torso, and anything at all — hands hanging lower than this nominal body,
+   an onset found a frame late — ate that margin and took the amplitude
+   with it.
+
+   Derived from the spark's own geometry instead, like the stance is
+   derived from the target list. It makes the far sparks STRICTER (a poke
+   at an overhead spark now has much further to fall short of) and the low
+   ones more forgiving, which is the right way round. The fractions are the
+   only typed numbers, and they apply to every spark equally.
+
+   This does not weaken the anti-cheat on a leg spark: amplitude was never
+   what separated a lunge from a plant. The hip gate is, and it is
+   untouched. */
+const CHORD_FRAC_IN = 0.55;
+const CHORD_FRAC_OUT = 0.22;
+function chordNeed(bx, by){
+  const rx = bx < 0 ? -REST_HAND.x : REST_HAND.x;
+  const full = Math.hypot(bx - rx, by - REST_HAND.y);
+  return { inAt: full * CHORD_FRAC_IN, outAt: full * CHORD_FRAC_OUT, full };
+}
+
+function chordKeeps(def, vx, vy, life){
+  const secs = life / 1000;
+  for(let k = 0; k <= 16; k++){
+    const u = secs * (k / 16);
+    const bx = def.bx + vx * u, by = def.by + vy * u;
+    const rx = bx < 0 ? -REST_HAND.x : REST_HAND.x;
+    // too close to the resting hand: no chord left to measure
+    if(Math.hypot(bx - rx, by - REST_HAND.y) < TUNE.CHORD_IN) return false;
+    // too far from the shoulder: an arms tier that needs legs is a lie
+    if(!def.legs){
+      const sx = bx < 0 ? -ARM.shX : ARM.shX;
+      if(Math.hypot(bx - sx, by - ARM.shY) > ARM.reach * 0.95) return false;
+    }
+  }
+  return true;
+}
+
+/* rnd is injectable so a harness can SEED the drift. Every number this
+   project reports is meant to be reproducible from a seed, and a drift that
+   reached for Math.random() quietly broke that: a false-failure rate seen
+   once at one in twelve hundred could not be found again to diagnose it.
+   The game passes nothing and gets Math.random. */
+function driftFor(def, life, rnd){
+  /* The envelope is not a style choice. The stance the fit gate asks for is
+     DERIVED from the extremes of the target list, so a spark that drifted
+     past them would be asking for a reach nobody made room for — and
+     widening the envelope to allow it would push the player back until
+     their body filled 60% of the frame instead of 69%, which costs
+     landmark accuracy in exactly the units the matcher breaks on. So the
+     drift is clamped to the envelope the stance already covers, and it
+     reads that envelope from stanceLimits() rather than repeating the
+     numbers, so the two cannot fall out of step. */
+  const L = stanceLimits();
+  const secs = life / 1000;
+  /* Directions are tried until one keeps the chord. If none does, the spark
+     simply does not drift, which is always valid — a still spark is the
+     thing every number in this project was measured against. Falling back
+     to no drift is the safe failure. */
+  for(let attempt = 0; ; attempt++){
+    const d = tryDrift(def, life, L, secs, rnd || Math.random);
+    if(d) return d;
+    if(attempt >= 11) return { vx:0, vy:0 };
+  }
+}
+
+function tryDrift(def, life, L, secs, rnd){
+  const a = rnd() * Math.PI * 2;
+  const sp = DRIFT_MIN + rnd() * (DRIFT_MAX - DRIFT_MIN);
+  const vx = Math.cos(a) * sp, vy = Math.sin(a) * sp;
+  /* Each axis is clamped SEPARATELY. Scaling the whole vector by whichever
+     axis had least room killed the drift outright, because almost every
+     validated spark position sits ON an edge of this envelope — wide-R is
+     at bxMax, the high row is at byHi, floor-C is at byLo — so one blocked
+     axis took the other down with it and the sparks hardly moved. Clamped
+     per axis they slide ALONG the edge instead, which is also the right
+     behaviour: a spark pinned at the outside of the envelope can still
+     drift inward and vertically, and inward never asks for more room than
+     the fit gate already made. */
+  const roomX = vx > 0 ? (L.bxMax - def.bx) : (def.bx + L.bxMax);
+  const roomY = vy > 0 ? (L.byHi  - def.by) : (def.by - L.byLo);
+  const kx = Math.abs(vx) * secs > roomX ? roomX / (Math.abs(vx) * secs) : 1;
+  const ky = Math.abs(vy) * secs > roomY ? roomY / (Math.abs(vy) * secs) : 1;
+  const ovx = vx * Math.max(0, kx), ovy = vy * Math.max(0, ky);
+  return chordKeeps(def, ovx, ovy, life) ? { vx:ovx, vy:ovy } : null;
+}
+
+/* Would this spark ever come within SEP_MIN of one already alive, at any
+   point in the time both are on screen? Checked over the whole overlap
+   rather than at the moment of spawn, because two sparks that light far
+   apart can drift together. Both paths are deterministic, so this is an
+   answer rather than an estimate. */
+function wouldCrowd(others, cand, lightAt, dieAt){
+  for(const t of others){
+    if(t.judged) continue;
+    const lo = Math.max(lightAt, t.lightAt), hi = Math.min(dieAt, t.dieAt);
+    if(hi <= lo) continue;
+    for(let k = 0; k <= 12; k++){
+      const ms = lo + (hi - lo) * (k / 12);
+      const a = sparkBody(cand, ms), b = sparkBody(t, ms);
+      if(Math.hypot(a.bx - b.bx, a.by - b.by) < SEP_MIN) return true;
+    }
+  }
+  return false;
+}
+
+
+/* ================== THE SMALL-ROOM FIELD ==================
+   This file is Sparks for a room about a metre and a half deep. It is NOT
+   the main field scaled down. That was tried and measured and does not work:
+   shrinking pulls every spark toward the hip, the resting hand sits near the
+   hip, and the workout is the chord from the HAND, so uniform scaling
+   destroys the quantity being scored. The field breaks below 94% of full
+   reach, where deep-L and deep-R fall inside CHORD_IN and can never score
+   CLEAN. A small room needs a different field, designed from scratch.
+
+   THE TRADE, measured rather than chosen. Vertical room is what binds: the
+   frame must hold the overhead reach above the hip AND the body below it.
+   Lateral room is not scarce. At a metre and a half the budget allows a top
+   row at by 1.57 and a half-width of 2.23, against the main field's 2.05 and
+   1.35. So this field spends sideways what it cannot spend upward.
+
+      distance   main field (2.05 / -1.30 / 1.35)   stance window
+        1.8 m    fits                                0.117
+        1.7 m    does not fit                        0.068
+        1.5 m    does not fit                       -0.051
+
+   What that costs: the top row is a high diagonal reach rather than straight
+   overhead, and its chord is 1.96 against the main field's 2.42 - about 81%
+   of the longest reach in the game. Everything below the shoulder is as long
+   or longer, because the width makes up for the height.
+
+   BODY NUMBERS ARE MEASURED, not nominal. From two of Hugo's own recordings,
+   10,868 arm frames and 5,289 leg frames, in his own torso units:
+      hip -> ankle        1.48 median, 1.57 p90   (this file reserves 1.57)
+      shoulder -> wrist   1.74 p99                (this file's ARM.reach)
+   The main file assumes 1.74 below the hip and an arm of 1.44. Both are
+   wrong, and both in the direction that demands more room than the body
+   needs - together they were asking the player to stand about 20 cm further
+   back than the geometry requires.
+
+   Every spark below was checked: chord >= 0.85 against a floor of 0.80, arm
+   sparks inside a 1.74 reach, leg sparks 0.25 to 0.45 torsos beyond it so
+   the body must travel, and 17% of pairs under SEP_MIN against the main
+   field's 15%, so crowding is not made worse. */
+const TARGETS = [
+  { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
+  { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
+  { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
+  { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
+  { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
+  { id:'wide-L',  name:'WIDE LEFT',   bx:-1.75, by: 0.70, legs:false },
+  { id:'wide-R',  name:'WIDE RIGHT',  bx: 1.75, by: 0.70, legs:false },
+  { id:'mid-L',   name:'MID LEFT',    bx:-1.70, by: 0.20, legs:false },
+  { id:'mid-R',   name:'MID RIGHT',   bx: 1.70, by: 0.20, legs:false },
+  { id:'side-L',  name:'SIDE LEFT',   bx:-1.65, by:-0.55, legs:true },
+  { id:'side-R',  name:'SIDE RIGHT',  bx: 1.65, by:-0.55, legs:true },
+  { id:'low-L',   name:'LOW LEFT',    bx:-1.35, by:-0.90, legs:true },
+  { id:'low-R',   name:'LOW RIGHT',   bx: 1.35, by:-0.90, legs:true },
+  { id:'deep-L',  name:'DEEP LEFT',   bx:-0.95, by:-1.05, legs:true },
+  { id:'deep-R',  name:'DEEP RIGHT',  bx: 0.95, by:-1.05, legs:true },
+  { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+];
+
+/* How far back the player has to stand, COMPUTED from the sparks above rather
+   than asked for in words. The sparks reach past the body on every side, so
+   Sparks needs more room in frame than a game that only looks at the body
+   does. A spark cannot be pulled inward to fit, because that would hand a
+   player who stands close an easier reach and the whole vocabulary stops
+   being scale free.
+
+   So the stance is part of the setup instead. For a torso of t frame-heights
+   there has to be SOME hip height that keeps the feet in the picture and
+   every spark on screen; past a certain t there is none. These bounds fall
+   out of the target list and change with it. */
+const SPARK_MARGIN = 0.02;
+const FEET_BELOW = 1.57;   // measured hip->ankle, p90
+function stanceLimits(ar){
+  ar = ar || 4/3;          // what the device actually delivers (960x720)
+  let byHi = -Infinity, byLo = Infinity, bxMax = 0;
+  for(const t of TARGETS){
+    byHi = Math.max(byHi, t.by); byLo = Math.min(byLo, t.by);
+    bxMax = Math.max(bxMax, Math.abs(t.bx));
+  }
+  // vertical: the highest spark pushes the hip down, the feet pull it up
+  /* 1.57 is hip->ankle at p90, MEASURED over 5,289 frames of his own legs.
+     The 1.74 it replaces was nominal and cost 0.17 torsos of room nothing
+     ever used. */
+  const need = (byHi + TUNE.HIT_R) + FEET_BELOW;   // torso units of total room
+  const tMaxV = (1 - 2*SPARK_MARGIN) / need;
+  /* Lateral. placeTarget puts a spark at hip.x + bx*torso/ar, so one torso
+     spans torso/ar of the WIDTH, not torso*ar: on a 4:3 frame a torso is a
+     SMALLER fraction of the width than of the height. This line had the
+     conversion inverted and left HIT_R unconverted, so it reported a lateral
+     ceiling of 0.216 where the real one is 0.362 — the lateral constraint
+     wrongly bound instead of the vertical one, and every piece of advice
+     derived from tMax named the wrong reason. */
+  const tMaxH = (0.5 - SPARK_MARGIN) * ar / (bxMax + TUNE.HIT_R);
+  return { tMax: Math.min(tMaxV, tMaxH), tMaxV, tMaxH, byHi, byLo, bxMax };
+}
+
+/* ONE definition of "this spark would be drawn inside the picture", returning
+   the offending edge or null. It exists because the start-gate checked this
+   and spawnTarget did not: a run started past the gate placed its sparks with
+   no on-screen test at all. In a recorded 2-run session that put 20 of 35
+   sparks above the top edge of the frame, where they were invisible — and
+   every single invisible one was declined. Measured, not guessed.
+   The radius uses o.scale, the same value placeTarget places with, so the
+   test and the placement cannot disagree. */
+/* frac scales the hit radius the test demands room for.
+   The START GATE asks for the whole circle (frac 1): that is a question about
+   whether this is a good place to stand.
+   The SPAWN asks only that the spark read as a spark (frac SPAWN_R_FRAC): that
+   is a question about whether the player can see and reach THIS one, and the
+   stricter test empties the game instead of fixing it.
+   0.15 was chosen by replaying both recordings against the verdicts, not
+   picked: every value from 0 to 0.15 refuses 14/14 of the sparks that were
+   drawn off screen and declined, while keeping every spark whose centre was
+   on screen. The only attempted sparks it refuses are three cross-R hits at
+   y = -0.12 to -0.16, which were struck BLIND and scored by luck. */
+const SPAWN_R_FRAC = 0.15;
+function onScreenAt(at, o, frac){
+  if(!at || !o) return 'nobody';
+  const m  = TUNE.HIT_R * (o.scale || o.torso) * (frac === undefined ? 1 : frac);
+  const mx = m / o.ar;
+  if(at.y - m  < SPARK_MARGIN)      return 'above';
+  if(at.y + m  > 1 - SPARK_MARGIN)  return 'below';
+  if(at.x - mx < SPARK_MARGIN)      return 'left';
+  if(at.x + mx > 1 - SPARK_MARGIN)  return 'right';
+  return null;
+}
+function hipWindow(torso){
+  const L = stanceLimits();
+  return { lo: SPARK_MARGIN + (L.byHi + TUNE.HIT_R) * torso,
+           hi: 1 - SPARK_MARGIN - FEET_BELOW * torso };
+}
+/* Does this body, where it is standing, leave room for every spark? */
+function stanceOk(o){
+  if(!o || !o.readable || !o.torso) return { ok:false, why:'nobody' };
+  const L = stanceLimits(o.ar);
+  if(o.torso > L.tMax) return { ok:false, why:'close', torso:o.torso, tMax:L.tMax };
+  const w = hipWindow(o.torso);
+  if(o.hip.y < w.lo) return { ok:false, why:'low', torso:o.torso };
+  if(o.hip.y > w.hi) return { ok:false, why:'high', torso:o.torso };
+  for(const t of TARGETS){
+    const off = onScreenAt(placeTarget(t, o), o);
+    if(off) return { ok:false, why:'room', torso:o.torso, id:t.id, edge:off,
+                     tMax:L.tMax };
+  }
+  return { ok:true, torso:o.torso, tMax:L.tMax };
+}
+
+/* 1.3 s to start, flat. The earlier design put lifetimes at 700 ms while in
+   the same breath putting the loop at 200 ms display + 230 ms reading it +
+   300-500 ms getting there = 730-930 ms, which makes 700 ms unreachable by
+   its own arithmetic. Lifetimes are an experimental condition, not a
+   setting: 1.3 s is the first condition, and 1 s and 700 ms get measured
+   against it rather than assumed. */
+/* How much further back, in plain words, from the ratio of the body's
+   measured scale to the largest scale the target field fits in. */
+function backAdvice(mult){
+  if(!(mult > 1))    return 'you have room';
+  if(mult < 1.12)    return 'a small step back';
+  if(mult < 1.3)     return 'about a quarter further back';
+  if(mult < 1.5)     return 'about a third further back';
+  if(mult < 1.8)     return 'about half again as far back';
+  return 'about twice as far back';
+}
+function backMult(o){
+  if(!o || !(o.scale || o.torso)) return 0;
+  const L = stanceLimits(o.ar);
+  return (o.scale || o.torso) / L.tMax;
+}
+
+const LIFETIME_MS = 1300;
+const GAP_MS = 700;
+/*==SCORER_END==*/
+
+/* ================= camera, pose, and the recording ================= */
+
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+/* ---- the recording ------------------------------------------------
+   Hugo's call on 25 Oct was to ship Sparks without this. It is in the
+   MILESTONE build for one reason: the first question the milestone has
+   to answer is whether the same movement scores the same twice, and
+   that cannot be answered without a stored movement to score twice.
+   Taking it out of a later build is a ten line change.
+
+   Each frame keeps the time the CAMERA captured it and the separate
+   time the estimate came back, every landmark with its own confidence,
+   and the gaps where frames never arrived. It lives in memory only and
+   disappears when the page closes. It becomes a file only if the player
+   taps Save recording. Nothing is sent anywhere.            */
+const REC_CAP = 40000;
+const rec = [];
+let recDropped = 0, lostSince = null;
+
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(),
+    game:'sparks', build:BUILD,
+    orientation: (window.innerHeight > window.innerWidth) ? 'portrait' : 'landscape',
+    screen:{ w:window.innerWidth, h:window.innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    coords:'MediaPipe normalised to the camera frame, unmirrored, origin top-left',
+    note:'capture = video.currentTime in seconds on the video clock; ready = performance.now() in ms when the estimate returned; clock = capture mapped into the performance clock by the running offset, minus POSE_LATENCY_MS',
+    lifetimeMs: LIFETIME_MS, tune: TUNE });
+}
+
+/* The single clock. video.currentTime is the only timestamp that belongs to
+   the camera rather than to the renderer, so it is what every judgment is
+   aligned to. It is mapped once per frame into the millisecond clock the
+   game's own events live on, and the residual constant delay between a body
+   moving and a landmark existing is held in POSE_LATENCY_MS.
+
+   That constant is ASSUMED, not measured. Measuring it needs the loopback in
+   the gate, where the screen shows a counter and the camera reads it back,
+   with no human in the middle. Until that runs, 200 ms is a placeholder sat
+   in the middle of the published 150-250 ms band, and it is recorded in every
+   file so any session can be re-judged once the real figure exists.
+
+   It matters more here than in Gap. The execution speed score is a
+   difference between two corrected times, so this constant cancels out of
+   it. The anticipation score is not: it compares a corrected body time
+   against an uncorrected display event, so it carries the whole of this
+   error as a bias. That is why they are reported as separate numbers. */
+let POSE_LATENCY_MS = 200;
+let clockOffset = null;          // performance-ms minus capture-ms
+
+/* ================= the game ================= */
+const BUILD = 'sparks-close-1';   // so a recording says which field it came from
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+
+function resize(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+/* SPARKS IS PLAYED SIDEWAYS.
+
+   The camera sensor is physically landscape: held upright it hands over a
+   picture wider than it is tall, the page fits it by width, and the play
+   area is a band across the middle of a long screen. Held sideways the
+   picture and the screen are the same shape.
+
+   Measured from the live target list, on a 4:3 camera and a tall phone:
+   the stance the gate asks for is IDENTICAL either way (0.228 — height is
+   what binds, and turning the phone does not change the camera's vertical
+   field of view), while the player goes from 33% to 96% of the screen
+   height and the black from 65% to 38%. Same distance, nearly three times
+   the picture.
+
+   This is the only change in this build. */
+function landscapeOK(){
+  /* window, NOT the canvas. resize() reads c.clientWidth, which is 0 until
+     the first layout — so a page opened ALREADY sideways evaluated 0 > 0,
+     decided it was upright, and stuck on TURN YOUR PHONE with no resize
+     event ever coming to correct it. window.innerWidth/innerHeight are
+     right from the first script tick. */
+  return window.innerWidth > window.innerHeight;
+}
+function checkRotation(){
+  if(!ui || !ui.oRot) return;
+  ui.oRot.hidden = landscapeOK();
+}
+addEventListener('resize', () => { resize(); checkRotation(); }); resize();
+addEventListener('orientationchange', () => { resize(); checkRotation(); });
+
+function videoFit(){
+  const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+  if(!vw || !vh) return { dx:0, dy:0, dw:W, dh:H, vw:0, vh:0 };
+  const sc = Math.min(W/vw, H/vh);           // contain: the whole frame, bars and all
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+// a landmark in canvas pixels. Landmarks are normalised to the CAMERA frame,
+// not the canvas, so anything drawn next to the body goes through this.
+function px(p){ const f = videoFit(); return { x: f.dx + p.x*f.dw, y: f.dy + p.y*f.dh }; }
+function frameAR(){ const vw = video.videoWidth||3, vh = video.videoHeight||4; return vw/vh; }
+
+const EDGE_WORD = {
+  above: 'the sparks are landing above the picture',
+  below: 'the sparks are landing below the picture',
+  left:  'the sparks are landing off the side of the picture',
+  right: 'the sparks are landing off the side of the picture',
+  nobody:'the camera has lost you'
+};
+const ui = {
+  room:document.getElementById('room'), roomSub:document.getElementById('roomSub'),
+  roomHow:document.getElementById('roomHow'),
+  oStart:document.getElementById('oStart'), oFit:document.getElementById('oFit'),
+  oEnd:document.getElementById('oEnd'), hud:document.getElementById('hud'),
+  legs:document.getElementById('legs'), legsFill:document.getElementById('legsFill'),
+  legsTxt:document.getElementById('legsTxt'),
+  hTime:document.getElementById('hTime'), hSec:document.getElementById('hSec'),
+  hScore:document.getElementById('hScore'), streak:document.getElementById('streak'),
+  hStreak:document.getElementById('hStreak'), hStreakN:document.getElementById('hStreakN'),
+  loadMsg:document.getElementById('loadMsg'), errMsg:document.getElementById('errMsg'),
+  fitMsg:document.getElementById('fitMsg'), oRot:document.getElementById('oRot'),
+  endScore:document.getElementById('endScore'), endRows:document.getElementById('endRows'),
+  endTag:document.getElementById('endTag'), endNote:document.getElementById('endNote'),
+};
+
+let state = 'idle';
+let run = 0, score = 0, live = [], results = [];
+/* One scale tracker per run. It is reset with everything else, so stepping
+   closer between runs is picked up rather than inherited. */
+let scaleTrack = makeScale();
+let samples = [];                     // recent observations, capture-stamped
+let hipMeter = makeHipMeter();
+let wake = null;
+let streak = 0, bestStreak = 0, sparkNo = 0, legShown = 0;
+let shake = 0, parts = [], fading = [];
+
+/* ================= the song =================
+   A run is a track. Three minutes, built like one: a count-in, four sections
+   that add density and legwork, a breather, a swell, and a finale.
+
+   Everything the player has to do is on the grid, because a spark landing on
+   the beat reads as music rather than as a demand. That is safe to do ONLY
+   because the timing of the swing is not scored — see the block above the
+   execution-speed fields. If timing ever became a score, putting sparks on
+   the beat would turn a 150-250 ms pipeline into a rhythm game that cannot
+   be played.
+
+   Lifetimes do NOT shorten as the track builds. They are an experimental
+   condition, not a difficulty knob: 1.3 s is condition one and the other
+   conditions get measured on a real body before anything moves. Difficulty
+   comes from how often sparks arrive and how many want the legs.          */
+const BPM = 124;
+const BEAT = 60 / BPM;                       // seconds
+const BAR = BEAT * 4;
+
+/* Cadences are in BEATS, so the tempo and the spark spacing stay locked to
+   each other.
+
+   The old table had a floor of four beats, and the reason was real: one
+   slot held the spark that was due, so a spark landing while the previous
+   one was alive made the earlier one vanish. That slot is gone — sparks now
+   live in a list and several are on screen at once on purpose — so the
+   reason for the floor went with it, and keeping the rule because it was
+   once true would be cargo. What replaces it is a different invariant: no
+   two live sparks may ever come within SEP_MIN of each other, checked over
+   the whole of their overlap at spawn.
+
+   LIFETIMES are now per section, and they are long, because choosing takes
+   time. A player cannot weigh two sparks against each other if each one is
+   gone in 1.3 s. The run OPENS slowly on purpose — six beats apart, one
+   spark at a time, five full seconds to find it — so the game can be
+   learned before it is played. */
+/* ONE-MINUTE TEST RUN.
+
+   Hugo, while we are still finding out what is broken: "is it worth making
+   it shorter? Maybe like a minute for now... something we can really work
+   out the issues with, without wearing me out."
+
+   Right, and it costs nothing: a recording from a one-minute run says
+   exactly as much about a failure as a recording from three minutes, and
+   he has to play it standing up every time.
+
+   Nothing is made slower, because the opening IS the slow part — six beats
+   between sparks, five-second lifetimes, about 1.7 on screen. The test run
+   keeps the count-in and the whole of WARM, takes a third of BUILD so the
+   density starts to climb, and ends on the finale.
+
+   EVERYTHING derives from this list — total length, the spark schedule, the
+   music, the section the HUD shows — so the full run comes back by flipping
+   one constant. Nothing else in the file knows which list it got. */
+const TEST_RUN = false;   /* the full run. The one-minute version stays in the file as TEST_SECTIONS. */
+
+const FULL_SECTIONS = [
+  // bars, beats between sparks, share wanting the legs, lifetime ms, energy, label
+  { bars: 4,  cadence: 0, legs: 0,    life: 4200, energy: 0.15, name:'' },   // count-in
+  { bars: 16, cadence: 6, legs: 0.15, life: 5000, energy: 0.35, name:'WARM' },
+  { bars: 20, cadence: 4, legs: 0.30, life: 4400, energy: 0.55, name:'BUILD' },
+  { bars: 20, cadence: 3, legs: 0.45, life: 3800, energy: 0.80, name:'PUSH' },
+  { bars: 16, cadence: 2, legs: 0.55, life: 3400, energy: 1.00, name:'PEAK' },
+  { bars: 8,  cadence: 5, legs: 0.30, life: 4600, energy: 0.45, name:'BREATHE' },
+  { bars: 5,  cadence: 0, legs: 0,    life: 4000, energy: 0.70, name:'LIFT' },
+  { bars: 4,  cadence: 0, legs: 0,    life: 4000, energy: 1.00, name:'FINALE' },
+];
+
+const TEST_SECTIONS = [
+  { bars: 4,  cadence: 0, legs: 0,    life: 4200, energy: 0.15, name:'' },   // count-in
+  { bars: 16, cadence: 6, legs: 0.15, life: 5000, energy: 0.35, name:'WARM' },
+  { bars: 7,  cadence: 4, legs: 0.30, life: 4400, energy: 0.55, name:'BUILD' },
+  { bars: 4,  cadence: 0, legs: 0,    life: 4000, energy: 1.00, name:'FINALE' },
+];
+
+const SECTIONS = TEST_RUN ? TEST_SECTIONS : FULL_SECTIONS;
+/* The lifetime of a spark lighting right now, from the section it lands in. */
+function lifetimeNow(){
+  const sec = sectionAt(songTime());
+  return sec && sec.life ? sec.life : LIFETIME_MS;
+}
+const TOTAL_BARS = SECTIONS.reduce((a, s) => a + s.bars, 0);
+const RUN_SECONDS = TOTAL_BARS * BAR;
+
+/* How many may share the screen. Four is the ceiling rather than the target:
+   the cadence and the lifetimes decide how many are usually up, and this
+   only stops a pile-up when the player ignores everything. More than four
+   stops being a choice and becomes a wall. */
+const MAX_ALIVE = 4;
+
+const FINALE_ID = 'floor-C';     // the one no amount of folding can reach
+const FINALE_LIFETIME = 2200;
+const FINALE_MULT = 3;
+
+const LEG_POOL = TARGETS.filter(t => t.legs && t.id !== FINALE_ID);
+const ARM_POOL = TARGETS.filter(t => !t.legs);
+
+/* Which spark comes next. Never the same one twice running, and never the
+   same side twice running when there is a choice, because two sparks on one
+   side is a reach and then another reach, while alternating is travel. */
+let lastPick = null;
+function pickSpark(legShare){
+  const pool = (Math.random() < legShare ? LEG_POOL : ARM_POOL).slice();
+  const side = lastPick ? Math.sign(lastPick.bx) : 0;
+  let choice = pool.filter(t => t.id !== (lastPick && lastPick.id) && Math.sign(t.bx) !== side);
+  if(!choice.length) choice = pool.filter(t => t.id !== (lastPick && lastPick.id));
+  if(!choice.length) choice = pool;
+  const t = choice[Math.floor(Math.random() * choice.length)];
+  lastPick = t;
+  return t;
+}
+
+/* The schedule: every spark in the run, as a bar/beat position, worked out
+   once at the start so the track has a shape rather than a dice roll per
+   spark. */
+/* One continuous walk down the beat, not a fresh count per section.
+
+   Counting from zero inside each section put sparks one beat apart across a
+   boundary — 0.6 s, against a 1.3 s lifetime — so the second would light
+   while the first was still alive, and with one slot holding the spark that
+   is due, the earlier one would simply have vanished. Walking the whole
+   track once means the gap is never shorter than the cadence that emitted
+   the spark. */
+function sectionAtBeat(b){
+  let bar = 0;
+  for(const s of SECTIONS){
+    if(b < (bar + s.bars) * 4) return s;
+    bar += s.bars;
+  }
+  return null;
+}
+function buildSchedule(){
+  const out = [];
+  const totalBeats = TOTAL_BARS * 4;
+  for(let beat = 0; beat < totalBeats; ){
+    const s = sectionAtBeat(beat);
+    if(!s) break;
+    if(s.cadence > 0){
+      out.push({ at: beat * BEAT, def: pickSpark(s.legs), finale:false });
+      beat += s.cadence;
+    } else beat += 1;
+  }
+  // the finale sits one beat into its own section, with the swell before it
+  let bar = 0;
+  for(const s of SECTIONS){
+    if(s.name === 'FINALE'){
+      out.push({ at: (bar * 4 + 1) * BEAT,
+                 def: TARGETS.find(t => t.id === FINALE_ID), finale:true });
+      break;
+    }
+    bar += s.bars;
+  }
+  return out.sort((x, y) => x.at - y.at);
+}
+let schedule = [], schedIdx = 0, songStart = 0;
+
+function sectionAt(sec){
+  let bar = 0;
+  for(const s of SECTIONS){
+    if(sec < (bar + s.bars) * BAR) return s;
+    bar += s.bars;
+  }
+  return SECTIONS[SECTIONS.length - 1];
+}
+
+function nowClock(){ return performance.now(); }
+function songTime(){ return actx ? (actx.currentTime - songStart) : 0; }
+
+function captureToClock(vt, ready){
+  const capMs = vt * 1000;
+  const off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset * 0.9 + off * 0.1;
+  return capMs + clockOffset - POSE_LATENCY_MS;
+}
+
+function lastReadable(){
+  for(let i = samples.length - 1; i >= 0; i--) if(samples[i].o.readable) return samples[i].o;
+  return null;
+}
+
+function spawnTarget(entry){
+  const o = lastReadable();
+  if(!o) return false;                 // no body yet: skip it, never guess one
+  const at = placeTarget(entry.def, o);
+  if(!at) return false;
+  /* The spark would be drawn outside the picture. Refuse it and say which
+     edge, so the recording names the direction and the banner can tell the
+     player which way they are short. Silently placing it is what made 57%
+     of a real run invisible. */
+  const off = onScreenAt(at, o, SPAWN_R_FRAC);
+  if(off){ noRoom = { edge:off, torso:o.scale || o.torso, at:nowClock() }; return false; }
+  const lightAt = nowClock();
+  const life = entry.finale ? FINALE_LIFETIME : lifetimeNow();
+  const dieAt = lightAt + life;
+  const ref = { hip:{ x:o.hip.x, y:o.hip.y }, torso:o.scale, ar:o.ar };
+
+  /* Several drifts are tried before the spark is given up on, because the
+     separation rule rejects a path rather than a position and a different
+     direction usually clears. */
+  let cand = null;
+  for(let tryN = 0; tryN < 8; tryN++){
+    const d = driftFor(entry.def, life);
+    const c = { def: entry.def, ref, lightAt, dieAt, life,
+                bx0: entry.def.bx, by0: entry.def.by, vx: d.vx, vy: d.vy };
+    if(!wouldCrowd(live, c, lightAt, dieAt)){ cand = c; break; }
+  }
+  if(!cand) return false;              // it would crowd another: let it go
+
+  sparkNo++;
+  const tier = tierOf(entry.def);
+  if(tier.id === 'bloom') legShown++;
+  const t = Object.assign(
+    makeSpark(entry.def, o, { life, lightAt, drift:{ vx:cand.vx, vy:cand.vy },
+                              tier, finale: entry.finale }),
+    { no: sparkNo });
+  live.push(t);
+  recPush({ k:'spark_light', t:lightAt, no:sparkNo, id:entry.def.id, legs:entry.def.legs,
+            tier:tier.id, finale:entry.finale, songT:+songTime().toFixed(3),
+            body:{ bx:entry.def.bx, by:entry.def.by },
+            drift:{ vx:+cand.vx.toFixed(4), vy:+cand.vy.toFixed(4) },
+            at:{ x:+at.x.toFixed(4), y:+at.y.toFixed(4) },
+            alive: live.length,
+            torso:+o.torso.toFixed(4), lifetime:life });
+  return true;
+}
+
+/* The reward, fired at judgment. */
+function burst(t, r){
+  const q = Math.max(0, Math.min(1, r.quality || 0));
+  const leg = t.legs ? (r.legCredit || 0) : 0;
+  const p = px(sparkPos(t, nowClock()));
+  const o = lastReadable();
+  const rad = (o ? o.scale * videoFit().dh : Math.min(W,H)*0.18) * TUNE.HIT_R;
+  const n = Math.round((t.finale ? 90 : 26) + q * (t.finale ? 70 : 44) + leg * 26);
+  const warm = t.legs ? [79,214,224] : [255,176,46];
+  /* Speeds are in pixels per SECOND and sized off the spark's own radius, so
+     the burst is the same gesture on any phone. Wanted: reach about two and
+     a half times the spark radius within a quarter second and be gone inside
+     two thirds of one. Against the drag below that needs a mean near six to
+     fourteen radii per second — an earlier version used a fraction of a
+     radius and the particles travelled ten pixels, which rendered as a solid
+     white ball sitting on the player's hand. */
+  for(let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2;
+    const sp = rad * (6 + Math.random() * 8) * (0.65 + q * 0.5) * (t.finale ? 1.4 : 1);
+    const white = Math.random() < 0.22;
+    parts.push({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - rad*2,
+                 life:1, decay:1.6 + Math.random()*1.4,
+                 size:(1.0 + Math.random()*2.2) * (t.finale ? 1.5 : 1),
+                 col: white ? [255,250,235] : warm });
+  }
+  // small on purpose: the player's head is already moving, so a big shake
+  // reads as the camera losing them rather than as impact
+  shake = Math.min(1, 0.35 + q * 0.5 + (t.finale ? 0.5 : 0));
+}
+
+function judgeNow(t){
+  const r = judgeTarget(t, samples);
+  t.judged = r;
+  t.judgedAt = nowClock();
+  results.push({ id:t.def.id, isLeg:t.def.legs, tier:t.tier.id, finale:t.finale, ...r });
+
+  /* UNSCORED never breaks a streak. The camera not seeing the player is not
+     the player failing, and taking their music away for it would be the game
+     blaming them for its own eyes. */
+  let gained = 0;
+  if(r.verdict === 'CLEAN' || r.verdict === 'CLIPPED'){
+    streak++;
+    bestStreak = Math.max(bestStreak, streak);
+    const mult = (1 + Math.min(streak, 12) * 0.05) * (t.finale ? FINALE_MULT : 1);
+    gained = Math.round(r.points * mult);
+    score += gained;
+    burst(t, r);
+    chime(streak, r.quality, t.finale);
+  } else if(r.verdict === 'MISSED'){
+    streak = 0;
+    blip(170, 0.2, 0.26);
+  } else if(r.verdict === 'PASSED'){
+    /* Passed over. No sound at all, and the streak is untouched: the player
+       chose, and choosing is the game. What stops a player from choosing
+       NOTHING is not a penalty here but the legwork floor, which is a rate
+       per BLOOM presented — ignore the blooms and the run does not clear,
+       however many embers were struck. */
+  } else {
+    blip(330, 0.09, 0.16);     // unscored: a neutral tick, streak untouched
+  }
+  ui.hScore.textContent = score;
+  setStreakUI();
+  recPush({ k:'spark_judge', t:nowClock(), no:sparkNo, id:t.def.id,
+            latencyAssumed:POSE_LATENCY_MS, lightAt:t.lightAt, dieAt:t.dieAt,
+            early: nowClock() < t.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40,
+            streak, gained, ...r });
+  t.flash = 1;
+}
+
+function setStreakUI(){
+  const mult = 1 + Math.min(streak, 12) * 0.05;
+  ui.hStreak.textContent = streak >= 2 ? ('×' + mult.toFixed(2)) : '';
+  ui.hStreakN.textContent = streak >= 2 ? (streak + ' IN A ROW') : '';
+}
+
+function endRun(){
+  state = 'over'; live = [];
+  stopMusic();
+  ui.hud.hidden = true; ui.legs.hidden = true; ui.streak.hidden = true;
+  ui.room.hidden = true; noRoom = null;
+  const clean = results.filter(r=>r.verdict==='CLEAN').length;
+  const reps  = results.filter(r=>r.rep).length;
+  const uns   = results.filter(r=>r.verdict==='UNSCORED').length;
+  const passed = results.filter(r=>r.verdict==='PASSED').length;
+  const legRes = results.filter(r=>r.tier === 'bloom');
+  const legHit = legRes.filter(r=>r.legsOk === true).length;
+  const went = results.filter(r=>r.verdict!=='PASSED' && r.verdict!=='UNSCORED').length;
+  const hm = hipMeter.get(legShown);
+  const final = Math.round(score * hm.mult);
+  /* Clearing is now measured against the sparks the player WENT FOR, not
+     every spark presented. Choosing is the game: a run that declines half
+     the screen and does the other half properly is a run, and counting the
+     declined ones against them would make the choice a trap. The thing
+     that stops a player declining everything is the legwork floor, which
+     is a rate per BLOOM PRESENTED and is unaffected by any of this. */
+  const cleared = hm.ok && went > 0 && reps >= Math.ceil(went * TUNE.CLEAR_REPS);
+  ui.endScore.textContent = final;
+  ui.endTag.textContent = cleared ? ('RUN ' + run + ' CLEARED') : ('RUN ' + run + ' COMPLETE');
+  const tierCount = id => results.filter(r => r.tier === id &&
+    (r.verdict === 'CLEAN' || r.verdict === 'CLIPPED')).length;
+  const rows = [
+    ['Clean strikes', clean + ' of ' + went + ' gone for'],
+    ['Real repetitions', reps + ' of ' + went],
+    ['Blooms landed', legHit + ' of ' + legRes.length + ' taken'],
+    ['Taken', tierCount('ember') + ' ember · ' + tierCount('flare')
+             + ' flare · ' + tierCount('bloom') + ' bloom'],
+    ['Best streak', String(bestStreak)],
+  ];
+  if(passed) rows.push(['Passed over', passed + (passed===1?' spark':' sparks')]);
+  /* The commonest reason a spark did not pay, across the whole run. One
+     line, and it is the first thing to look at after playing. */
+  {
+    const tally = {};
+    for(const r of results) if(r.why) tally[r.why] = (tally[r.why] || 0) + 1;
+    const top = Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
+    if(top) rows.push(['Most often', top[0] + '  (' + top[1] + '×)']);
+  }
+  if(uns) rows.push(['Not observed', uns + (uns===1?' spark':' sparks')]);
+  if(hm.mult < 0.999) rows.push(['Struck', String(score) + '  ×' + hm.mult.toFixed(2) + ' legwork']);
+  ui.endRows.innerHTML = rows.map(r=>'<tr><td class="k">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('')
+    + '<tr><td class="k">Legwork floor</td><td class="v '+(hm.ok?'good':'bad')+'">'
+    + (hm.ok ? 'CLEARED' : 'NOT CLEARED') + '</td></tr>';
+  ui.endNote.textContent = hm.ok
+    ? 'Passing a spark over costs nothing. The blooms are where the run is won — and the floor is measured against every one that appeared, not just the ones you took.'
+    : 'The run did not travel enough to count as a workout, so most of what you struck did not pay. The low sparks want you to take your body there, not fold at the waist.';
+  ui.oEnd.hidden = false;
+  recPush({ k:'run_end', t:nowClock(), run, raw:score, final, cleared, clean, reps,
+            unscored:uns, legHit, legTotal:legRes.length, bestStreak,
+            sparks:results.length, hip:+hm.hip.toFixed(3), lat:+hm.lat.toFixed(3),
+            frac:+hm.frac.toFixed(3), mult:+hm.mult.toFixed(3), floorOk:hm.ok,
+            legShown, needHip:+hm.needHip.toFixed(2), needLat:+hm.needLat.toFixed(2), recDropped });
+}
+
+/* ---- drawing ---- */
+function drawMirror(dim){
+  const f = videoFit();
+  ctx.save();
+  ctx.translate(W,0); ctx.scale(-1,1);
+  try { ctx.drawImage(video, W-f.dx-f.dw, f.dy, f.dw, f.dh); } catch(e){}
+  ctx.restore();
+  ctx.fillStyle = 'rgba(7,8,15,'+dim+')'; ctx.fillRect(0,0,W,H);
+}
+
+const BONES = [[J.shA,J.elA],[J.elA,J.wrA],[J.shB,J.elB],[J.elB,J.wrB],
+               [J.shA,J.shB],[J.shA,J.hipA],[J.shB,J.hipB],[J.hipA,J.hipB],
+               [J.hipA,J.knA],[J.knA,J.ankA],[J.hipB,J.knB],[J.knB,J.ankB]];
+
+function drawPlayer(alpha){
+  if(!pose) return;
+  const P = {}; let any=false;
+  for(const k in J){ const p = read(pose, J[k]); if(p){ P[J[k]] = px(p); any=true; } }
+  if(!any) return;
+  ctx.save();
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='rgba(246,241,230,'+alpha+')';
+  ctx.lineWidth = Math.max(5, Math.min(W,H)*0.015);
+  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  const n = P[J.nose];
+  if(n){ ctx.fillStyle='rgba(246,241,230,'+alpha+')'; ctx.beginPath();
+    ctx.arc(n.x, n.y, Math.max(8, Math.min(W,H)*0.022), 0, 7); ctx.fill(); }
+  // the hands are what strikes, so they are marked
+  for(const k of [J.wrA, J.wrB]){
+    if(!P[k]) continue;
+    ctx.fillStyle = 'rgba(79,214,224,'+alpha+')';
+    ctx.beginPath(); ctx.arc(P[k].x, P[k].y, Math.max(7, Math.min(W,H)*0.019), 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* What a spark looks like is what it is worth.
+
+   This is the whole mechanism Hugo asked for: the player is pulled toward
+   the effort by what they are looking at, with no instruction anywhere. An
+   EMBER is a plain dim ring. A FLARE has a second ring and a slow shimmer.
+   A BLOOM has a wide glow, two orbiting rings and a pulse, and it is worth
+   nearly five times an ember. Nothing on screen says "this one is harder";
+   it just looks like the one you want, and it is. */
+function drawSpark(t, now){
+  const o = lastReadable();
+  /* Drawn where it is NOW. The scorer reads it at capture time instead, and
+     the two differ by the pipeline delay times the drift speed — at most
+     0.2 torso-per-second times a fifth of a second, which is 0.04 torso.
+     That difference is the player's own latency and is the same one the
+     catch-tick exists to paper over; it is not an error in the score. */
+  const q = px(sparkPos(t, now));
+  // the ring is sized off the player's own torso, so the target it draws is
+  // the target that is scored
+  const torsoPx = o ? o.scale * videoFit().dh : Math.min(W,H)*0.18;
+  const r = torsoPx * TUNE.HIT_R;
+  const life = Math.max(0, Math.min(1, (t.dieAt - now) / t.life));
+  const tier = t.tier || TIERS.ember;
+  const col = tier.rgb.join(',');
+  const age = (now - t.lightAt) / 260;
+  const pop = age < 1 ? 1 + (1 - age) * 0.5 : 1;     // it arrives, it does not fade in
+  const R = r * pop * (t.caught ? 0.72 : 1);
+  const bright = t.caught ? 1 : 0.85;
+  const g0 = tier.glow;
+  // a bloom breathes; an ember does not
+  const pulse = 1 + Math.sin(now / 420) * 0.06 * tier.shimmer;
+
+  ctx.save();
+
+  /* The glow. Its reach and its opacity both scale with the tier, so a
+     bloom is visibly the brightest thing on screen and an ember is
+     background. */
+  const gr = R * (1.35 + g0 * 0.95) * pulse;
+  const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, gr);
+  g.addColorStop(0, 'rgba('+col+','+((t.caught ? .72 : .34) + g0*0.30).toFixed(3)+')');
+  g.addColorStop(0.55, 'rgba('+col+','+(g0*0.14).toFixed(3)+')');
+  g.addColorStop(1, 'rgba('+col+',0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, gr, 0, 7); ctx.fill();
+
+  /* Orbiting rings: none on an ember, one on a flare, two on a bloom. They
+     turn slowly, which reads as "alive" without asking the player to react
+     to anything — the camera could not score a reaction anyway. */
+  for(let i = 0; i < tier.ring; i++){
+    const sp = (i ? -1 : 1) * (now / (1400 + i*600));
+    const rr = R * (1.55 + i * 0.30);
+    ctx.strokeStyle = 'rgba('+col+','+(0.16 + g0*0.22).toFixed(3)+')';
+    ctx.lineWidth = Math.max(1.5, R * 0.045);
+    ctx.setLineDash([R*0.5, R*0.85]);
+    ctx.lineDashOffset = sp * R * 4;
+    ctx.beginPath(); ctx.arc(q.x, q.y, rr, 0, 7); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  if(t.finale){
+    ctx.strokeStyle = 'rgba(255,250,235,.5)';
+    ctx.lineWidth = Math.max(2, R*0.05);
+    ctx.beginPath(); ctx.arc(q.x, q.y, R*1.9 + Math.sin(now/120)*R*0.06, 0, 7); ctx.stroke();
+  }
+
+  // the hit radius, drawn as what it is
+  ctx.strokeStyle = 'rgba('+col+','+(0.22 + g0*0.16).toFixed(3)+')';
+  ctx.lineWidth = Math.max(1.5, R*0.04);
+  ctx.beginPath(); ctx.arc(q.x, q.y, R, 0, 7); ctx.stroke();
+  // the inner zone that earns full credit
+  ctx.strokeStyle = 'rgba('+col+','+bright+')';
+  ctx.lineWidth = Math.max(3, R*0.09*(0.7 + g0*0.6));
+  ctx.beginPath(); ctx.arc(q.x, q.y, R*(TUNE.CENTRE_R/TUNE.HIT_R)*pulse, 0, 7); ctx.stroke();
+  // life remaining, counting down around the hit radius
+  ctx.strokeStyle = 'rgba('+col+',.95)'; ctx.lineWidth = Math.max(4, R*0.12);
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(q.x, q.y, R*1.2, -Math.PI/2, -Math.PI/2 + life*Math.PI*2); ctx.stroke();
+
+  /* The only words on a spark. A bloom says what it wants, because "take
+     your body there" is not guessable from a colour. */
+  if(tier.id === 'bloom'){
+    ctx.fillStyle = 'rgba('+col+',.9)';
+    ctx.font = Math.round(Math.min(W,H)*(t.finale?0.034:0.026))+'px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(t.finale ? 'FINALE' : 'LUNGE', q.x, q.y + R*2.05);
+  }
+  ctx.restore();
+}
+
+/* Has the hand the player can SEE reached the spark they can see?
+
+   This is a presentation fact, not a score. It fires off the drawn body,
+   which is a fifth of a second behind the body that gets judged, so it can
+   never be used to decide anything. What it does is close the gap: the spark
+   reacts the instant their hand is in it, and the burst and the points land
+   when the evidence has actually arrived. Without it the spark hangs there
+   looking untouched while the player knows perfectly well they hit it. */
+function checkCaught(t){
+  if(t.caught || !pose) return;
+  const o = lastReadable();
+  if(!o) return;
+  const q = px(sparkPos(t, nowClock()));
+  const rad = o.scale * videoFit().dh * TUNE.HIT_R;
+  for(const k of [J.wrA, J.wrB]){
+    const p = read(pose, k);
+    if(!p) continue;
+    const w = px(p);
+    if(Math.hypot(w.x - q.x, w.y - q.y) <= rad){
+      t.caught = true;
+      blip(1320, 0.05, 0.07);        // a tick, not a reward
+      return;
+    }
+  }
+}
+
+function drawParts(dt){
+  if(!parts.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for(let i = parts.length - 1; i >= 0; i--){
+    const p = parts[i];
+    p.life -= p.decay * dt;
+    if(p.life <= 0){ parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 900 * dt;              // they fall
+    p.vx *= 0.98; p.vy *= 0.98;
+    ctx.fillStyle = 'rgba('+p.col[0]+','+p.col[1]+','+p.col[2]+','+p.life.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.4 + p.life*0.8), 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* The verdict, as a line that does not block the next spark.
+
+   Gap puts a full screen flash here and masks the moment of judgment, because
+   the body on screen is behind the body that was judged. That still holds,
+   so there is no animation of the hand going through anything. But a full
+   screen flash every spark would strobe at this density, so the verdict is a
+   small line where the spark was. */
+function drawVerdict(t){
+  const r = t.judged; if(!r) return;
+  const a = Math.min(1, t.flash * 1.5);
+  const q = px(sparkPos(t, t.judgedAt || nowClock()));
+  const txt = r.verdict === 'CLEAN' ? (t.finale ? 'FINALE' : 'STRUCK')
+            : r.verdict === 'CLIPPED' ? 'CLIPPED'
+            : r.verdict === 'MISSED' ? 'MISSED'
+            : r.verdict === 'PASSED' ? '' : 'NOT SEEN';
+  const col = r.verdict === 'CLEAN' ? '#7fc08a'
+            : r.verdict === 'CLIPPED' ? '#ffb02e'
+            : r.verdict === 'MISSED' ? '#d4635a' : '#8a90ad';
+  if(!txt) return;        // passed over: it simply goes out
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  const rise = (1 - t.flash) * Math.min(W,H) * 0.06;
+  const big = Math.round(Math.min(W,H) * (t.finale ? 0.062 : 0.045));
+  const small = Math.round(Math.min(W,H) * 0.024);
+  /* And WHY, under it, whenever the spark did not pay in full. Hugo played
+     this and the blue ones did not count when he went down for them — and
+     he could not tell me what they said, because they said nothing. A
+     verdict with no reason cannot be acted on and cannot be debugged, and
+     a game that only says you failed makes the player guess at their own
+     body. The word is the same word that goes into the recording. */
+  const sub = r.verdict === 'UNSCORED' ? (r.why || 'not your fault')
+            : (r.verdict !== 'CLEAN' || (t.legs && r.legsOk === false)) ? r.why
+            : null;
+
+  /* A PLATE BEHIND THE WORDS. Rendering this is what caught it: a verdict
+     is drawn where the spark was, and for the low sparks that is directly
+     over the player's own body — so the reason this build exists to show
+     was thin orange text lying across a pale stick figure, and unreadable.
+     A verdict nobody can read is the same as no verdict. */
+  ctx.font = big + 'px Georgia';
+  const wTxt = ctx.measureText(txt).width;
+  ctx.font = small + 'px Georgia';
+  const wSub = sub ? ctx.measureText(sub).width : 0;
+  const padX = Math.min(W,H) * 0.028, padY = Math.min(W,H) * 0.018;
+  const bw = Math.max(wTxt, wSub) + padX*2;
+  const bh = big + (sub ? small * 1.9 : 0) + padY*1.4;
+  const cy = q.y - rise - big*0.72;
+  ctx.fillStyle = 'rgba(7,8,15,0.72)';
+  if(ctx.roundRect){
+    ctx.beginPath(); ctx.roundRect(q.x - bw/2, cy, bw, bh, Math.min(W,H)*0.016); ctx.fill();
+  } else ctx.fillRect(q.x - bw/2, cy, bw, bh);
+
+  ctx.font = big + 'px Georgia';
+  ctx.fillStyle = col;
+  ctx.fillText(txt, q.x, cy + big*0.92);
+  if(sub){
+    ctx.font = small + 'px Georgia';
+    ctx.fillStyle = r.verdict === 'UNSCORED' ? '#9aa0bb' : '#ffc濃'.slice(0,4) + 'b02e'.slice(0,0) || '#ffb02e';
+    ctx.fillStyle = r.verdict === 'UNSCORED' ? '#9aa0bb' : '#ffb02e';
+    ctx.fillText(sub, q.x, cy + big*0.92 + small*1.5);
+  }
+  ctx.restore();
+}
+
+/* ---- the fit gate ----
+   Two questions, not one: are the legs in the picture, and is there room on
+   screen for the sparks. The second is the one that is specific to this game,
+   and it is answered by placing every spark against the body as it stands and
+   checking they all land on screen. Still advice, not a lock — the override
+   below is always enabled. */
+/* Set by spawnTarget when a spark could not be placed inside the picture.
+   The banner reads it; the skip record reports it. */
+let noRoom = null;
+let fitOk = false, fitSince = 0, fitWhy = 'nobody';
+
+function checkFit(now){
+  const kn = read(pose, J.knA) || read(pose, J.knB);
+  const an = read(pose, J.ankA) || read(pose, J.ankB);
+  let ok = !!(kn && an);
+  fitWhy = ok ? 'legs' : 'legs';
+  if(ok){
+    const o = pose ? observe(pose, read, frameAR(), scaleTrack, nowClock()) : null;
+    const st = stanceOk(o);
+    ok = st.ok;
+    fitWhy = st.ok ? 'ok' : st.why;
+  }
+  if(ok !== fitOk){ fitOk = ok; fitSince = now; }
+  return ok && (now - fitSince) > 600;
+}
+function fitMessage(){
+  /* "A bit further back" was useless advice to a player who needed half again
+     the distance: it reads as a nudge, so it gets ignored, and the run starts
+     anyway with the sparks off screen. It now names the amount. */
+  const o = pose ? observe(pose, read, frameAR(), scaleTrack, nowClock()) : null;
+  const how = backAdvice(backMult(o));
+  switch(fitWhy){
+    case 'ok':    return 'Good. Starting\u2026';
+    case 'legs':  return 'Step back until your knees and feet are in the picture.';
+    case 'close': return 'Step back \u2014 ' + how + '. The sparks need room around you.';
+    case 'low':   return 'Step back \u2014 ' + how + ', or prop the phone a little higher.';
+    case 'high':  return 'Step back \u2014 ' + how + ', or prop the phone a little lower.';
+    case 'room':  return 'Step back \u2014 ' + how + '. The sparks need room around you.';
+    default:      return 'Step back until your whole body is in the picture.';
+  }
+}
+
+/* ---- audio: synthesised, no files, no licences ----
+
+   Dance music, built out of oscillators at runtime. The parts that make it
+   move rather than merely play:
+
+   FOUR ON THE FLOOR. A kick on every beat. It is the thing the player's
+   weight follows, so it is never taken away — layers build on top of it
+   rather than including it.
+
+   SIDECHAIN. Everything melodic goes through a gain node that is ducked on
+   every kick and recovers over about two thirds of a beat. That pumping is
+   most of what makes dance music feel like dance music, and it costs one
+   node and one ramp per beat.
+
+   A FILTER THAT OPENS. The melodic bus runs through a lowpass whose cutoff
+   is driven by the section's energy and by the streak. Quiet and closed at
+   the start, wide open at the peak and on a long streak. This is where
+   "dynamic" actually lives: the track changes because of where you are in it
+   AND because of how you are playing.
+
+   A REAL LIFT. The bars before the finale have no sparks and a riser — noise
+   through a bandpass climbing two octaves, with the filter opening and the
+   kick dropping out for the last bar. Then the finale lands.
+
+   Everything is scheduled against actx.currentTime with a lookahead, never
+   setTimeout or rAF, because the audio clock is the only one that does not
+   drift when the page is busy. The same clock carries the song position that
+   decides when sparks appear.                                            */
+let actx = null, master = null, pump = null, tone = null;
+let layerGain = {}, schedTimer = null, schedAt = 0;
+const LOOKAHEAD = 0.12, TICK = 25;
+
+function initAudio(){
+  try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return; }
+  master = actx.createGain();
+  /* 1.3, not the 0.85 it was. The mix came down off the kick so the round
+     could build, which cost about 6 dB of level, and this puts it back.
+     Set against a measured worst case — loudest section, streak 12, a chime
+     landing on a kick — rendered six times because hit() uses a fresh random
+     noise buffer each call and one render is not a headroom measurement.
+     At 1.3 that worst case peaks 0.74-0.84 and never clips. */
+  master.gain.value = 1.3;
+  master.connect(actx.destination);
+
+  // the melodic bus: ducked by the kick, then filtered
+  tone = actx.createBiquadFilter();
+  tone.type = 'lowpass';
+  tone.frequency.value = 700;
+  tone.Q.value = 7;
+  pump = actx.createGain();
+  pump.gain.value = 1;
+  tone.connect(pump); pump.connect(master);
+
+  for(const k of ['pad','bass','stab','lead','shine']){
+    const g = actx.createGain();
+    g.gain.value = (k === 'pad') ? 1 : 0;
+    g.connect(tone);                      // melodic: pumped and filtered
+    layerGain[k] = g;
+  }
+  for(const k of ['kick','hat','clap']){
+    const g = actx.createGain();
+    g.gain.value = (k === 'kick') ? 1 : 0;
+    g.connect(master);                    // drums: never ducked by themselves
+    layerGain[k] = g;
+  }
+}
+
+/* Two things decide whether a layer plays, and both have to allow it.
+
+   The SECTION sets the ceiling: the track itself thins out for the breather
+   and fills up at the peak, whatever the player is doing. The STREAK decides
+   how much of that ceiling has been earned. The kick and the pad are the
+   floor and are always there, because a track that starts silent gives the
+   player nothing to move to before they have hit anything.
+
+   On/off gating alone was NOT enough, and the measurement said so: with
+   layers switching between 0 and 1 the track read at a flat 0.081 → 0.083
+   RMS from the count-in to the finale. It got brighter and never got bigger,
+   because the kick at 0.78 was most of the level and four extra layers at
+   0.03 each could not be heard against it. So two further things changed:
+   the kick came down to make room, and a layer's gain is now GRADED by the
+   section energy rather than switched. Measured again below. */
+const LAYER_AT = { kick:0,  pad:0,  hat:1,   bass:2,  clap:3,   stab:4,  lead:6,   shine:9 };
+const LAYER_E  = { kick:0,  pad:0,  hat:0.3, bass:0.4, clap:0.5,  stab:0.6, lead:0.75, shine:0.95 };
+/* Once a layer is allowed in, how loud it is follows the section. FLOOR_E is
+   the kick and the pad, which swell but never disappear; the rest come in at
+   a third and reach full only at the peak. This is where the round's level
+   dynamics actually live. */
+const layerLevel = (k, e) => (k === 'kick' || k === 'pad') ? 0.62 + 0.38*e : 0.34 + 0.66*e;
+let layerKey = '';
+function updateLayers(){
+  if(!actx) return;
+  const sec = sectionAt(songTime());
+  const e = sec ? sec.energy : 0.3;
+  const key = streak + '|' + e;
+  if(key === layerKey) return;
+  layerKey = key;
+  for(const k in LAYER_AT){
+    const want = (streak >= LAYER_AT[k] && e >= LAYER_E[k]) ? layerLevel(k, e) : 0;
+    const g = layerGain[k].gain;
+    g.cancelScheduledValues(actx.currentTime);
+    g.setTargetAtTime(want, actx.currentTime, 0.15);
+  }
+}
+
+/* The filter follows the section AND the player. */
+function updateTone(){
+  if(!actx || !tone) return;
+  const sec = sectionAt(songTime());
+  const e = sec ? sec.energy : 0.3;
+  const s = Math.min(1, streak / 12);
+  const hz = 420 * Math.pow(2, e * 3.4 + s * 1.6);   // 420 Hz up to ~11 kHz
+  tone.frequency.setTargetAtTime(Math.min(13000, hz), actx.currentTime, 0.3);
+}
+
+function voice(dest, type, freq, t, dur, peak, detune){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if(detune) o.detune.setValueAtTime(detune, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(dest);
+  o.start(t); o.stop(t + dur + 0.04);
+}
+function noiseBuf(dur){
+  const n = Math.max(1, Math.floor(actx.sampleRate * dur));
+  const buf = actx.createBuffer(1, n, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i = 0; i < n; i++) d[i] = (Math.random()*2 - 1);
+  return buf;
+}
+function hit(dest, t, dur, peak, hz, type){
+  const s = actx.createBufferSource(); s.buffer = noiseBuf(dur);
+  const f = actx.createBiquadFilter(); f.type = type || 'highpass'; f.frequency.value = hz;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(peak, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f); f.connect(g); g.connect(dest);
+  s.start(t); s.stop(t + dur + 0.02);
+}
+
+/* The duck. Called at every kick, on the melodic bus only. */
+function sidechain(t){
+  if(!pump) return;
+  const g = pump.gain;
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(0.28, t);
+  g.linearRampToValueAtTime(1, t + BEAT * 0.66);
+}
+
+// A minor, four bars. Roots, the chord above each, and the scale the lead walks.
+const ROOTS = [110.00, 87.31, 130.81, 98.00];          // Am F C G
+const CHORD = [[0,3,7,12],[0,4,7,12],[0,4,7,12],[0,4,7,12]];
+const PENT  = [0, 3, 5, 7, 10, 12];
+const semi = n => Math.pow(2, n/12);
+
+function scheduleBeat(bIndex, t){
+  if(!actx) return;
+  const bar = Math.floor(bIndex / 4), beat = bIndex % 4;
+  const root = ROOTS[bar % 4];
+  const sec = sectionAtBeat(bIndex);
+  const e = sec ? sec.energy : 0.3;
+  const lift = sec && sec.name === 'LIFT';
+  const fin  = sec && sec.name === 'FINALE';
+
+  /* KICK, every beat. It drops out for the last bar of the lift so the
+     finale has something to land against. */
+  const barsIntoLift = lift ? (bIndex/4 - liftStartBar) : 0;
+  const kickOn = !(lift && barsIntoLift >= 4);
+  if(kickOn){
+    const k = actx.createOscillator(), g = actx.createGain();
+    k.type = 'sine';
+    k.frequency.setValueAtTime(165, t);
+    k.frequency.exponentialRampToValueAtTime(44, t + 0.085);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.46, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.21);
+    k.connect(g); g.connect(layerGain.kick); k.start(t); k.stop(t + 0.26);
+    hit(layerGain.kick, t, 0.02, 0.20, 1200);       // the click that carries on a phone
+    sidechain(t);
+  }
+
+  // CLAP on 2 and 4, three taps a few ms apart so it smears like a real one
+  if(beat === 1 || beat === 3){
+    for(let i = 0; i < 3; i++)
+      hit(layerGain.clap, t + i*0.012, 0.055 + i*0.02, 0.30 - i*0.07, 1400, 'bandpass');
+  }
+
+  // HATS: closed on every eighth, open on the offbeat, which is the sound
+  for(let i = 0; i < 2; i++)
+    hit(layerGain.hat, t + i*(BEAT/2), 0.028, 0.15, 9000);
+  if(beat === 1 || beat === 3 || e > 0.7)
+    hit(layerGain.hat, t + BEAT*0.5, 0.13, 0.13, 7000);
+  if(e > 0.75) for(let i = 0; i < 4; i++)
+    hit(layerGain.hat, t + i*(BEAT/4), 0.016, 0.07, 11000);
+
+  /* BASS: a moving eighth-note line, root and octave, not a held note. */
+  const BPAT = [0, 0, 12, 0, 7, 0, 12, 0];
+  for(let i = 0; i < 2; i++){
+    const n = BPAT[(beat*2 + i) % BPAT.length];
+    voice(layerGain.bass, 'sawtooth', root/2 * semi(n), t + i*(BEAT/2),
+          BEAT*0.42, 0.20, i ? 6 : -6);
+  }
+
+  // PAD: one long chord a bar, and short STABS on the offbeats
+  if(beat === 0){
+    for(const iv of CHORD[bar % 4]){
+      voice(layerGain.pad, 'sawtooth', root * semi(iv), t, BAR*1.02, 0.038, -7);
+      voice(layerGain.pad, 'sawtooth', root * semi(iv), t, BAR*1.02, 0.038, +7);
+    }
+  }
+  if(beat === 1 || beat === 3)
+    for(const iv of CHORD[bar % 4])
+      voice(layerGain.stab, 'square', root*2 * semi(iv), t + BEAT*0.5, BEAT*0.26, 0.055);
+
+  // LEAD: pentatonic sixteenths, busier the higher the energy
+  const steps = e > 0.7 ? 4 : 2;
+  for(let i = 0; i < steps; i++){
+    const n = PENT[(bIndex*steps + i*2 + bar) % PENT.length];
+    voice(layerGain.lead, 'square', root*4 * semi(n), t + i*(BEAT/steps),
+          BEAT/steps*0.7, 0.048);
+  }
+  if(beat === 0) voice(layerGain.shine, 'sine', root*8 * semi(PENT[bar % PENT.length]),
+                       t, BAR*0.7, 0.042);
+  if(fin && beat === 0)
+    for(const iv of CHORD[bar % 4])
+      voice(master, 'sawtooth', root*2 * semi(iv), t, BAR*1.5, 0.045, 9);
+}
+
+/* The riser: noise through a bandpass climbing two octaves across the lift,
+   plus a sine doing the same. Scheduled once, when the lift begins. */
+let liftStartBar = 1e9, liftDone = false;
+function scheduleLift(t, bars){
+  if(!actx || liftDone) return;
+  liftDone = true;
+  const dur = bars * BAR;
+  const s = actx.createBufferSource(); s.buffer = noiseBuf(dur);
+  const f = actx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2.2;
+  f.frequency.setValueAtTime(380, t);
+  f.frequency.exponentialRampToValueAtTime(5200, t + dur);
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.16, t + dur*0.92);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f); f.connect(g); g.connect(master);
+  s.start(t); s.stop(t + dur + 0.05);
+  const o = actx.createOscillator(), og = actx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(110, t);
+  o.frequency.exponentialRampToValueAtTime(880, t + dur);
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.05, t + dur*0.9);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(og); og.connect(master); o.start(t); o.stop(t + dur + 0.05);
+}
+
+/* The spark schedule rides the same clock. The scheduler marks a spark as due
+   at a wall-clock moment; the draw loop lights it on the first frame past
+   that, and the moment it actually appeared is what gets recorded as lightAt.
+   Up to one frame of slip against the beat is inaudible; claiming a spark
+   appeared when it did not would not be. */
+let dueSpark = null;
+
+function scheduler(){
+  if(!actx || state !== 'play') return;
+  while(schedAt < actx.currentTime - songStart + LOOKAHEAD){
+    const bIndex = Math.round(schedAt / BEAT);
+    const sec = sectionAtBeat(bIndex);
+    if(sec && sec.name === 'LIFT' && !liftDone){
+      liftStartBar = Math.floor(bIndex / 4);
+      scheduleLift(songStart + schedAt, sec.bars);
+    }
+    scheduleBeat(bIndex, songStart + schedAt);
+    schedAt += BEAT;
+  }
+  const sT = songTime();
+  while(schedIdx < schedule.length && schedule[schedIdx].at <= sT + 0.05){
+    dueSpark = schedule[schedIdx++];
+  }
+  if(sT >= RUN_SECONDS && state === 'play' && !live.length) endRun();
+}
+
+function startMusic(){
+  if(!actx) return;
+  songStart = actx.currentTime + 0.12;
+  schedAt = 0;
+  liftDone = false; liftStartBar = 1e9;
+  for(const k in layerGain) layerGain[k].gain.value = (k === 'pad' || k === 'kick') ? 1 : 0;
+  layerKey = '';
+  if(tone) tone.frequency.value = 500;
+  if(pump) pump.gain.value = 1;
+  if(schedTimer) clearInterval(schedTimer);
+  schedTimer = setInterval(scheduler, TICK);
+}
+function stopMusic(){
+  if(schedTimer){ clearInterval(schedTimer); schedTimer = null; }
+  if(!actx) return;
+  for(const k in layerGain){
+    const g = layerGain[k].gain;
+    g.cancelScheduledValues(actx.currentTime);
+    g.setTargetAtTime(0, actx.currentTime, 0.25);
+  }
+}
+
+/* The hit: a chime that climbs the pentatonic as the streak grows, so a long
+   run of sparks walks up the scale. It goes straight to the master, above
+   the duck and the filter, so the reward always cuts through whatever the
+   track is doing. */
+function chime(st, quality, finale){
+  if(!actx) return;
+  const step = PENT[Math.min(st - 1, 30) % PENT.length];
+  const oct = Math.min(2, Math.floor((st - 1) / PENT.length));
+  const f = 523.25 * semi(step) * Math.pow(2, oct) * (finale ? 2 : 1);
+  const now = actx.currentTime;
+  voice(master, 'triangle', f, now, finale ? 1.1 : 0.34, 0.17 + 0.1*(quality||0));
+  voice(master, 'sine', f*2, now + 0.012, finale ? 0.8 : 0.2, 0.06);
+  if(finale){
+    voice(master, 'sine', f*1.5, now + 0.05, 1.0, 0.1);
+    hit(master, now, 0.5, 0.2, 2000, 'bandpass');
+  }
+}
+
+function blip(f, g, d){
+  if(!actx) return;
+  const o = actx.createOscillator(), v = actx.createGain();
+  o.type='triangle'; o.frequency.value=f;
+  v.gain.setValueAtTime(0, actx.currentTime);
+  v.gain.linearRampToValueAtTime(g, actx.currentTime+0.012);
+  v.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+d);
+  o.connect(v); v.connect(master || actx.destination); o.start(); o.stop(actx.currentTime+d+0.05);
+}
+
+async function keepAwake(){
+  try { if('wakeLock' in navigator){ wake = await navigator.wakeLock.request('screen'); } } catch(e){}
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state !== 'idle') keepAwake();
+});
+
+/* ---- the loop ---- */
+let lastFrameAt = 0, lastRaf = 0;
+
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = lastRaf ? Math.min(0.05, (now - lastRaf) / 1000) : 0.016;
+  lastRaf = now;
+  if(video.readyState < 2 || !landmarker){ return; }
+
+  let fresh = false, clockT = now;
+  if(video.currentTime !== lastVideoTime){
+    const vt = video.currentTime;
+    if(lastFrameAt && now - lastFrameAt > 120){
+      recPush({ k:'gap', t:now, ms:Math.round(now-lastFrameAt) });
+    }
+    lastFrameAt = now;
+    lastVideoTime = vt;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      pose = (res && res.landmarks && res.landmarks[0]) ? res.landmarks[0] : null;
+      fresh = true;
+      clockT = captureToClock(vt, performance.now());
+    } catch(e){ pose = null; }
+
+    if(fresh){
+      const lm = pose ? pose.map(p => [ +p.x.toFixed(4), +p.y.toFixed(4),
+                                        +(p.z||0).toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(3) ]) : null;
+      recPush({ k:'f', cap:+(vt).toFixed(4), ready:+performance.now().toFixed(1),
+                clock:+clockT.toFixed(1), lm });
+      if(!pose && lostSince === null){ lostSince = now; recPush({ k:'lost', t:now }); }
+      if(pose && lostSince !== null){ recPush({ k:'found', t:now, out:Math.round(now-lostSince) }); lostSince = null; }
+    }
+  }
+
+  if(state === 'fit'){
+    drawMirror(0.45); drawPlayer(0.9);
+    const ok = checkFit(now);
+    ui.fitMsg.textContent = fitMessage();
+    if(ok){ ui.oFit.hidden = true; startRun(); }
+    return;
+  }
+
+  if(state !== 'play'){
+    if(state === 'over'){ drawMirror(0.75); drawParts(dt); }
+    return;
+  }
+
+  // one observation per fresh frame, carrying its own capture time
+  if(fresh && pose){
+    const o = observe(pose, read, frameAR(), scaleTrack, nowClock());
+    samples.push({ t: clockT, o });
+    if(samples.length > 400) samples.shift();
+    hipMeter.push(o);
+    const hm = hipMeter.get(legShown);
+    ui.legsFill.style.width = Math.round(hm.frac*100) + '%';
+    ui.legsTxt.textContent = hm.ok ? 'LEGWORK — FLOOR CLEARED' : 'LEGWORK';
+  }
+
+  // the shake is applied to the world, never to the overlays, so the score
+  // and the legwork bar stay still while the picture moves
+  ctx.save();
+  if(shake > 0){
+    shake = Math.max(0, shake - dt * 4.5);
+    const m = shake * shake * Math.min(W,H) * 0.012;
+    ctx.translate((Math.random()-0.5)*m, (Math.random()-0.5)*m);
+  }
+  drawMirror(0.52);
+  drawPlayer(0.6);
+
+  // a spark falls due on the song clock; it lights on the next frame, and the
+  // moment it actually appeared is what is recorded
+  /* A spark that falls due while the previous one is still live, or while
+     the camera cannot see the player, is DROPPED rather than queued. A
+     backlog would hand the player a burst of sparks at once through no fault
+     of theirs, and would put the track out of step with its own music. It is
+     recorded, so a thin run can be explained rather than guessed at. */
+  if(dueSpark){
+    if(live.filter(t => !t.judged).length >= MAX_ALIVE){
+      recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id, why:'screen full' });
+      dueSpark = null;
+    } else if(spawnTarget(dueSpark)) dueSpark = null;
+    else if(now - (dueSpark.firstTried || (dueSpark.firstTried = now)) > 400){
+      const nr = (noRoom && now - noRoom.at < 600) ? noRoom : null;
+      recPush({ k:'spark_skipped', t:now, id:dueSpark.def.id,
+                why: nr ? ('off screen: ' + nr.edge) : 'no body visible or no room',
+                edge: nr ? nr.edge : null,
+                torso: nr ? +nr.torso.toFixed(4) : null });
+      dueSpark = null;
+    }
+  }
+
+  /* Say why the sparks stopped. Held for 2.5 s after the last refusal so a
+     single drop does not flash, and a run that cannot place anything shows it
+     continuously. */
+  {
+    const show = !!(noRoom && now - noRoom.at < 2500);
+    ui.room.hidden = !show;
+    if(show){
+      ui.roomSub.textContent = EDGE_WORD[noRoom.edge] || EDGE_WORD.nobody;
+      ui.roomHow.textContent = backAdvice(backMult(lastReadable()));
+    }
+  }
+
+  /* A judged spark stops being the spark and goes off to fade on its own.
+     Holding the next one back until the verdict finished animating cost most
+     of a second at three-beat cadence, which is longer than the gap between
+     sparks: the track would have fallen behind its own music. */
+  /* Every live spark, drawn back to front so the richest one sits on top.
+     They are judged independently of each other, which is safe only because
+     SEP_MIN guarantees no hand position can be inside two of them at once —
+     without that, one swing could claim two sparks, or be awarded to the
+     one the player was not going for. */
+  live.sort((a, b) => a.tier.glow - b.tier.glow);
+  for(let i = live.length - 1; i >= 0; i--){
+    const t = live[i];
+    if(t.judged) continue;
+    checkCaught(t);
+    drawSpark(t, now);
+    /* Judge as soon as the evidence for a completed strike has arrived,
+       and otherwise at the deadline. The deadline is the old behaviour and
+       is still the backstop: the spark ARRIVES at dieAt, but the landmarks
+       describing the body over its lifetime do not exist until the pipeline
+       has run. Judging at death reads an interval the estimates have not
+       reached yet, which in Gap returned UNSCORED on every wall of a round
+       while every unit test passed. */
+    if(readyToJudge(t, samples) ||
+       now >= t.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40){
+      judgeNow(t);
+      fading.push(t);
+      live.splice(i, 1);
+    }
+  }
+  for(let i = fading.length - 1; i >= 0; i--){
+    const f = fading[i];
+    drawVerdict(f);
+    f.flash -= dt * 1.6;
+    if(f.flash <= 0) fading.splice(i, 1);
+  }
+  drawParts(dt);
+  ctx.restore();
+
+  // the clock across the top, outside the shake
+  const left = Math.max(0, RUN_SECONDS - songTime());
+  ui.hTime.textContent = Math.floor(left/60) + ':' + String(Math.floor(left%60)).padStart(2,'0');
+  const sec = sectionAt(songTime());
+  if(sec.name && ui.hSec.textContent !== sec.name) ui.hSec.textContent = sec.name;
+  updateLayers();
+  updateTone();
+}
+
+function startRun(){
+  run++; score = 0; results = []; samples = []; streak = 0; bestStreak = 0;
+  sparkNo = 0; legShown = 0; parts = []; fading = []; shake = 0; live = []; dueSpark = null;
+  scaleTrack = makeScale();
+  lastPick = null; schedIdx = 0;
+  schedule = buildSchedule();
+  hipMeter.reset();
+  state = 'play';
+  ui.hud.hidden = false; ui.legs.hidden = false; ui.streak.hidden = false;
+  ui.room.hidden = true; noRoom = null;
+  ui.hScore.textContent = '0';
+  ui.hSec.textContent = '';
+  ui.legsFill.style.width = '0%'; ui.legsTxt.textContent = 'LEGWORK';
+  setStreakUI();
+  startMusic();
+  recPush({ k:'run_start', t:nowClock(), run, bpm:BPM, runSeconds:+RUN_SECONDS.toFixed(1),
+            sparks:schedule.length, schedule: schedule.map(s=>({ at:+s.at.toFixed(2), id:s.def.id, finale:s.finale })) });
+}
+
+/* ---- starting up ---- */
+function dropStream(){
+  const s = video.srcObject;
+  if(s){ try { s.getTracks().forEach(t => t.stop()); } catch(e){} }
+  video.srcObject = null;
+}
+function waitForFrames(ms){
+  return new Promise((res, rej) => {
+    if(video.readyState >= 2) return res();
+    let done = false;
+    const ok = () => { if(done) return; done = true; clean(); res(); };
+    const giveUp = () => { if(done) return; done = true; clean();
+      rej(new Error('The camera turned on but sent no picture. Close any other app using it, then try again.')); };
+    const t = setTimeout(giveUp, ms || 10000);
+    function clean(){ clearTimeout(t);
+      video.removeEventListener('loadeddata', ok); video.removeEventListener('playing', ok); }
+    video.addEventListener('loadeddata', ok); video.addEventListener('playing', ok);
+  });
+}
+
+let starting = false;
+async function begin(){
+  if(starting || state !== 'idle') return;
+  if(!landscapeOK()){ checkRotation(); return; }   // sideways only
+
+  /* FULLSCREEN, so the browser bar goes away.
+
+     Chrome on Android has no setting for this; the page has to ask, and it
+     may only ask inside a user gesture. This runs at the top of begin(),
+     which is called straight from the Start tap and before any await, so
+     the gesture is still live. It is wrapped and ignored on failure: a
+     browser that refuses fullscreen must still start the game. */
+  try {
+    const el = document.documentElement;
+    const go = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(go && !document.fullscreenElement) {
+      const p = go.call(el, { navigationUI:'hide' });
+      if(p && p.catch) p.catch(()=>{});
+    }
+  } catch(e){}
+  starting = true;
+  const btn = document.getElementById('bStart'); if(btn) btn.disabled = true;
+  ui.errMsg.hidden = true; ui.loadMsg.hidden = false;
+  try {
+    if(!actx) initAudio();
+    if(actx && actx.state === 'suspended') await actx.resume();
+    // a tall screen wants a tall frame: a landscape request crops the legs
+    // before the tracker ever sees them
+    const tall = window.innerHeight > window.innerWidth;
+    const vW = tall ? 720 : 960, vH = tall ? 960 : 720;
+    const s = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:vW}, height:{ideal:vH}, facingMode:'user' }, audio:false });
+    dropStream();
+    video.srcObject = s;
+    const playing = video.play();
+    if(playing && playing.catch) playing.catch(()=>{});
+    await Promise.race([ playing ? playing.catch(()=>{}) : Promise.resolve(),
+                         new Promise(r => setTimeout(r, 3000)) ]);
+    await waitForFrames(8000);
+    if(!landmarker) await loadTracker();
+    recHeader();
+    ui.loadMsg.hidden = true; ui.oStart.hidden = true; ui.oFit.hidden = false;
+    state = 'fit'; keepAwake();
+    requestAnimationFrame(frame);
+  } catch(err){
+    dropStream();
+    ui.loadMsg.hidden = true;
+    let m = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    if(err && err.name === 'NotAllowedError') m = 'Camera permission denied. Allow it in the address bar and reload.';
+    if(err && err.name === 'NotFoundError') m = 'No camera found on this device.';
+    if(err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    if(err && err.name === 'AbortError') m = 'The camera did not start. Tap once and give it a moment.';
+    ui.errMsg.textContent = m; ui.errMsg.hidden = false;
+  } finally {
+    starting = false;
+    const b2 = document.getElementById('bStart'); if(b2) b2.disabled = false;
+  }
+}
+
+document.getElementById('bStart').addEventListener('click', begin);
+checkRotation();   // the ui object exists by here, so this is the first honest look
+// The override is always enabled. A player the camera cannot frame must still
+// be able to start; the gate is advice, not a lock.
+document.getElementById('bGo').addEventListener('click', () => { ui.oFit.hidden = true; startRun(); });
+document.getElementById('bAgain').addEventListener('click', () => { ui.oEnd.hidden = true; startRun(); });
+document.getElementById('bRec').addEventListener('click', () => {
+  const lines = rec.map(o => JSON.stringify(o)).join('\n');
+  const blob = new Blob([lines], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sparks-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+});
+
+window.__SPARKS__ = { TUNE, TARGETS, LIFETIME_MS, GAP_MS, J, makeReader, observe, placeTarget,
+                      stanceLimits, hipWindow, stanceOk,
+                      velocityAt, findOnset, arcBetween, hipTravel, judgeTarget,
+                      makeHipMeter, iso, idist, iang, zone, rec };
+</script>
+</body>
+</html>
