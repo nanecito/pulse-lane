@@ -1456,7 +1456,7 @@ const FIELDS = [
 ];
 let LEVEL = 0;
 let TARGETS = FIELDS[0].targets;
-function setLevel(i){ LEVEL = i; TARGETS = FIELDS[i].targets; }
+function setLevel(i){ LEVEL = i; TARGETS = FIELDS[i].targets; lastPick = null; }
 
 /* How far back the player has to stand, COMPUTED from the sparks above rather
    than asked for in words. The sparks reach past the body on every side, so
@@ -1818,15 +1818,26 @@ const FINALE_ID = 'floor-C';     // the one no amount of folding can reach
 const FINALE_LIFETIME = 2200;
 const FINALE_MULT = 3;
 
-const LEG_POOL = TARGETS.filter(t => t.legs && t.id !== FINALE_ID);
-const ARM_POOL = TARGETS.filter(t => !t.legs);
+/* DERIVED PER PICK, NOT ONCE AT LOAD. These were `const ... = TARGETS.filter()`
+   evaluated while the module was still being read, so they snapshotted
+   LEVEL 1's targets and never changed again. setLevel() reassigns TARGETS,
+   but nothing reassigned these. Picking level 2 therefore produced a run
+   that was LABELLED side-step, whose stance gate correctly demanded the
+   extra room, and whose every spark came from level 1: zero step sparks in
+   a full three-minute run, which is how it was found.
+
+   The reason it got through: FIELDS, setLevel and stanceLimits were each
+   checked on their own and all three were right. Nothing drove startRun
+   with level 2 selected. "Drive the real path, not just its parts." */
+const legPool = () => TARGETS.filter(t => t.legs && t.id !== FINALE_ID);
+const armPool = () => TARGETS.filter(t => !t.legs);
 
 /* Which spark comes next. Never the same one twice running, and never the
    same side twice running when there is a choice, because two sparks on one
    side is a reach and then another reach, while alternating is travel. */
 let lastPick = null;
 function pickSpark(legShare){
-  const pool = (Math.random() < legShare ? LEG_POOL : ARM_POOL).slice();
+  const pool = (Math.random() < legShare ? legPool() : armPool());
   const side = lastPick ? Math.sign(lastPick.bx) : 0;
   let choice = pool.filter(t => t.id !== (lastPick && lastPick.id) && Math.sign(t.bx) !== side);
   if(!choice.length) choice = pool.filter(t => t.id !== (lastPick && lastPick.id));
@@ -2861,6 +2872,7 @@ function startRun(){
   setStreakUI();
   startMusic();
   recPush({ k:'run_start', t:nowClock(), run, level:FIELDS[LEVEL].id, levelName:FIELDS[LEVEL].name,
+            fieldIds: TARGETS.map(t => t.id),
             bpm:BPM, runSeconds:+RUN_SECONDS.toFixed(1),
             sparks:schedule.length, schedule: schedule.map(s=>({ at:+s.at.toFixed(2), id:s.def.id, finale:s.finale })) });
 }
