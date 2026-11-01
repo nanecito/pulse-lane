@@ -52,7 +52,14 @@
     text-shadow:0 1px 6px rgba(0,0,0,.9)}
   /* an id selector beats the [hidden] attribute, so without this the score
      and the legwork bar sit on top of the start and setup screens */
-  #hud[hidden],#legs[hidden],#streak[hidden]{display:none}
+  /* The level buttons are deliberately large. Everything else in this game
+     is read from a metre and a half away, and 11px type is exactly why the
+     old legwork caption read as a mystery blue line. */
+  button.lvl{font-size:15px;letter-spacing:.1em;padding:10px 18px;
+    border-color:rgba(255,255,255,.22);color:var(--dim);background:transparent}
+  button.lvl.on{border-color:var(--spark);color:var(--spark)}
+  #lvlBlurb{font-size:13px;margin-top:-2px;color:var(--dim)}
+  #hud[hidden],#streak[hidden]{display:none}
   #streak{position:fixed;top:64px;left:0;right:0;text-align:center;z-index:3;
     pointer-events:none;text-shadow:0 2px 10px rgba(0,0,0,.9)}
   #streak b{display:block;font-weight:400;font-size:30px;color:var(--spark-l);letter-spacing:.04em}
@@ -69,14 +76,13 @@
   #room #roomHow{color:var(--spark-l);letter-spacing:.06em;margin-top:3px}
   #hud .r{text-align:right}
   #hud b{font-weight:400;color:var(--spark);font-size:22px;display:block}
-  /* the legs meter is the whole point of the game, so it is on screen the
-     whole time rather than revealed at the end */
-  #legs{position:fixed;left:16px;right:16px;bottom:env(safe-area-inset-bottom,0);
-    margin-bottom:14px;z-index:3;pointer-events:none}
-  #legsBar{height:7px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
-  #legsFill{height:100%;width:0%;background:var(--cyan);transition:width .25s linear}
-  #legsTxt{font-size:11px;letter-spacing:.18em;color:var(--dim);margin-top:6px;text-align:center;
-    text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  /* THE LEGWORK BAR IS GONE. It was a 7px line with an 11px caption, which
+     is unreadable from where the game is actually played - it read as a
+     mystery blue line across the screen. Worse, it lied: with no bloom yet
+     presented the floor is zero, zero is cleared by doing nothing, and the
+     bar sat FULL saying FLOOR CLEARED for the first ~14 s of every run.
+     That is the project's own "no data must never count as OK".
+     The legwork is still measured, and still reported at the end. */
   .tag{display:inline-block;border:1px solid var(--spark);color:var(--spark);
     border-radius:999px;padding:3px 12px;font-size:11px;letter-spacing:.16em;margin-bottom:8px}
   table{border-collapse:collapse;font-size:14px;color:var(--warm)}
@@ -112,11 +118,6 @@
   <div class="r"><span style="color:var(--dim)">SCORE</span><b id="hScore">0</b></div>
 </div>
 <div id="streak" hidden><b id="hStreak"></b><span id="hStreakN"></span></div>
-<div id="legs" hidden>
-  <div id="legsBar"><div id="legsFill"></div></div>
-  <div id="legsTxt">LEGWORK</div>
-</div>
-
 <div id="room" hidden>
   <b>STEP BACK</b>
   <span id="roomSub">sparks are landing outside the picture</span>
@@ -129,9 +130,14 @@
   <ul class="how">
     <li>About a metre and a half back &mdash; knees and feet in the picture.</li>
     <li>Sweep a hand through the spark. A poke does not count &mdash; the swing is what scores.</li>
-    <li>The low ones want a lunge, not a bend at the waist. The bar at the bottom is watching your legs.</li>
+    <li>The blue ones sit past your reach. Take your body to them &mdash; a lunge, or a step.</li>
     <li>A run is three minutes. The music fills out while you keep landing them.</li>
   </ul>
+  <div class="row" id="lvlRow">
+    <button class="lvl on" data-lvl="0">1 &middot; ORIGINAL</button>
+    <button class="lvl" data-lvl="1">2 &middot; SIDE STEP</button>
+  </div>
+  <p class="sub" id="lvlBlurb">Reach, across, and down.</p>
   <div class="row"><button id="bStart">Start</button></div>
   <p class="note" id="loadMsg" hidden>Waking the camera&hellip;</p>
   <p class="err" id="errMsg" hidden></p>
@@ -1380,7 +1386,37 @@ function wouldCrowd(others, cand, lightAt, dieAt){
    sparks inside a 1.74 reach, leg sparks 0.25 to 0.45 torsos beyond it so
    the body must travel, and 17% of pairs under SEP_MIN against the main
    field's 15%, so crowding is not made worse. */
-const TARGETS = [
+/* ================== THE LEVELS ==================
+   Level 1 is the field above. Level 2 moves two rows BEYOND ARM REACH to
+   the sides, so they cannot be stretched to - the feet have to move.
+
+   The geometry, worked out rather than chosen. A sideways lean moves the
+   shoulder about 0.30-0.40 torsos, so a spark only forces a STEP if it
+   sits further past the arm than a lean can close. At shoulder height the
+   distance from the shoulder is about bx - 0.4, so with ARM.reach 1.44:
+
+     gap past reach   bx needed   fits at 1.5 m (cap 2.23)?
+        0.30            2.14        yes - but a lean reaches it
+        0.42            2.26        no at 1.5 m, yes from ~1.55 m
+        0.60            2.44        no until ~1.7 m
+
+   0.42 is the choice: past a lean, and a 0.6-torso step brings it back
+   inside reach. The cost is that LEVEL 2 NEEDS MORE ROOM THAN LEVEL 1 -
+   lateral becomes the binding constraint at tMax 0.239 against level 1's
+   0.270, so about 1.55 m rather than 1.45 m. Nothing new was needed to
+   handle that: the fit gate already computes the stance from the target
+   list, so picking level 2 in too small a room asks the player to step
+   back, in the words it already uses.
+
+   The step sparks are legs:true, which is what makes them pay as blooms
+   AND what points the leg gate at them: reachDir() takes the direction
+   from the SHOULDER to the spark, which for these is almost pure sideways,
+   so a side step credits in full and a squat credits almost nothing. The
+   cue reads STEP rather than LUNGE for the same reason - "use your legs"
+   is the vague instruction this project already decided against. */
+const FIELDS = [
+  { id:1, name:'ORIGINAL', blurb:'Reach, across, and down.',
+  targets: [
   { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
   { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
   { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
@@ -1397,7 +1433,30 @@ const TARGETS = [
   { id:'deep-L',  name:'DEEP LEFT',   bx:-0.95, by:-1.05, legs:true },
   { id:'deep-R',  name:'DEEP RIGHT',  bx: 0.95, by:-1.05, legs:true },
   { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+  ] },
+  { id:2, name:'SIDE STEP', blurb:'Two rows past your reach. Move your feet.',
+    targets: [
+      { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
+      { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
+      { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
+      { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
+      { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
+      { id:'step-L',  name:'STEP LEFT',   bx:-2.26, by: 0.90, legs:true, cue:'STEP' },
+      { id:'step-R',  name:'STEP RIGHT',  bx: 2.26, by: 0.90, legs:true, cue:'STEP' },
+      { id:'far-L',   name:'FAR LEFT',    bx:-2.26, by: 0.30, legs:true, cue:'STEP' },
+      { id:'far-R',   name:'FAR RIGHT',   bx: 2.26, by: 0.30, legs:true, cue:'STEP' },
+      { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.20, legs:false },
+      { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
+      { id:'side-L',  name:'SIDE LEFT',   bx:-1.65, by:-0.55, legs:true },
+      { id:'side-R',  name:'SIDE RIGHT',  bx: 1.65, by:-0.55, legs:true },
+      { id:'low-L',   name:'LOW LEFT',    bx:-1.35, by:-0.90, legs:true },
+      { id:'low-R',   name:'LOW RIGHT',   bx: 1.35, by:-0.90, legs:true },
+      { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+    ] },
 ];
+let LEVEL = 0;
+let TARGETS = FIELDS[0].targets;
+function setLevel(i){ LEVEL = i; TARGETS = FIELDS[i].targets; }
 
 /* How far back the player has to stand, COMPUTED from the sparks above rather
    than asked for in words. The sparks reach past the body on every side, so
@@ -1581,7 +1640,7 @@ let POSE_LATENCY_MS = 200;
 let clockOffset = null;          // performance-ms minus capture-ms
 
 /* ================= the game ================= */
-const BUILD = 'sparks-close-1';   // so a recording says which field it came from
+const BUILD = 'sparks-close-2';   // so a recording says which field it came from
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -1645,8 +1704,6 @@ const ui = {
   roomHow:document.getElementById('roomHow'),
   oStart:document.getElementById('oStart'), oFit:document.getElementById('oFit'),
   oEnd:document.getElementById('oEnd'), hud:document.getElementById('hud'),
-  legs:document.getElementById('legs'), legsFill:document.getElementById('legsFill'),
-  legsTxt:document.getElementById('legsTxt'),
   hTime:document.getElementById('hTime'), hSec:document.getElementById('hSec'),
   hScore:document.getElementById('hScore'), streak:document.getElementById('streak'),
   hStreak:document.getElementById('hStreak'), hStreakN:document.getElementById('hStreakN'),
@@ -1971,7 +2028,7 @@ function setStreakUI(){
 function endRun(){
   state = 'over'; live = [];
   stopMusic();
-  ui.hud.hidden = true; ui.legs.hidden = true; ui.streak.hidden = true;
+  ui.hud.hidden = true; ui.streak.hidden = true;
   ui.room.hidden = true; noRoom = null;
   const clean = results.filter(r=>r.verdict==='CLEAN').length;
   const reps  = results.filter(r=>r.rep).length;
@@ -1981,14 +2038,18 @@ function endRun(){
   const legHit = legRes.filter(r=>r.legsOk === true).length;
   const went = results.filter(r=>r.verdict!=='PASSED' && r.verdict!=='UNSCORED').length;
   const hm = hipMeter.get(legShown);
-  const final = Math.round(score * hm.mult);
+  /* THE LEGWORK FLOOR NO LONGER CUTS THE SCORE. Hugo's call, 31 Oct: the
+     cut was guarding against a cheat by a player who is not there, and it
+     nagged the one who is. What the legs did is still measured and still
+     reported; it just no longer takes points away. */
+  const final = score;
   /* Clearing is now measured against the sparks the player WENT FOR, not
      every spark presented. Choosing is the game: a run that declines half
      the screen and does the other half properly is a run, and counting the
      declined ones against them would make the choice a trap. The thing
      that stops a player declining everything is the legwork floor, which
      is a rate per BLOOM PRESENTED and is unaffected by any of this. */
-  const cleared = hm.ok && went > 0 && reps >= Math.ceil(went * TUNE.CLEAR_REPS);
+  const cleared = went > 0 && reps >= Math.ceil(went * TUNE.CLEAR_REPS);
   ui.endScore.textContent = final;
   ui.endTag.textContent = cleared ? ('RUN ' + run + ' CLEARED') : ('RUN ' + run + ' COMPLETE');
   const tierCount = id => results.filter(r => r.tier === id &&
@@ -2011,13 +2072,12 @@ function endRun(){
     if(top) rows.push(['Most often', top[0] + '  (' + top[1] + '×)']);
   }
   if(uns) rows.push(['Not observed', uns + (uns===1?' spark':' sparks')]);
-  if(hm.mult < 0.999) rows.push(['Struck', String(score) + '  ×' + hm.mult.toFixed(2) + ' legwork']);
-  ui.endRows.innerHTML = rows.map(r=>'<tr><td class="k">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('')
-    + '<tr><td class="k">Legwork floor</td><td class="v '+(hm.ok?'good':'bad')+'">'
-    + (hm.ok ? 'CLEARED' : 'NOT CLEARED') + '</td></tr>';
-  ui.endNote.textContent = hm.ok
-    ? 'Passing a spark over costs nothing. The blooms are where the run is won — and the floor is measured against every one that appeared, not just the ones you took.'
-    : 'The run did not travel enough to count as a workout, so most of what you struck did not pay. The low sparks want you to take your body there, not fold at the waist.';
+  /* Reported, never deducted. The number is how far the hips actually
+     travelled, in torso lengths, which is a thing a person can compare
+     against their own last run. */
+  rows.push(['Legwork', hm.hip.toFixed(0) + ' torsos travelled']);
+  ui.endRows.innerHTML = rows.map(r=>'<tr><td class="k">'+r[0]+'</td><td class="v">'+r[1]+'</td></tr>').join('');
+  ui.endNote.textContent = 'Passing a spark over costs nothing. The blue ones pay most, and they are the ones your body has to travel for.';
   ui.oEnd.hidden = false;
   recPush({ k:'run_end', t:nowClock(), run, raw:score, final, cleared, clean, reps,
             unscored:uns, legHit, legTotal:legRes.length, bestStreak,
@@ -2144,7 +2204,7 @@ function drawSpark(t, now){
     ctx.fillStyle = 'rgba('+col+',.9)';
     ctx.font = Math.round(Math.min(W,H)*(t.finale?0.034:0.026))+'px Georgia';
     ctx.textAlign = 'center';
-    ctx.fillText(t.finale ? 'FINALE' : 'LUNGE', q.x, q.y + R*2.05);
+    ctx.fillText(t.finale ? 'FINALE' : (t.def.cue || 'LUNGE'), q.x, q.y + R*2.05);
   }
   ctx.restore();
 }
@@ -2691,10 +2751,7 @@ function frame(now){
     const o = observe(pose, read, frameAR(), scaleTrack, nowClock());
     samples.push({ t: clockT, o });
     if(samples.length > 400) samples.shift();
-    hipMeter.push(o);
-    const hm = hipMeter.get(legShown);
-    ui.legsFill.style.width = Math.round(hm.frac*100) + '%';
-    ui.legsTxt.textContent = hm.ok ? 'LEGWORK — FLOOR CLEARED' : 'LEGWORK';
+    hipMeter.push(o);   // still counted, no longer shown during play
   }
 
   // the shake is applied to the world, never to the overlays, so the score
@@ -2797,14 +2854,14 @@ function startRun(){
   schedule = buildSchedule();
   hipMeter.reset();
   state = 'play';
-  ui.hud.hidden = false; ui.legs.hidden = false; ui.streak.hidden = false;
+  ui.hud.hidden = false; ui.streak.hidden = false;
   ui.room.hidden = true; noRoom = null;
   ui.hScore.textContent = '0';
   ui.hSec.textContent = '';
-  ui.legsFill.style.width = '0%'; ui.legsTxt.textContent = 'LEGWORK';
   setStreakUI();
   startMusic();
-  recPush({ k:'run_start', t:nowClock(), run, bpm:BPM, runSeconds:+RUN_SECONDS.toFixed(1),
+  recPush({ k:'run_start', t:nowClock(), run, level:FIELDS[LEVEL].id, levelName:FIELDS[LEVEL].name,
+            bpm:BPM, runSeconds:+RUN_SECONDS.toFixed(1),
             sparks:schedule.length, schedule: schedule.map(s=>({ at:+s.at.toFixed(2), id:s.def.id, finale:s.finale })) });
 }
 
@@ -2887,6 +2944,18 @@ async function begin(){
   }
 }
 
+/* Both levels are open. Earning level 2 by clearing level 1 is the right
+   rule once other people play it - Hugo's point, 31 Oct - but it is not in
+   yet, and locking the only tester out of the thing he just asked for would
+   be the wrong order to build it in. */
+for(const b of document.querySelectorAll('button.lvl')){
+  b.addEventListener('click', () => {
+    const i = +b.dataset.lvl;
+    setLevel(i);
+    for(const o of document.querySelectorAll('button.lvl')) o.classList.toggle('on', o === b);
+    document.getElementById('lvlBlurb').textContent = FIELDS[i].blurb;
+  });
+}
 document.getElementById('bStart').addEventListener('click', begin);
 checkRotation();   // the ui object exists by here, so this is the first honest look
 // The override is always enabled. A player the camera cannot frame must still
