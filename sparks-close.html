@@ -1217,6 +1217,23 @@ const TIERS = {
   bloom: { id:'bloom', points:260,  glow:1.00, ring:2, shimmer:1,
            rgb:[ 79,214,224], name:'BLOOM' },
 };
+/* A FOOT SPARK IS DRAWN IN ITS OWN COLOUR, and that is the only thing the
+   foot changes about a tier. It scores as a bloom, counts as a bloom, and
+   appears in the end screen as a bloom; it is only PAINTED differently,
+   which is where a "tell them apart" change belongs.
+
+   Not cyan, which is what was asked for in passing: cyan IS bloom, so foot
+   sparks were already cyan and so were floor-C, side, low and step. That is
+   the whole reason they were indistinguishable - every leg spark on the
+   board was the same colour, and in THE MIX five of them are on screen in
+   one run. The shape and the word were trying to carry a difference that
+   colour had already thrown away.
+
+   Violet, because it is the furthest from what is taken. Minimum hue
+   separation from the three existing tiers: violet 85 degrees, green 58.
+   Amber 35, coral 15, cyan 185, violet 290. */
+const FOOT_RGB = [214, 112, 255];
+
 const tierOf = def => def.legs ? TIERS.bloom
                     : (def.across ? TIERS.flare : TIERS.ember);
 
@@ -1792,7 +1809,7 @@ let clockOffset = null;          // performance-ms minus capture-ms
    new build by reading drift velocities out of it and matching them against
    the committed driftFor. A build string that never changes is not a build
    string. */
-const BUILD = 'sparks-close-4-foot';
+const BUILD = 'sparks-close-5-violet';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -2330,7 +2347,7 @@ function drawSpark(t, now){
   const r = torsoPx * TUNE.HIT_R;
   const life = Math.max(0, Math.min(1, (t.dieAt - now) / t.life));
   const tier = t.tier || TIERS.ember;
-  const col = tier.rgb.join(',');
+  const col = (t.def.foot ? FOOT_RGB : tier.rgb).join(',');
   const age = (now - t.lightAt) / 260;
   const pop = age < 1 ? 1 + (1 - age) * 0.5 : 1;     // it arrives, it does not fade in
   const R = r * pop * (t.caught ? 0.72 : 1);
@@ -2411,17 +2428,19 @@ function drawSpark(t, now){
 
   /* The only words on a spark. A bloom says what it wants, because "take
      your body there" is not guessable from a colour. */
-  if(tier.id === 'bloom'){
+  /* No word on a foot spark. Colour, silhouette and a thump already say
+     what it is three ways, and a run of THE MIX puts five bloom-class
+     sparks on screen - labelling each one turns the board into text. LUNGE
+     and STEP stay, because nothing else signals them. */
+  if(tier.id === 'bloom' && !isFoot){
     /* Sized for a man standing two metres from a phone, not for someone
        holding it. 0.026 of the short side was eleven pixels on his screen,
        which is why he could not tell a foot spark from a hand one. A foot
        spark's first few are larger again, because that is when the word is
        doing the teaching. */
-    const teaching = isFoot && t.footTeach;
-    const sz = t.finale ? 0.046 : (teaching ? 0.058 : (isFoot ? 0.046 : 0.038));
-    const fs = Math.round(Math.min(W,H)*sz);
-    ctx.fillStyle = 'rgba('+col+','+(teaching ? 1 : 0.92)+')';
-    ctx.font = (teaching ? 'bold ' : '') + fs + 'px Georgia';
+    const fs = Math.round(Math.min(W,H)*(t.finale ? 0.046 : 0.038));
+    ctx.fillStyle = 'rgba('+col+',0.92)';
+    ctx.font = fs + 'px Georgia';
     ctx.textAlign = 'center';
     /* BELOW the spark unless that would put it off the bottom, which on the
        foot row it always did: the first render of the diamonds showed no
