@@ -1787,7 +1787,12 @@ let POSE_LATENCY_MS = 200;
 let clockOffset = null;          // performance-ms minus capture-ms
 
 /* ================= the game ================= */
-const BUILD = 'sparks-close-3';   // so a recording says which field it came from
+/* BUMP THIS WITH EVERY SHIPPED CHANGE. It did not get bumped for the
+   levels-3-to-5 fix, and the next recording could only be identified as the
+   new build by reading drift velocities out of it and matching them against
+   the committed driftFor. A build string that never changes is not a build
+   string. */
+const BUILD = 'sparks-close-4-foot';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -2105,6 +2110,16 @@ function spawnTarget(entry){
                               tier, finale: entry.finale }),
     { no: sparkNo });
   live.push(t);
+  if(entry.def.foot){
+    footThump();
+    /* Tagged on the SPARK, not read from t.no at draw time: t.no is the
+       global spark number, so "the first three foot sparks" and "sparks 1
+       to 3" are different sets and the first foot spark of a run is
+       usually number seven or later. */
+    t.footTeach = footSeen < FOOT_SAY_N;
+    if(t.footTeach) say('foot');
+    footSeen++;
+  }
   recPush({ k:'spark_light', t:lightAt, no:sparkNo, id:entry.def.id, legs:entry.def.legs,
             tier:tier.id, finale:entry.finale, songT:+songTime().toFixed(3),
             body:{ bx:entry.def.bx, by:entry.def.by },
@@ -2177,7 +2192,13 @@ function judgeNow(t){
   }
   ui.hScore.textContent = score;
   setStreakUI();
-  recPush({ k:'spark_judge', t:nowClock(), no:sparkNo, id:t.def.id,
+  /* t.no, NOT sparkNo. sparkNo is the global counter, which has moved on by
+   the time a spark is judged, so every judge record carried the number of
+   whatever lit most recently. Joining a recording light-to-judge on it
+   produced sparks that appeared to be judged twice and "falling" sparks
+   that appeared to drift upward - neither real. Scoring was never affected;
+   analysis of every earlier recording was. */
+  recPush({ k:'spark_judge', t:nowClock(), no:t.no, id:t.def.id,
             latencyAssumed:POSE_LATENCY_MS, lightAt:t.lightAt, dieAt:t.dieAt,
             early: nowClock() < t.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40,
             streak, gained, ...r });
@@ -2332,15 +2353,40 @@ function drawSpark(t, now){
 
   /* Orbiting rings: none on an ember, one on a flare, two on a bloom. They
      turn slowly, which reads as "alive" without asking the player to react
-     to anything — the camera could not score a reaction anyway. */
-  for(let i = 0; i < tier.ring; i++){
-    const sp = (i ? -1 : 1) * (now / (1400 + i*600));
-    const rr = R * (1.55 + i * 0.30);
-    ctx.strokeStyle = 'rgba('+col+','+(0.16 + g0*0.22).toFixed(3)+')';
-    ctx.lineWidth = Math.max(1.5, R * 0.045);
-    ctx.setLineDash([R*0.5, R*0.85]);
-    ctx.lineDashOffset = sp * R * 4;
-    ctx.beginPath(); ctx.arc(q.x, q.y, rr, 0, 7); ctx.stroke();
+     to anything — the camera could not score a reaction anyway.
+
+     ON A FOOT SPARK THEY ARE DIAMONDS. He could not tell a foot spark from
+     a hand spark while playing, and the only thing distinguishing them was
+     the word FOOT drawn at 0.026 of the short side - about eleven pixels on
+     his phone, from two metres away. A silhouette carries where type does
+     not. The orbit rings are the right place for it: they are decoration,
+     so turning them into diamonds says "foot" without misdrawing the hit
+     radius, which has to stay a true circle because it is what is scored. */
+  const isFoot = !!t.def.foot;
+  if(isFoot){
+    /* ONE diamond, and it does not turn. Rendering the first version caught
+       this: two rings at the bloom tier, each rotating the other way, sat
+       about twenty degrees apart and read as a pair of wonky SQUARES rather
+       than a diamond. A silhouette only works if it is one shape, held
+       still, with a point at the top. */
+    const rd = R * 1.45;
+    ctx.strokeStyle = 'rgba('+col+','+(0.42 + g0*0.22).toFixed(3)+')';
+    ctx.lineWidth = Math.max(2.5, R * 0.10);
+    ctx.lineJoin = 'miter';
+    ctx.beginPath();
+    ctx.moveTo(q.x, q.y - rd); ctx.lineTo(q.x + rd, q.y);
+    ctx.lineTo(q.x, q.y + rd); ctx.lineTo(q.x - rd, q.y);
+    ctx.closePath(); ctx.stroke();
+  } else {
+    for(let i = 0; i < tier.ring; i++){
+      const sp = (i ? -1 : 1) * (now / (1400 + i*600));
+      const rr = R * (1.55 + i * 0.30);
+      ctx.strokeStyle = 'rgba('+col+','+(0.16 + g0*0.22).toFixed(3)+')';
+      ctx.lineWidth = Math.max(1.5, R * 0.045);
+      ctx.setLineDash([R*0.5, R*0.85]);
+      ctx.lineDashOffset = sp * R * 4;
+      ctx.beginPath(); ctx.arc(q.x, q.y, rr, 0, 7); ctx.stroke();
+    }
   }
   ctx.setLineDash([]);
 
@@ -2366,10 +2412,25 @@ function drawSpark(t, now){
   /* The only words on a spark. A bloom says what it wants, because "take
      your body there" is not guessable from a colour. */
   if(tier.id === 'bloom'){
-    ctx.fillStyle = 'rgba('+col+',.9)';
-    ctx.font = Math.round(Math.min(W,H)*(t.finale?0.034:0.026))+'px Georgia';
+    /* Sized for a man standing two metres from a phone, not for someone
+       holding it. 0.026 of the short side was eleven pixels on his screen,
+       which is why he could not tell a foot spark from a hand one. A foot
+       spark's first few are larger again, because that is when the word is
+       doing the teaching. */
+    const teaching = isFoot && t.footTeach;
+    const sz = t.finale ? 0.046 : (teaching ? 0.058 : (isFoot ? 0.046 : 0.038));
+    const fs = Math.round(Math.min(W,H)*sz);
+    ctx.fillStyle = 'rgba('+col+','+(teaching ? 1 : 0.92)+')';
+    ctx.font = (teaching ? 'bold ' : '') + fs + 'px Georgia';
     ctx.textAlign = 'center';
-    ctx.fillText(t.finale ? 'FINALE' : (t.def.cue || 'LUNGE'), q.x, q.y + R*2.05);
+    /* BELOW the spark unless that would put it off the bottom, which on the
+       foot row it always did: the first render of the diamonds showed no
+       word at all, because every foot spark sits low enough that its label
+       fell off the screen. The cue that teaches the mechanic was invisible
+       in exactly the place the mechanic lives. */
+    const below = q.y + R*2.25, above = q.y - R*2.05;
+    ctx.fillText(t.finale ? 'FINALE' : (t.def.cue || 'LUNGE'), q.x,
+                 below + fs*0.35 > H ? above : below);
   }
   ctx.restore();
 }
@@ -2847,6 +2908,41 @@ function chime(st, quality, finale){
   }
 }
 
+/* A FOOT SPARK ANNOUNCES ITSELF. Nothing used to make a sound when a spark
+   lit, so this is the only light-sound in the game and cannot be confused
+   with a verdict. Low and short: a thump, two octaves under the hand tiers,
+   with a filtered noise transient so it carries over the music on a phone
+   speaker rather than disappearing into the bass. */
+function footThump(){
+  if(!actx) return;
+  const now = actx.currentTime;
+  voice(master, 'sine', 98, now, 0.34, 0.26);
+  voice(master, 'triangle', 49, now + 0.01, 0.28, 0.16);
+  hit(master, now, 0.09, 0.14, 420, 'lowpass');
+}
+
+/* Spoken, because he plays two metres from the phone and cannot read it.
+   Guarded: speechSynthesis is absent in some webviews, throws in others,
+   and must never take the game down with it. Cancel first, or a queue
+   builds up and the game starts talking over itself a bar late. */
+function say(text){
+  try {
+    const S = window.speechSynthesis;
+    if(!S || typeof SpeechSynthesisUtterance === 'undefined') return;
+    S.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0; u.pitch = 0.9; u.volume = 1;
+    S.speak(u);
+  } catch(e){}
+}
+
+/* How many foot sparks of a run get announced out loud. It is a teaching
+   cue, not a mechanic: once he has heard it three times he knows what a
+   diamond means, and a game that keeps shouting FOOT at minute three is
+   just noise. */
+const FOOT_SAY_N = 3;
+let footSeen = 0;
+
 function blip(f, g, d){
   if(!actx) return;
   const o = actx.createOscillator(), v = actx.createGain();
@@ -3013,7 +3109,7 @@ function frame(now){
 
 function startRun(){
   run++; score = 0; results = []; samples = []; streak = 0; bestStreak = 0;
-  sparkNo = 0; legShown = 0; parts = []; fading = []; shake = 0; live = []; dueSpark = null;
+  sparkNo = 0; legShown = 0; footSeen = 0; parts = []; fading = []; shake = 0; live = []; dueSpark = null;
   scaleTrack = makeScale();
   lastPick = null; schedIdx = 0;
   schedule = buildSchedule();
