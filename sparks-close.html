@@ -1157,7 +1157,42 @@ function makeHipMeter(){
  * ------------------------------------------------------------------ */
 const DRIFT_MIN = 0.07;
 const DRIFT_MAX = 0.20;   // torso per second
-const FALL_DROP = 1.20;   // torsos a falling spark descends over its lifetime
+/* RAIN, rebuilt as rain. It used to be 1.20 torsos spread over whatever
+   life the spark got - 0.29 torsos a second, about 20 pixels a second on
+   his phone - and he struck them at a median of 29% of their life, so the
+   median spark had moved 24 pixels before he hit it. He reported that the
+   rain did not fall. It fell, at a speed nobody could see.
+
+   Tuning the speed cannot fix that, and the algebra says why: what he sees
+   before he strikes is rate x (0.29 x life), and rate x life IS the drop.
+   The life cancels. Pixels seen depends only on how far it drops, and the
+   drop was capped at 1.04-1.50 torsos by the chord floor. The ceiling from
+   tuning alone was 31 pixels against the 24 he got.
+
+   So the structure changes instead. A spark now STARTS ABOVE THE FRAME and
+   falls into it, which gives a second of fall he can only watch, before it
+   is close enough to be worth swinging at. Miss it and it keeps going and
+   leaves the bottom of the screen.
+
+   FALL_RATE is a speed, and 0.50 is a measured ceiling rather than a
+   guess. Swept against a simulated player who does NOT lead the target -
+   who aims where the spark looks when his swing starts, which is all the
+   brief permits asking for:
+
+       rate   aims-ahead   aims-at-what-he-sees
+       0.35      100%            100%
+       0.50      100%            100%
+       0.80      100%             67%   <- prediction starts to be required
+
+   RAIN_DEAD is where a catch stops being honest, not a style choice. Below
+   it the spark is within CHORD_IN of the resting hand and there is no
+   travel left to measure, so a catch is free. Solved per column: the worst
+   column is bx 0.50, directly over the resting hand, which cannot be
+   caught below by 0.479. One flat floor at 0.50 covers every column. */
+const FALL_RATE = 0.50;   // torsos per SECOND
+const RAIN_TOP  = 2.10;   // where it is born: above the top of the frame
+const RAIN_ARM  = 1.55;   // by the time it is here it is in frame and worth hitting
+const RAIN_DEAD = 0.50;   // below this a catch would be free, so the spark is gone
 
 /* Centre to centre, for every pair of sparks alive at the same time, for
    the whole of their overlap. Two hit radii is 0.84, so at 1.10 no point in
@@ -1390,15 +1425,13 @@ function driftFor(def, life, rnd){
      So the descent is now shortened until the WHOLE path clears the floor,
      which is what chordKeeps already checks and simply never saw. The room
      clamp stays: both have to hold. FALL_DROP is the ask, not the promise. */
-  if(def.fall){
-    const roomY = def.by - L.byLo;
-    let drop = Math.min(FALL_DROP, roomY);
-    for(; drop > 0; drop -= 0.02){
-      const vy = -drop / secs;
-      if(chordKeeps(def, 0, vy, life)) return { vx: 0, vy };
-    }
-    return { vx: 0, vy: 0 };
-  }
+  /* A falling spark falls at a FIXED SPEED and is not clamped to the
+     envelope, because leaving the envelope is now the point: it is born
+     above the frame and it exits the bottom. What keeps it honest is not a
+     clamp but RAIN_DEAD - its life ends at the height where a catch would
+     stop costing anything, so the whole of its SCORED existence is above
+     that line and chordKeeps has nothing left to reject. */
+  if(def.fall) return { vx: 0, vy: -FALL_RATE };
 
   for(let attempt = 0; ; attempt++){
     const d = tryDrift(def, life, L, secs, rnd || Math.random);
@@ -1572,12 +1605,16 @@ const FIELDS = [
     ] },
   { id:4, name:'RAIN', blurb:'They fall. Catch them on the way down.',
     targets: [
-      { id:'rain-A',  name:'RAIN 1',      bx:-1.20, by: 1.50, legs:false, across:true, fall:true },
-      { id:'rain-B',  name:'RAIN 2',      bx:-0.70, by: 1.50, legs:false, across:true, fall:true },
-      { id:'rain-C',  name:'RAIN 3',      bx:-0.25, by: 1.50, legs:false, across:true, fall:true },
-      { id:'rain-D',  name:'RAIN 4',      bx: 0.25, by: 1.50, legs:false, across:true, fall:true },
-      { id:'rain-E',  name:'RAIN 5',      bx: 0.70, by: 1.50, legs:false, across:true, fall:true },
-      { id:'rain-F',  name:'RAIN 6',      bx: 1.20, by: 1.50, legs:false, across:true, fall:true },
+      /* Six columns across the width, all born at RAIN_TOP, which is ABOVE
+         the frame: they come in over the top edge rather than appearing in
+         mid-air. The widest pair sits at 1.45 rather than 1.20 so the rain
+         spans the body instead of huddling over it. */
+      { id:'rain-A',  name:'RAIN 1',      bx:-1.45, by: 2.10, legs:false, across:true, fall:true },
+      { id:'rain-B',  name:'RAIN 2',      bx:-0.85, by: 2.10, legs:false, across:true, fall:true },
+      { id:'rain-C',  name:'RAIN 3',      bx:-0.30, by: 2.10, legs:false, across:true, fall:true },
+      { id:'rain-D',  name:'RAIN 4',      bx: 0.30, by: 2.10, legs:false, across:true, fall:true },
+      { id:'rain-E',  name:'RAIN 5',      bx: 0.85, by: 2.10, legs:false, across:true, fall:true },
+      { id:'rain-F',  name:'RAIN 6',      bx: 1.45, by: 2.10, legs:false, across:true, fall:true },
       { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
       { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
       { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
@@ -1594,8 +1631,8 @@ const FIELDS = [
       { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
       { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
       { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
-      { id:'rain-L',  name:'RAIN LEFT',   bx:-0.70, by: 1.50, legs:false, across:true, fall:true },
-      { id:'rain-R',  name:'RAIN RIGHT',  bx: 0.70, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-L',  name:'RAIN LEFT',   bx:-0.85, by: 2.10, legs:false, across:true, fall:true },
+      { id:'rain-R',  name:'RAIN RIGHT',  bx: 0.85, by: 2.10, legs:false, across:true, fall:true },
       { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
       { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
       { id:'step-L',  name:'STEP LEFT',   bx:-2.26, by: 0.90, legs:true, cue:'STEP' },
@@ -1634,7 +1671,15 @@ function stanceLimits(ar){
   ar = ar || 4/3;          // what the device actually delivers (960x720)
   let byHi = -Infinity, byLo = Infinity, bxMax = 0;
   for(const t of TARGETS){
-    byHi = Math.max(byHi, t.by); byLo = Math.min(byLo, t.by);
+    /* A FALLING SPARK IS BORN ABOVE THE FRAME, so its spawn height is not
+       a height the player has to make room for - asking for room up there
+       would push him back far enough to fit a spark he is never meant to
+       see at that moment. What he must have room for is where it becomes
+       worth hitting, which is RAIN_ARM. Left as t.by this read byHi 2.10,
+       demanded 2.52 torsos above the hip, and would have told him to step
+       back for the rest of his life. */
+    const hi = t.fall ? Math.min(t.by, RAIN_ARM) : t.by;
+    byHi = Math.max(byHi, hi); byLo = Math.min(byLo, t.by);
     bxMax = Math.max(bxMax, Math.abs(t.bx));
   }
   // vertical: the highest spark pushes the hip down, the feet pull it up
@@ -1809,7 +1854,7 @@ let clockOffset = null;          // performance-ms minus capture-ms
    new build by reading drift velocities out of it and matching them against
    the committed driftFor. A build string that never changes is not a build
    string. */
-const BUILD = 'sparks-close-5-violet';
+const BUILD = 'sparks-close-6-rain';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -1891,7 +1936,7 @@ let samples = [];                     // recent observations, capture-stamped
 let hipMeter = makeHipMeter();
 let wake = null;
 let streak = 0, bestStreak = 0, sparkNo = 0, legShown = 0;
-let shake = 0, parts = [], fading = [];
+let shake = 0, parts = [], fading = [], ghosts = [];
 
 /* ================= the song =================
    A run is a track. Three minutes, built like one: a count-in, four sections
@@ -2092,10 +2137,23 @@ function spawnTarget(entry){
      edge, so the recording names the direction and the banner can tell the
      player which way they are short. Silently placing it is what made 57%
      of a real run invisible. */
-  const off = onScreenAt(at, o, SPAWN_R_FRAC);
+  /* A falling spark is BORN OFF THE TOP OF THE FRAME on purpose, so asking
+     whether it is on screen where it was born would reject every one of
+     them. The question that matters is whether it will be on screen by the
+     time it is worth swinging at, so that is the height tested. */
+  const fitAt = entry.def.fall
+    ? placeTarget({ bx: entry.def.bx, by: RAIN_ARM }, o)
+    : at;
+  const off = onScreenAt(fitAt, o, SPAWN_R_FRAC);
   if(off){ noRoom = { edge:off, torso:o.scale || o.torso, at:nowClock() }; return false; }
   const lightAt = nowClock();
-  const life = entry.finale ? FINALE_LIFETIME : lifetimeNow();
+  /* Rain does not get a lifetime from the song. Its life IS the distance
+     from where it is born to RAIN_DEAD, divided by the speed it falls: it
+     dies exactly where a catch would stop being worth anything, and not a
+     frame later. */
+  const life = entry.finale ? FINALE_LIFETIME
+             : (entry.def.fall ? Math.round((entry.def.by - RAIN_DEAD) / FALL_RATE * 1000)
+                               : lifetimeNow());
   const dieAt = lightAt + life;
   const ref = { hip:{ x:o.hip.x, y:o.hip.y }, torso:o.scale, ar:o.ar };
 
@@ -3105,6 +3163,12 @@ function frame(now){
        now >= t.dieAt + POSE_LATENCY_MS + TUNE.JUDGE_POST + 40){
       judgeNow(t);
       fading.push(t);
+      /* A MISSED RAIN SPARK KEEPS FALLING. It is no longer scored - its
+         life ended at RAIN_DEAD - but it carries on down and leaves the
+         bottom of the screen, because "if you don't catch them they are
+         gone" is the whole feel of the level, and a spark that simply
+         vanishes at a line in mid-air does not say that. */
+      if(t.def.fall && !t.caught) ghosts.push(t);
       live.splice(i, 1);
     }
   }
@@ -3113,6 +3177,17 @@ function frame(now){
     drawVerdict(f);
     f.flash -= dt * 1.6;
     if(f.flash <= 0) fading.splice(i, 1);
+  }
+  /* The ones that got away, on their way out of frame. Drawn dim so they
+     are never mistaken for something still worth chasing. */
+  for(let i = ghosts.length - 1; i >= 0; i--){
+    const g = ghosts[i];
+    const q = sparkPos(g, now);
+    if(q.y > 1.14){ ghosts.splice(i, 1); continue; }
+    const a = ctx.globalAlpha;
+    ctx.globalAlpha = a * 0.26;
+    drawSpark(g, now);
+    ctx.globalAlpha = a;
   }
   drawParts(dt);
   ctx.restore();
@@ -3128,7 +3203,7 @@ function frame(now){
 
 function startRun(){
   run++; score = 0; results = []; samples = []; streak = 0; bestStreak = 0;
-  sparkNo = 0; legShown = 0; footSeen = 0; parts = []; fading = []; shake = 0; live = []; dueSpark = null;
+  sparkNo = 0; legShown = 0; footSeen = 0; parts = []; fading = []; ghosts = []; shake = 0; live = []; dueSpark = null;
   scaleTrack = makeScale();
   lastPick = null; schedIdx = 0;
   schedule = buildSchedule();
