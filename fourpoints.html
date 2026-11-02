@@ -87,9 +87,11 @@ so the camera can see you from your hands to your feet.</p></div></div>
       <p>Put the phone on the floor on its side, a couple of metres away, leaning on
       something so it looks slightly down at you. It has to see the whole of you,
       hands to feet.</p>
+      <p><b>Play side-on to it.</b> Lie across the picture, one end of you toward each side
+      of the frame, not facing the phone. Square on it cannot find the floor and nothing
+      reads. It checks this once you are down and tells you out loud.</p>
       <p class="sub">The camera has never been pointed at a body on the floor before this
-      build. The setup below measures whether it can see you properly and tells you
-      straight if it cannot.</p>
+      build. It measures whether it can see you properly and says so plainly if it cannot.</p>
     </div>
     <div class="col">
       <h2>Round one</h2>
@@ -174,6 +176,8 @@ const TUNE = {
   VIS_KEEP:     0.04,  // confidence to keep one already acquired
   VIS_FRACTION: 0.58,  // fraction of a configuration's joints that must be seen
   FLOOR_RESID:  0.22,  // worst floor-line fit still usable, in torsos
+  FACE_SIDE:    0.40,  // shoulder+hip spread over torso that counts as side-on
+  FACE_FRONT:   0.55,  // and above which the player is squarely facing the camera
   HOLD_MOVE:    0.30,  // body movement a transition must actually show
 };
 
@@ -360,6 +364,30 @@ function features(pose, read, floor){
     f.asym = Math.abs(H(g.wrA)-H(g.wrB)) + Math.abs(H(g.ankA)-H(g.ankB));
 
   return { f, seen, torso, floor:fl };
+}
+
+/* ---- which way is the player facing? ----------------------------
+   Everything here assumes the camera is looking at the player side-on, with the
+   body lying across the picture. Face the phone instead and the floor cannot be
+   found and no height means anything.
+
+   Side-on, the left and right of the body project almost on top of each other,
+   so the gap between the two shoulders and between the two hips is small next
+   to the torso. Square on, that gap is most of a torso wide. Same scale-free
+   kind of measure as everything else, and it needs NO FLOOR - which is the
+   point, because it has to run before the floor is found.
+
+   Hugo's first real run passed the standing fit check, then he got down facing
+   the phone and nothing would read. The check existed, for the wrong moment. */
+function bodyFacing(pose, read){
+  const a = read(pose, J.shA), b = read(pose, J.shB);
+  const c = read(pose, J.hipA), d = read(pose, J.hipB);
+  if(!a || !b || !c || !d) return null;          // unknown, never a guess
+  const sh = midp(a,b), hp = midp(c,d);
+  const torso = dist(sh, hp);
+  if(!(torso > 0.02)) return null;
+  const spread = (dist(a,b) + dist(c,d)) / (2 * torso);
+  return { spread, sideOn: spread <= TUNE.FACE_SIDE, frontOn: spread >= TUNE.FACE_FRONT };
 }
 
 function credit(key, got, want){
@@ -793,6 +821,7 @@ function resolve(load, heldId, judged, table){
   return { outcome, damage, points, unscored:false };
 }
 /*==SCORER_END==*/
+
 /* ================= camera, pose, the clock and the recording =================
    Lifted from gap.html, which is the tested version of all of this, with the
    changes a floor game forces: a landscape picture, a fit check that wants the
@@ -1238,14 +1267,14 @@ function say(text, opt){
   const o = opt || {};
   if(!voiceOn || !text) return;
   const now = performance.now();
-  const gap = o.gap === undefined ? 5000 : o.gap;
+  const gap = o.gap === undefined ? 7000 : o.gap;
   if(text === lastSaid && now - lastSaidAt < gap) return;
   lastSaid = text; lastSaidAt = now;
   try {
     if(o.cut) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     if(voicePick) u.voice = voicePick;
-    u.rate = o.rate || 1.0; u.pitch = 1.0; u.volume = 1.0;
+    u.rate = o.rate || 0.88; u.pitch = 1.0; u.volume = 1.0;
     speechSynthesis.speak(u);
     recPush({ k:'say', t:nowClock(), text });
   } catch(e){}
@@ -1636,7 +1665,7 @@ function doJudge(){
     ex.resolved = { outcome:null, damage:0, points:0, unscored:true };
     ex.heldId = null;
     unscoredSound();
-    sayNow('I lost sight of you. That one does not count against you.');
+    sayNow('Lost you. Does not count.');
   } else {
     ex.judged = bestJudge; ex.heldId = bestCfg.id;
     ex.resolved = resolve(ex.load, bestCfg.id, bestJudge, roundTable);
@@ -1644,10 +1673,10 @@ function doJudge(){
     damage += ex.resolved.damage;
     outcomeSound(ex.resolved.outcome);
     const o = ex.resolved.outcome;
-    let line = o === 'F' ? 'It holds.' : o === 'P' ? 'It strains.' : 'It gives.';
-    if(o !== 'F'){
+    let line = o === 'F' ? 'Holds.' : o === 'P' ? 'Strains.' : 'Gives.';
+    if(o === 'X'){
       const want = answerFor(ex.load);
-      if(want) line += ' ' + want.name + ' holds that one.';
+      if(want) line += ' ' + want.name + ' holds that.';
     }
     sayNow(line);
   }
@@ -1664,7 +1693,8 @@ function doJudge(){
             settled:!!ex.judged.settled, rep:!!ex.judged.rep,
             outcome:ex.resolved.outcome, damage:ex.resolved.damage,
             points:ex.resolved.points, samples:ex.judged.samples,
-            lockAt:ex.lockAt, judgedAt:nowClock(), confusion:all });
+            lockAt:ex.lockAt, judgedAt:nowClock(), confusion:all,
+            facing:(()=>{ const f=bodyFacing(pose,read); return f?+f.spread.toFixed(3):null; })() });
   // Mask rather than animate. The body on screen is a fifth of a second behind
   // the body that was judged, so showing the load pass through the player would
   // contradict the result that was just scored.
@@ -1675,7 +1705,7 @@ function doJudge(){
 function endRound(){
   const cleared = damage <= budget && exNo >= exchanges.length;
   state = 'over'; ex = null; stopBed();
-  sayNow(cleared ? 'It held. Round complete.' : 'It came down.');
+  sayNow(cleared ? 'It held.' : 'It came down.');
   recPush({ k:'round_end', t:nowClock(), round, cleared, score, damage,
             exchanges:results.length, transitions:transitions.length,
             bracedMs:Math.round(bracedMs), confusion,
@@ -1817,11 +1847,14 @@ function paintWaiting(){
    part of him it cannot see instead, which is true whichever way the image runs. */
 
 const GUIDE_STABLE_MS = 1800;     // frame must stay good this long before moving on
-const SETTLE_MS       = 6000;     // time to get down onto the floor
+const SETTLE_MS       = 7000;     // time to get down onto the floor
+const ORIENT_STABLE_MS= 1500;     // and to settle side-on before the floor is read
+const ORIENT_GIVEUP_MS= 25000;    // after which it stops insisting and says so
 const CAL_HOLD_MS     = 3200;     // each calibration posture
 const COUNTIN_MS      = 5000;
 
-let guideOkSince = 0, settleFrom = 0, calAttempt = 0, lastGuide = '';
+let guideOkSince = 0, orientOkSince = 0, settleFrom = 0, calAttempt = 0, lastGuide = '';
+let lastFacing = null, playFaceWarn = -1e9, orientFrom = 0, orientWaived = false;
 
 function guidance(){
   if(innerHeight > innerWidth)
@@ -1854,13 +1887,55 @@ function stepGuide(now){
     if(!guideOkSince) guideOkSince = now;
     if(now - guideOkSince > GUIDE_STABLE_MS){
       state = 'settle'; settleFrom = now;
-      sayNow('Good. Now get down onto your hands and feet, where you are.');
+      sayNow('Good. Now get down onto your hands and feet, side-on to the phone.');
       recPush({ k:'guide_done', t:now, torso:torsoNow() });
     }
   } else {
     guideOkSince = 0;
     if(g.say) say(g.say, { gap:5200 });
   }
+}
+
+/* The standing fit check passes while the player is still upright, and never
+   looks again. Hugo passed it, got down facing the phone, and nothing would
+   read - so the game told him he was fine and then could not score him. A gate
+   that runs once is not a gate. This one runs before the floor is read, again
+   through every calibration hold, and once more during the round. */
+function orientation(){
+  const f = bodyFacing(pose, read);
+  lastFacing = f;
+  if(!f) return { ok:false, big:'I CANNOT SEE YOUR HIPS',
+                  say:'I cannot see your hips. Shuffle until all of you is in the picture.' };
+  if(f.frontOn) return { ok:false, big:'TURN SIDE-ON',
+                  say:'Turn side-on to the phone. I need to see you from the side, not the front.' };
+  if(!f.sideOn) return { ok:false, big:'TURN A LITTLE MORE',
+                  say:'Almost. Turn a little further onto your side.' };
+  return { ok:true, big:'THAT IS IT', say:null };
+}
+
+function stepOrient(now){
+  const o = orientation();
+  if(o.ok){
+    if(!orientOkSince) orientOkSince = now;
+    if(now - orientOkSince > ORIENT_STABLE_MS){
+      recPush({ k:'orient_ok', t:now, spread: lastFacing ? +lastFacing.spread.toFixed(3) : null });
+      startCalibration(now);
+    }
+  } else {
+    orientOkSince = 0;
+    // The 0.40 bar is measured on a generated figure and has never been seen on
+    // a real body. If it is set wrong it would trap the player here with no way
+    // past, which is worse than not checking at all - so it gives up, says so,
+    // and records that it did. The override is always on, as everywhere else.
+    if(now - orientFrom > ORIENT_GIVEUP_MS){
+      orientWaived = true;
+      recPush({ k:'orient_waived', t:now, spread: lastFacing ? +lastFacing.spread.toFixed(3) : null });
+      sayNow('I still cannot tell which way you are facing. Carrying on anyway, so treat the scores as rough.');
+      banner = { msg:'side-on check waived', until: now + 12000 };
+      startCalibration(now);
+    } else if(o.say) say(o.say);
+  }
+  return o;
 }
 
 function startCalibration(now){
@@ -1932,14 +2007,32 @@ function paint(now){
 
   if(state === 'settle' || state === 'calfail'){
     const left = Math.max(0, SETTLE_MS - (now - settleFrom));
-    bigText(['DOWN ONTO HANDS AND FEET', 'starting in '+Math.ceil(left/1000)]);
-    if(left <= 0) startCalibration(now);
+    bigText(['DOWN ONTO HANDS AND FEET', 'side-on to the phone \u2014 '+Math.ceil(left/1000)]);
+    if(left <= 0){
+      state = 'orient'; orientOkSince = 0; orientFrom = now;
+      sayNow('Now turn side-on, so I see you from the side and not the front.');
+    }
+    return;
+  }
+
+  if(state === 'orient'){
+    const o = stepOrient(now);
+    bigText([o.big, lastFacing ? 'side-on reading '+lastFacing.spread.toFixed(2)+'  (want under '+TUNE.FACE_SIDE+')'
+                               : 'looking for you'],
+            { col: o.ok ? '#7fd4a2' : '#e0b762' });
     return;
   }
 
   if(state === 'calibrating'){
     if(calIdx >= CAL_SEQ.length){ finishCalibration(now); return; }
     const cfg = byId[CAL_SEQ[calIdx]];
+    const o = orientation();
+    if(!o.ok && !orientWaived){
+      calHoldStart = now;                 // the hold does not count while he is turned
+      bigText([o.big, 'the floor reading needs you side-on'], { col:'#e07a62' });
+      if(o.say) say(o.say);
+      return;
+    }
     const frac = Math.min(1, (now - calHoldStart) / CAL_HOLD_MS);
     const bw = Math.min(300, W*0.26), bh = bw*0.7;
     drawConfigDiagram(cfg, W - bw - 18, H/2 - bh/2, bw, bh, 'rgba(224,183,98,0.95)', 7);
@@ -2053,7 +2146,11 @@ function drawHud(t, topH){
   }
 
   // what the game thinks you are in right now, always visible
-  if(bestNow){
+  const fac = bodyFacing(pose, read);
+  if(fac && fac.frontOn){
+    text('TURN SIDE-ON', 16, H-18, S*1.3, '#e07a62', 'left', 800);
+    if(t - playFaceWarn > 12000){ playFaceWarn = t; say('Turn side-on to the phone.', { gap:0 }); }
+  } else if(bestNow){
     text(byId[bestNow].name.toUpperCase()+'  '+Math.round(bestQ*100)+'%',
          16, H-18, S*1.1, bestQ >= TUNE.LOCK_FULL ? '#7fd4a2' : bestQ >= TUNE.LOCK_PART ? '#e0b762' : '#8c8679', 'left', 700);
   } else {
@@ -2069,7 +2166,8 @@ async function boot(){
   show(null);
   state = 'boot';
   initAudio(); initVoice(); resumeAudio();
-  sayNow('Starting the camera. Put the phone down on its side and step back.');
+  sayNow('Starting the camera. Put the phone down on its side, a couple of metres away, '
+       + 'and step back. You will be playing side-on to it.');
   try {
     await startCamera();
     await loadTracker();
@@ -2081,7 +2179,7 @@ async function boot(){
     return;
   }
   resize(); checkOrientation(); keepAwake();
-  state = 'guide'; guideOkSince = 0; calAttempt = 0;
+  state = 'guide'; guideOkSince = 0; orientOkSince = 0; calAttempt = 0; orientWaived = false;
   requestAnimationFrame(frame);
 }
 
@@ -2121,6 +2219,9 @@ function renderEnd(cleared){
   if(floorInfo) L.push('<p class="sub">floor at '+floorInfo.angle+'&deg;, spread '+
     floorInfo.spread.toFixed(1)+'&deg;, postures disagreeing by '+floorInfo.disagree.toFixed(1)+'&deg;'+
     ' · found on attempt '+(calAttempt+1)+'</p>');
+  if(orientWaived) L.push('<p class="warn">The side-on check never passed and was waived. '+
+    'Treat every number above as rough, and send the recording — the measured side-on '+
+    'reading is in it, and it is the number that bar was guessed from.</p>');
   const ids = roundCfgs.map(c=>c.id);
   const acc = {}; for(const a of ids){ acc[a] = {}; for(const b of ids) acc[a][b] = []; }
   for(const c of confusion){
@@ -2213,6 +2314,9 @@ window.__fp = {
   featsFromPose, reachReport, fitFloor, floorOf, makeReader, J,
   drawConfigDiagram, drawStructure, drawLoadMark, drawGhost, drawHud, text, pill, bigText,
   setState: s => { state = s; },
+  peekState: () => state,
+  peekFacing: () => lastFacing,
+  bodyFacing,
   peekState: () => state,
   fakeRound(r){ round = r-1; configureRound(r); buildExchanges();
     score=0; damage=0; exNo=0; results=[]; samples=[]; confusion=[]; transitions=[]; bracedMs=0;
