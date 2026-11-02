@@ -55,7 +55,8 @@
   /* The level buttons are deliberately large. Everything else in this game
      is read from a metre and a half away, and 11px type is exactly why the
      old legwork caption read as a mystery blue line. */
-  button.lvl{font-size:15px;letter-spacing:.1em;padding:10px 18px;
+  #lvlRow{flex-wrap:wrap;gap:8px}
+  button.lvl{font-size:14px;letter-spacing:.08em;padding:9px 15px;
     border-color:rgba(255,255,255,.22);color:var(--dim);background:transparent}
   button.lvl.on{border-color:var(--spark);color:var(--spark)}
   #lvlBlurb{font-size:13px;margin-top:-2px;color:var(--dim)}
@@ -136,6 +137,9 @@
   <div class="row" id="lvlRow">
     <button class="lvl on" data-lvl="0">1 &middot; ORIGINAL</button>
     <button class="lvl" data-lvl="1">2 &middot; SIDE STEP</button>
+    <button class="lvl" data-lvl="2">3 &middot; FOOTWORK</button>
+    <button class="lvl" data-lvl="3">4 &middot; RAIN</button>
+    <button class="lvl" data-lvl="4">5 &middot; THE MIX</button>
   </div>
   <p class="sub" id="lvlBlurb">Reach, across, and down.</p>
   <div class="row"><button id="bStart">Start</button></div>
@@ -484,9 +488,23 @@ function observe(pose, read, ar, scale, t){
   if(g.wrB) o.limbs.wrB = g.wrB;
   if(g.shA) o.anchors.wrA = g.shA;           // a hand sweeps about its shoulder
   if(g.shB) o.anchors.wrB = g.shB;
+  /* FEET ARE LIMBS TOO, for the targets that ask for them. A foot sweeps
+     about its HIP the way a hand sweeps about its shoulder, so the arc and
+     chord measures carry over unchanged. Measured on a real run at his
+     playing distance: both ankles visible in 100% of 5,225 in-run frames,
+     mean confidence 0.98 - this is not a landmark the camera struggles
+     with at this range. */
+  if(g.ankA) o.limbs.ankA = g.ankA;
+  if(g.ankB) o.limbs.ankB = g.ankB;
+  if(g.hipA) o.anchors.ankA = g.hipA;
+  if(g.hipB) o.anchors.ankB = g.hipB;
   o.readable = !!(o.hip && o.sh && (o.limbs.wrA || o.limbs.wrB));
   return o;
 }
+
+/* Which limbs may strike a given target. One definition, so the pass
+   search and the visibility test cannot disagree about what counts. */
+function limbsFor(def){ return def && def.foot ? ['ankA','ankB'] : ['wrA','wrB']; }
 
 /* Place a spark. The position is given in BODY FRAME — torso units from
    the player's own hip centre, gravity aligned, +x to screen right, +y up
@@ -707,7 +725,7 @@ function findPass(t, samples, win){
     return p ? idist(p, sparkPos(t, s.t), s.o.ar) / s.o.scale : null;
   };
   let hit = null, nearest = Infinity, everVisible = false;
-  for(const key of ['wrA','wrB']){
+  for(const key of limbsFor(t.def)){
     let k0 = -1, k1 = -1, exited = false;
     for(let k = 0; k < win.length; k++){
       const d = distAt(win[k], key);
@@ -817,7 +835,7 @@ function judgeTarget(t, samples){
        bug — it is a lie in the recording, and the recording is the only way
        any of this gets diagnosed from a real body. */
     let seen = true;
-    for(const key of ['wrA','wrB']){
+    for(const key of limbsFor(t.def)){
       let n = 0, last = null, maxGap = 0;
       for(const i of win){
         const s = samples[i];
@@ -923,7 +941,7 @@ function judgeTarget(t, samples){
   /* Scored against what THIS spark demands, taken from where it actually
      was when the hand arrived — it drifts, so its demand drifts with it. */
   const need = chordNeed(sparkBody(t, samples[entryI].t).bx,
-                         sparkBody(t, samples[entryI].t).by);
+                         sparkBody(t, samples[entryI].t).by, t.def.foot);
   const cAmp = zone(arc.chord, need.inAt, need.outAt);
   const sAmp = arc.sweep === null ? null : zone(arc.sweep, TUNE.SWEEP_IN, TUNE.SWEEP_OUT);
   // Amplitude takes the better of sweep and chord: a sweep straight along the
@@ -951,7 +969,13 @@ function judgeTarget(t, samples){
   const hip = hipTravel(samples, oi, entryI, sparkBody(t, samples[entryI].t));
   const legCredit = (hip && hip.toward !== null)
     ? zone(hip.toward, TUNE.LEG_FULL, TUNE.LEG_NONE) : null;
+  /* A FOOT SPARK IS LEGWORK BY DEFINITION. The hip-travel gate exists to
+     tell a lunge from a fold at the waist when the HAND does the striking.
+     When the foot is what reached the spark, the legs have demonstrably
+     done the work, and asking the hips to travel as well would fail an
+     honest kick for standing still - which is exactly what a kick is. */
   const legsOk = !t.legs ? null
+    : t.def.foot ? true
     : (legCredit !== null && legCredit >= TUNE.LEG_REP_CREDIT);
 
   /* ---------------------------------------------------------------- *
@@ -1028,7 +1052,14 @@ function judgeTarget(t, samples){
      their hips hold 83% of the score of one who did, and it paid nothing
      extra for a deep lunge over a bare one. Graded, and the strike alone is
      worth a quarter. */
-  if(points && t.legs) points = Math.round(points * (TUNE.LEG_STRIKE_SHARE
+  /* ...but NOT on a foot spark. Its legwork is the strike. Grading it on hip
+     credit it is not asked to earn paid an honest kick a QUARTER of the tier
+     - the same waiver missed for the third time in one feature: the gate
+     waived it, the session floor charged for it anyway, and the purse
+     graded on it anyway. In simulation that halved level 3's honest score
+     against level 1 for a player doing everything the level asked. */
+  if(points && t.legs && !t.def.foot)
+    points = Math.round(points * (TUNE.LEG_STRIKE_SHARE
                                + (1 - TUNE.LEG_STRIKE_SHARE) * (legCredit || 0)));
 
   return { verdict, why, chordNeeded:+need.inAt.toFixed(4), quality:+quality.toFixed(4),
@@ -1126,6 +1157,7 @@ function makeHipMeter(){
  * ------------------------------------------------------------------ */
 const DRIFT_MIN = 0.07;
 const DRIFT_MAX = 0.20;   // torso per second
+const FALL_DROP = 1.20;   // torsos a falling spark descends over its lifetime
 
 /* Centre to centre, for every pair of sparks alive at the same time, for
    the whole of their overlap. Two hit radii is 0.84, so at 1.10 no point in
@@ -1187,6 +1219,13 @@ const TIERS = {
 };
 const tierOf = def => def.legs ? TIERS.bloom
                     : (def.across ? TIERS.flare : TIERS.ember);
+
+/* Which sparks the SESSION legwork floor charges hip path for. One place,
+   because the harness used to carry its own copy of this rule and the two
+   disagreed the moment foot sparks were exempted: the game charged for 1
+   and the simulation charged for 5. A harness restating a rule is a harness
+   measuring a game that does not exist. */
+const countsForFloor = def => tierOf(def).id === 'bloom' && !def.foot;
 
 /* A drift that keeps the whole path inside the envelope the stance was
    derived from. A spark that drifted past |bx| 1.35 or by 2.05 would be
@@ -1256,20 +1295,31 @@ const ARM = { shX: 0.40, shY: 1.00, reach: 1.44 };
    untouched. */
 const CHORD_FRAC_IN = 0.55;
 const CHORD_FRAC_OUT = 0.22;
-function chordNeed(bx, by){
-  const rx = bx < 0 ? -REST_HAND.x : REST_HAND.x;
-  const full = Math.hypot(bx - rx, by - REST_HAND.y);
+/* Where a foot rests, in the same body frame: standing, slightly apart.
+   1.48 below the hip is MEASURED - his own hip-to-ankle median over 5,289
+   frames. A foot spark's chord is the distance the FOOT travels, so it has
+   to be measured from here and not from the resting hand. */
+const REST_FOOT = { x: 0.25, y: -1.48 };
+function chordNeed(bx, by, foot){
+  const R = foot ? REST_FOOT : REST_HAND;
+  const rx = bx < 0 ? -R.x : R.x;
+  const full = Math.hypot(bx - rx, by - R.y);
   return { inAt: full * CHORD_FRAC_IN, outAt: full * CHORD_FRAC_OUT, full };
 }
 
+/* The limb this spark is struck with decides which rest position the chord
+   is measured from. It used to read REST_HAND for everything, which was
+   harmless only because the one path that could reach it with a foot spark
+   returned before getting here. Harmless-by-accident is not a check. */
 function chordKeeps(def, vx, vy, life){
+  const R = def.foot ? REST_FOOT : REST_HAND;
   const secs = life / 1000;
   for(let k = 0; k <= 16; k++){
     const u = secs * (k / 16);
     const bx = def.bx + vx * u, by = def.by + vy * u;
-    const rx = bx < 0 ? -REST_HAND.x : REST_HAND.x;
-    // too close to the resting hand: no chord left to measure
-    if(Math.hypot(bx - rx, by - REST_HAND.y) < TUNE.CHORD_IN) return false;
+    const rx = bx < 0 ? -R.x : R.x;
+    // too close to the resting limb: no chord left to measure
+    if(Math.hypot(bx - rx, by - R.y) < TUNE.CHORD_IN) return false;
     // too far from the shoulder: an arms tier that needs legs is a lie
     if(!def.legs){
       const sx = bx < 0 ? -ARM.shX : ARM.shX;
@@ -1300,6 +1350,39 @@ function driftFor(def, life, rnd){
      simply does not drift, which is always valid — a still spark is the
      thing every number in this project was measured against. Falling back
      to no drift is the safe failure. */
+  /* A FOOT SPARK DOES NOT DRIFT. Its chord is measured from the resting
+     foot and its reach envelope is the leg, neither of which the drift
+     validator knows about, so the safe answer is the one every number in
+     this project was measured against: a still spark. */
+  if(def.foot) return { vx:0, vy:0 };
+
+  /* FALLING SPARKS fall, rather than wandering. The speed is chosen so the
+     whole descent fits the lifetime and lands inside the envelope the fit
+     gate already made room for - FALL_DROP torsos over the spark's life,
+     clamped like any other drift. Slow on purpose: the camera is 150-250 ms
+     late, so a spark the player has to react to would be unfair. At
+     FALL_DROP/life the offset latency costs is about 0.06 torso against a
+     0.42 radius, and scoring reads capture time anyway, so it cancels. */
+  /* FALLING SPARKS used to return from here WITHOUT being validated, which
+     meant the 0.80 chord floor - whose only caller is tryDrift, below -
+     never ran on them. It mattered: four of RAIN's six and both of THE
+     MIX's finished their descent 0.655-0.665 from the resting hand, inside
+     the band the floor exists to reject, where an honest catch has almost
+     no travel left to measure and a late one is nearly free.
+
+     So the descent is now shortened until the WHOLE path clears the floor,
+     which is what chordKeeps already checks and simply never saw. The room
+     clamp stays: both have to hold. FALL_DROP is the ask, not the promise. */
+  if(def.fall){
+    const roomY = def.by - L.byLo;
+    let drop = Math.min(FALL_DROP, roomY);
+    for(; drop > 0; drop -= 0.02){
+      const vy = -drop / secs;
+      if(chordKeeps(def, 0, vy, life)) return { vx: 0, vy };
+    }
+    return { vx: 0, vy: 0 };
+  }
+
   for(let attempt = 0; ; attempt++){
     const d = tryDrift(def, life, L, secs, rnd || Math.random);
     if(d) return d;
@@ -1453,9 +1536,68 @@ const FIELDS = [
       { id:'low-R',   name:'LOW RIGHT',   bx: 1.35, by:-0.90, legs:true },
       { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
     ] },
+  { id:3, name:'FOOTWORK', blurb:'The low ones want a foot, not a hand.',
+    targets: [
+      { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
+      { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
+      { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
+      { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
+      { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
+      { id:'wide-L',  name:'WIDE LEFT',   bx:-1.55, by: 0.70, legs:false },
+      { id:'wide-R',  name:'WIDE RIGHT',  bx: 1.55, by: 0.70, legs:false },
+      { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.20, legs:false },
+      { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
+      { id:'kick-L',  name:'KICK LEFT',   bx:-1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
+      { id:'kick-R',  name:'KICK RIGHT',  bx: 1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
+      { id:'toe-L',   name:'TOE LEFT',    bx:-1.15, by:-1.20, legs:true, foot:true, cue:'FOOT' },
+      { id:'toe-R',   name:'TOE RIGHT',   bx: 1.15, by:-1.20, legs:true, foot:true, cue:'FOOT' },
+      { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+    ] },
+  { id:4, name:'RAIN', blurb:'They fall. Catch them on the way down.',
+    targets: [
+      { id:'rain-A',  name:'RAIN 1',      bx:-1.20, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-B',  name:'RAIN 2',      bx:-0.70, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-C',  name:'RAIN 3',      bx:-0.25, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-D',  name:'RAIN 4',      bx: 0.25, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-E',  name:'RAIN 5',      bx: 0.70, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-F',  name:'RAIN 6',      bx: 1.20, by: 1.50, legs:false, across:true, fall:true },
+      { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
+      { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
+      { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
+      { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.20, legs:false },
+      { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
+      { id:'side-L',  name:'SIDE LEFT',   bx:-1.65, by:-0.55, legs:true },
+      { id:'side-R',  name:'SIDE RIGHT',  bx: 1.65, by:-0.55, legs:true },
+      { id:'low-L',   name:'LOW LEFT',    bx:-1.35, by:-0.90, legs:true },
+      { id:'low-R',   name:'LOW RIGHT',   bx: 1.35, by:-0.90, legs:true },
+      { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+    ] },
+  { id:5, name:'THE MIX', blurb:'A bit of everything. The hardest one.',
+    targets: [
+      { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
+      { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
+      { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
+      { id:'rain-L',  name:'RAIN LEFT',   bx:-0.70, by: 1.50, legs:false, across:true, fall:true },
+      { id:'rain-R',  name:'RAIN RIGHT',  bx: 0.70, by: 1.50, legs:false, across:true, fall:true },
+      { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
+      { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
+      { id:'step-L',  name:'STEP LEFT',   bx:-2.26, by: 0.90, legs:true, cue:'STEP' },
+      { id:'step-R',  name:'STEP RIGHT',  bx: 2.26, by: 0.90, legs:true, cue:'STEP' },
+      { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.20, legs:false },
+      { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
+      { id:'side-L',  name:'SIDE LEFT',   bx:-1.65, by:-0.55, legs:true },
+      { id:'side-R',  name:'SIDE RIGHT',  bx: 1.65, by:-0.55, legs:true },
+      { id:'kick-L',  name:'KICK LEFT',   bx:-1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
+      { id:'kick-R',  name:'KICK RIGHT',  bx: 1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
+      { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+    ] },
 ];
 let LEVEL = 0;
 let TARGETS = FIELDS[0].targets;
+/* lastPick lives here, beside setLevel, because setLevel clears it: a
+   target carried over from another field would otherwise steer the first
+   choice of the new run. */
+let lastPick = null;
 function setLevel(i){ LEVEL = i; TARGETS = FIELDS[i].targets; lastPick = null; }
 
 /* How far back the player has to stand, COMPUTED from the sparks above rather
@@ -1482,7 +1624,12 @@ function stanceLimits(ar){
   /* 1.57 is hip->ankle at p90, MEASURED over 5,289 frames of his own legs.
      The 1.74 it replaces was nominal and cost 0.17 torsos of room nothing
      ever used. */
-  const need = (byHi + TUNE.HIT_R) + FEET_BELOW;   // torso units of total room
+  /* Below the hip, the room needed is whichever is deeper: the player's own
+     feet, or the lowest spark plus its radius. Until foot sparks existed
+     byLo was -1.15 and |byLo|+HIT_R came to exactly FEET_BELOW, so taking
+     only the feet happened to be right and the bug was invisible. A foot
+     spark at by -1.40 needs 1.82 and would have been drawn off the bottom. */
+  const need = (byHi + TUNE.HIT_R) + Math.max(FEET_BELOW, Math.abs(byLo) + TUNE.HIT_R);
   const tMaxV = (1 - 2*SPARK_MARGIN) / need;
   /* Lateral. placeTarget puts a spark at hip.x + bx*torso/ar, so one torso
      spans torso/ar of the WIDTH, not torso*ar: on a 4:3 frame a torso is a
@@ -1528,7 +1675,7 @@ function onScreenAt(at, o, frac){
 function hipWindow(torso){
   const L = stanceLimits();
   return { lo: SPARK_MARGIN + (L.byHi + TUNE.HIT_R) * torso,
-           hi: 1 - SPARK_MARGIN - FEET_BELOW * torso };
+           hi: 1 - SPARK_MARGIN - Math.max(FEET_BELOW, Math.abs(L.byLo) + TUNE.HIT_R) * torso };
 }
 /* Does this body, where it is standing, leave room for every spark? */
 function stanceOk(o){
@@ -1640,7 +1787,7 @@ let POSE_LATENCY_MS = 200;
 let clockOffset = null;          // performance-ms minus capture-ms
 
 /* ================= the game ================= */
-const BUILD = 'sparks-close-2';   // so a recording says which field it came from
+const BUILD = 'sparks-close-3';   // so a recording says which field it came from
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -1835,7 +1982,6 @@ const armPool = () => TARGETS.filter(t => !t.legs);
 /* Which spark comes next. Never the same one twice running, and never the
    same side twice running when there is a choice, because two sparks on one
    side is a reach and then another reach, while alternating is travel. */
-let lastPick = null;
 function pickSpark(legShare){
   const pool = (Math.random() < legShare ? legPool() : armPool());
   const side = lastPick ? Math.sign(lastPick.bx) : 0;
@@ -1945,7 +2091,15 @@ function spawnTarget(entry){
 
   sparkNo++;
   const tier = tierOf(entry.def);
-  if(tier.id === 'bloom') legShown++;
+  /* The session legwork floor is a debt of HIP PATH, so only a spark whose
+     legwork is measured as hip travel may add to it. A foot spark is exempt
+     from the hip gate by design - and a kick moves the pelvis almost not at
+     all - so counting one here charged the player for travel the level
+     never asked them to make. In simulation an honest kicker cleared all 14
+     of level 3 and still failed the floor at mult 0.88, penalised for doing
+     exactly what the level wanted. The two halves of one rule have to
+     agree: waived per spark, waived per session. */
+  if(countsForFloor(entry.def)) legShown++;
   const t = Object.assign(
     makeSpark(entry.def, o, { life, lightAt, drift:{ vx:cand.vx, vy:cand.vy },
                               tier, finale: entry.finale }),
@@ -2987,7 +3141,7 @@ document.getElementById('bRec').addEventListener('click', () => {
 window.__SPARKS__ = { TUNE, TARGETS, LIFETIME_MS, GAP_MS, J, makeReader, observe, placeTarget,
                       stanceLimits, hipWindow, stanceOk,
                       velocityAt, findOnset, arcBetween, hipTravel, judgeTarget,
-                      makeHipMeter, iso, idist, iang, zone, rec };
+                      makeHipMeter, countsForFloor, iso, idist, iang, zone, rec };
 </script>
 </body>
 </html>
