@@ -23,12 +23,12 @@
             max(14px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));
     background:var(--bg); overflow-y:auto; z-index:5; }
   .screen.on{ display:flex; }
-  h1{ font-size:clamp(22px,4.4vw,34px); margin:0 0 2px; letter-spacing:.02em; font-weight:650; }
+  h1{ font-size:clamp(26px,5vw,40px); margin:0 0 2px; letter-spacing:.02em; font-weight:650; }
   h2{ font-size:clamp(14px,2.2vw,17px); margin:16px 0 6px; color:var(--dim);
       font-weight:600; text-transform:uppercase; letter-spacing:.09em; }
-  p{ margin:5px 0; line-height:1.45; font-size:clamp(13px,2vw,15px); color:#cdc7ba; }
-  .sub{ color:var(--dim); font-size:clamp(12px,1.8vw,14px); }
-  button{ font:inherit; font-size:clamp(15px,2.4vw,18px); font-weight:620; color:#10131a;
+  p{ margin:6px 0; line-height:1.5; font-size:clamp(15px,2.3vw,18px); color:#cdc7ba; }
+  .sub{ color:var(--dim); font-size:clamp(13px,2vw,16px); }
+  button{ font:inherit; font-size:clamp(17px,2.8vw,21px); font-weight:620; color:#10131a;
     background:var(--ink); border:0; border-radius:11px; padding:14px 22px; margin:6px 8px 6px 0;
     cursor:pointer; }
   button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
@@ -37,8 +37,8 @@
   .cols{ display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; }
   .col{ flex:1 1 320px; min-width:280px; }
 
-  table{ border-collapse:collapse; margin:8px 0; font-size:clamp(11px,1.7vw,13px); }
-  th,td{ border:1px solid var(--line); padding:5px 8px; text-align:center; }
+  table{ border-collapse:collapse; margin:8px 0; font-size:clamp(13px,1.9vw,15px); }
+  th,td{ border:1px solid var(--line); padding:7px 10px; text-align:center; }
   th{ color:var(--dim); font-weight:600; }
   td.F{ color:var(--good); font-weight:700; } td.P{ color:var(--part); }
   td.X{ color:#6b6459; } th.rowh{ text-align:left; color:var(--ink); font-weight:600; }
@@ -97,46 +97,18 @@ so the camera can see you from your hands to your feet.</p></div></div>
       exactly one load and fails the other two, so there is no posture to hide in.</p>
       <div id="t1"></div>
       <p class="sub">Later rounds use all six, where some postures partly carry a load
-      instead of failing it outright.</p>
-    </div>
-  </div>
-  <div class="row"><button id="bGo">Set up the camera</button></div>
-</div>
-
-<div id="sSetup" class="screen">
-  <h1>Setup</h1>
-  <div class="cols">
-    <div class="col">
-      <div id="fitline" class="sub">starting the camera…</div>
-      <h2>Finding the floor</h2>
-      <p class="sub">The game has no idea which way up the room is. It works that out from
-      your own hands and feet, by watching you hold a few shapes. Everything it scores
-      afterwards is measured against that line, so this part matters more than it looks.</p>
-      <div id="calchips" class="cal"></div>
-      <div id="calbar"><i></i></div>
-      <div id="calmsg" class="sub">&nbsp;</div>
-      <div class="row">
-        <button id="bCal">Start the floor check</button>
-        <button id="bSkipCal" class="ghost">Skip it</button>
-        <button id="bAssist" class="ghost">Prompts: round one only</button>
-      </div>
-      <p class="sub">Skipping is allowed and always will be. The check is advice, not a lock
-      — but a floor line more than about seven degrees out costs a clean hold, measured,
-      so a skipped check means scores you should not trust.</p>
-    </div>
-    <div class="col">
-      <h2>What it found</h2>
-      <div id="calreport" class="results sub">nothing yet.</div>
-      <h2>The full table</h2>
-      <p class="sub">Round one names the posture that answers each load while you
-      learn it. After that it only names the load, and when something gives way it
-      tells you what would have held — so the table gets learned by playing it.
-      This is the whole thing, for studying.</p>
+      instead of failing it outright. Round one names the posture that answers each load
+      while you learn it; after that it names only the load, and when something gives way
+      it tells you what would have held.</p>
       <div id="t2"></div>
     </div>
   </div>
-  <div class="row"><button id="bStart">Start the round</button>
-  <button id="bBack" class="ghost">Back</button></div>
+  <div class="row">
+    <button id="bGo">Start</button>
+    <button id="bVoice" class="ghost">Voice: on</button>
+    <button id="bAssist" class="ghost">Prompts: round one only</button>
+  </div>
+  <p class="sub">Put the phone down as soon as you have tapped. It waits for you.</p>
 </div>
 
 <div id="sEnd" class="screen">
@@ -1233,6 +1205,54 @@ function stopBed(){
   bed = null; bedGain = null;
 }
 
+/* ================= the voice =================
+   Hugo cannot read phone-sized text from where he plays, and in this game he is
+   often face down or face up on the floor with the screen out of view entirely.
+   So the voice is not an accessibility extra here: for a good part of a round it
+   is the only channel that reaches him. Everything the screen says, it says.
+
+   Web Speech, no files, no dependency. It needs a user gesture before it will
+   speak, which the single tap that starts the camera provides. */
+
+let voiceOn = true, voicePick = null, lastSaid = '', lastSaidAt = -1e9;
+
+function initVoice(){
+  if(!('speechSynthesis' in window)) { voiceOn = false; return; }
+  const pick = () => {
+    const vs = speechSynthesis.getVoices() || [];
+    voicePick = vs.find(v => /en[-_]GB/i.test(v.lang) && v.localService)
+             || vs.find(v => /^en/i.test(v.lang) && v.localService)
+             || vs.find(v => /^en/i.test(v.lang))
+             || vs[0] || null;
+  };
+  pick();
+  speechSynthesis.onvoiceschanged = pick;        // Android loads these late
+  // some browsers need one utterance inside the gesture before they will speak
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch(e){}
+}
+
+/* `gap` is how long the same line must wait before it may repeat, so the guidance
+   does not become a stuck record while the player shuffles about. `cut` stops
+   whatever is mid-sentence, for the lines that must land now. */
+function say(text, opt){
+  const o = opt || {};
+  if(!voiceOn || !text) return;
+  const now = performance.now();
+  const gap = o.gap === undefined ? 5000 : o.gap;
+  if(text === lastSaid && now - lastSaidAt < gap) return;
+  lastSaid = text; lastSaidAt = now;
+  try {
+    if(o.cut) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if(voicePick) u.voice = voicePick;
+    u.rate = o.rate || 1.0; u.pitch = 1.0; u.volume = 1.0;
+    speechSynthesis.speak(u);
+    recPush({ k:'say', t:nowClock(), text });
+  } catch(e){}
+}
+function sayNow(text){ say(text, { cut:true, gap:0 }); }
+function hush(){ try { speechSynthesis.cancel(); } catch(e){} lastSaid=''; }
+
 /* ================= drawing =================
    Landscape. The camera picture sits underneath, dimmed; the player's own
    skeleton is drawn over it so they can see what the game can see; the
@@ -1492,11 +1512,7 @@ function pill(x, y, w, h, frac, col, bgcol){
 const TELE_MS    = 1700;      // the load announces itself
 const COMMIT0    = 2800;      // window to get there, first exchange
 const COMMIT1    = 1900;      // and by the last one
-const RESOLVE_MS = 1150;
-const COUNTIN_MS = 8000;      // long on purpose: the player has to get down onto
-                              // the floor after tapping, and in Sparks a round
-                              // that began on the tap scored the player bent over
-                              // the phone
+const RESOLVE_MS = 1600;      // long enough for the voice to finish the verdict
 
 let state = 'idle';
 let round = 0, score = 0, damage = 0, exNo = 0, exchanges = [], ex = null;
@@ -1512,7 +1528,6 @@ let countFrom = 0, maskUntil = 0, banner = null;
 let assist = true, assistPref = 'auto';
 
 const CAL_SEQ = ['FOREARM','ANCHOR','SPAN'];       // the three round-one postures
-const CAL_HOLD_MS = 2600;
 const byId = {}; for(const c of CONFIGS) byId[c.id] = c;
 const loadById = {}; for(const l of LOADS) loadById[l.id] = l;
 
@@ -1558,14 +1573,15 @@ function startRound(){
   score = 0; damage = 0; exNo = 0; results = []; samples = [];
   transitions = []; bracedMs = 0; confusion = []; ex = null;
   fps = { n:0, t0:performance.now(), poseN:0 };
-  state = 'countin'; countFrom = nowClock();
+  state = 'play';
   show(null); checkOrientation();
-  initAudio(); resumeAudio(); startBed(); keepAwake();
+  resumeAudio(); startBed(); keepAwake();
   recPush({ k:'round_start', t:nowClock(), round, n:roundN, assist,
             configs:roundCfgs.map(c=>c.id), loads:roundLoads, budget,
             table:roundTable, latencyAssumed:POSE_LATENCY_MS,
             floor: floor ? { angle:+floorAngle(floor).toFixed(2), resid:+(floor.resid).toFixed(5),
                              spread:+(floor.angSpread||0).toFixed(2), count:floor.count } : null });
+  nextExchange();
 }
 
 function nextExchange(){
@@ -1579,6 +1595,13 @@ function nextExchange(){
   const f0 = lastFeatures();
   ex.openedF = f0 ? f0.f : null;
   playTelegraph(spec.load, TELE_MS);
+  const ld = loadById[spec.load];
+  if(assist){
+    const want = answerFor(spec.load);
+    sayNow((ld?ld.name:spec.load) + (want ? '. ' + want.name : ''));
+  } else {
+    sayNow(ld ? ld.name : spec.load);
+  }
   recPush({ k:'exchange_open', t, no:ex.no, load:spec.load, commitMs:spec.commitMs,
             lockAt:ex.lockAt, judgeAt:ex.judgeAt });
   exNo++;
@@ -1608,12 +1631,20 @@ function doJudge(){
     ex.resolved = { outcome:null, damage:0, points:0, unscored:true };
     ex.heldId = null;
     unscoredSound();
+    sayNow('I lost sight of you. That one does not count against you.');
   } else {
     ex.judged = bestJudge; ex.heldId = bestCfg.id;
     ex.resolved = resolve(ex.load, bestCfg.id, bestJudge, roundTable);
     score += ex.resolved.points;
     damage += ex.resolved.damage;
     outcomeSound(ex.resolved.outcome);
+    const o = ex.resolved.outcome;
+    let line = o === 'F' ? 'It holds.' : o === 'P' ? 'It strains.' : 'It gives.';
+    if(o !== 'F'){
+      const want = answerFor(ex.load);
+      if(want) line += ' ' + want.name + ' holds that one.';
+    }
+    sayNow(line);
   }
   bedLevel(Math.min(1, damage/budget));
   results.push({ no:ex.no, load:ex.load, held:ex.heldId,
@@ -1639,6 +1670,7 @@ function doJudge(){
 function endRound(){
   const cleared = damage <= budget && exNo >= exchanges.length;
   state = 'over'; ex = null; stopBed();
+  sayNow(cleared ? 'It held. Round complete.' : 'It came down.');
   recPush({ k:'round_end', t:nowClock(), round, cleared, score, damage,
             exchanges:results.length, transitions:transitions.length,
             bracedMs:Math.round(bracedMs), confusion,
@@ -1687,7 +1719,8 @@ function onFreshPose(clockT, wall){
 
   if(state === 'calibrating'){
     collectFloorPoints(calPoints);
-    if(calIdx < CAL_SEQ.length) collectFloorPoints(calPerPose[calIdx].pts);
+    if(calIdx < CAL_SEQ.length && calPerPose[calIdx]) collectFloorPoints(calPerPose[calIdx].pts);
+    if(torso) calTorsos.push(torso);
     return;
   }
   if(!floor || !pose || !torso) { lastFV = null; return; }
@@ -1731,66 +1764,209 @@ function onFreshPose(clockT, wall){
   lastFrameClock = clockT;
 }
 
-/* ================= painting each state ================= */
-function paintWaiting(){
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
-  text('starting the camera…', W/2, H/2, 16, '#8c8679', 'center');
+/* ================= big text, read from across the room ================= */
+function bigText(lines, opt){
+  const o = opt || {};
+  const cx = W/2, base = Math.min(W, H*1.9);
+  const h1 = Math.round(base * (o.scale || 0.062));
+  const h2 = Math.round(h1 * 0.52);
+  const arr = Array.isArray(lines) ? lines : [lines];
+  let y = o.y === undefined ? H*0.42 : o.y;
+  ctx.save();
+  ctx.textAlign = 'center';
+  // a slab behind the words: the camera picture underneath is busy, and this is
+  // the one thing on screen that has to be readable from the far side of a room
+  const widest = arr.reduce((m,l,i) => {
+    ctx.font = (i===0?800:600)+' '+(i===0?h1:h2)+'px ui-sans-serif,system-ui,sans-serif';
+    return Math.max(m, ctx.measureText(l.replace(/\*/g,'')).width);
+  }, 0);
+  const boxH = h1*1.25 + (arr.length-1)*h2*1.45 + h1*0.5;
+  ctx.fillStyle = 'rgba(11,13,16,0.78)';
+  ctx.beginPath();
+  ctx.roundRect(cx - widest/2 - h1*0.5, y - h1*0.95, widest + h1, boxH, h1*0.3);
+  ctx.fill();
+  arr.forEach((l,i) => {
+    const big = i===0;
+    ctx.font = (big?800:600)+' '+(big?h1:h2)+'px ui-sans-serif,system-ui,sans-serif';
+    ctx.fillStyle = big ? (o.col || '#e9e4d8') : '#cdc7ba';
+    ctx.fillText(l, cx, y);
+    y += big ? h1*1.15 : h2*1.45;
+  });
+  ctx.restore();
 }
 
+function paintWaiting(){
+  ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+  bigText(['STARTING THE CAMERA','put the phone down and step back']);
+}
+
+/* ================= the guided, hands-free setup =================
+   Hugo cannot read phone-sized text from where he plays, and he cannot tap a
+   button and still be in position when the round starts - walking to the phone
+   is how you lose the pose the game is about to score. So after one tap for the
+   camera, nothing here needs touching: it talks him into frame, finds the floor,
+   counts him in and begins.
+
+   Guidance never says left or right. A mirrored picture makes that easy to get
+   backwards, and a confident wrong direction is worse than none. It names the
+   part of him it cannot see instead, which is true whichever way the image runs. */
+
+const GUIDE_STABLE_MS = 1800;     // frame must stay good this long before moving on
+const SETTLE_MS       = 6000;     // time to get down onto the floor
+const CAL_HOLD_MS     = 3200;     // each calibration posture
+const COUNTIN_MS      = 5000;
+
+let guideOkSince = 0, settleFrom = 0, calAttempt = 0, lastGuide = '';
+
+function guidance(){
+  if(innerHeight > innerWidth)
+    return { ok:false, big:'TURN THE PHONE SIDEWAYS', say:'Turn the phone on its side and lean it on something.' };
+  const t = torsoNow();
+  if(!t) return { ok:false, big:'I CANNOT SEE YOU',
+                  say:'I cannot see you. Step back until the camera can see all of you.' };
+  // name what is missing, never a direction
+  const want = [['your hands',[J.wrA,J.wrB]], ['your feet',[J.ankA,J.ankB]],
+                ['your hips',[J.hipA,J.hipB]], ['your head',[J.nose]]];
+  const missing = want.filter(([, ids]) => !ids.some(i => read(pose, i))).map(([n]) => n);
+  if(missing.length){
+    const list = missing.length===1 ? missing[0]
+               : missing.slice(0,-1).join(', ')+' or '+missing[missing.length-1];
+    return { ok:false, big:'I CANNOT SEE '+missing[0].toUpperCase(),
+             say:'I cannot see '+list+'. Step back a little.' };
+  }
+  if(t > 0.26) return { ok:false, big:'STEP BACK', say:'Step back. You are too close.' };
+  if(t < 0.095) return { ok:false, big:'COME CLOSER', say:'Come a little closer.' };
+  const fr = bodyInFrame();
+  if(fr.edge) return { ok:false, big:'SHIFT ACROSS',
+                       say:'You are right at the edge of the picture. Shift across a little.' };
+  return { ok:true, big:'I CAN SEE ALL OF YOU', say:null };
+}
+
+function stepGuide(now){
+  const g = guidance();
+  lastGuide = g.big;
+  if(g.ok){
+    if(!guideOkSince) guideOkSince = now;
+    if(now - guideOkSince > GUIDE_STABLE_MS){
+      state = 'settle'; settleFrom = now;
+      sayNow('Good. Now get down onto your hands and feet, where you are.');
+      recPush({ k:'guide_done', t:now, torso:torsoNow() });
+    }
+  } else {
+    guideOkSince = 0;
+    if(g.say) say(g.say, { gap:5200 });
+  }
+}
+
+function startCalibration(now){
+  calPoints = []; calTorsos = []; calIdx = 0;
+  calPerPose = CAL_SEQ.map(id => ({ id, pts:[] }));
+  calHoldStart = now;
+  state = 'calibrating';
+  sayCalPosture(0);
+  recPush({ k:'cal_start', t:now, attempt:calAttempt+1, sequence:CAL_SEQ });
+}
+function sayCalPosture(i){
+  const c = byId[CAL_SEQ[i]];
+  sayNow((i===0 ? 'First, ' : 'Now ') + c.cue + '. Hold it.');
+}
+
+function finishCalibration(now){
+  calTorsos.sort((a,b)=>a-b);
+  // Median by SCALE over readable frames, not a time median. Doc 14 lesson 9: a
+  // time-median frame landed on a collapsed estimate with the body below the
+  // bottom edge and reported the player's scale as five times its real value.
+  const torso = calTorsos.length ? calTorsos[Math.floor(calTorsos.length/2)] : null;
+  const r = torso ? acceptFloor(torso) : { ok:false, why:'I never saw your shoulders and hips together' };
+  floorInfo = r.info || null;
+  recPush({ k:'calibration', t:now, attempt:calAttempt+1, ok:r.ok, why:r.why||null,
+            info:floorInfo, torsoSamples:calTorsos.length, points:calPoints.length });
+  if(r.ok){
+    floor = r.floor;
+    sayNow('Floor found. Here we go.');
+    beginCountin(now);
+    return;
+  }
+  calAttempt++;
+  if(calAttempt < 2){
+    sayNow('I did not get a clean read of the floor. Let us try that once more.');
+    state = 'calfail'; settleFrom = now;
+    return;
+  }
+  // The override is always there. A round with no floor cannot be scored at all,
+  // so one is estimated and the player is told plainly that it is a guess.
+  if(torso){ floor = fitFloor(calPoints, torso); }
+  if(!floor && torso){ const pts=[]; collectFloorPoints(pts); floor = fitFloor(pts.concat(pts), torso); }
+  sayNow('I could not pin the floor down. I will use my best guess, so treat the scores as rough.');
+  banner = { msg:'playing with a guessed floor line', until: now + 9000 };
+  beginCountin(now);
+}
+
+function beginCountin(now){ state = 'countin'; countFrom = now; countSaid = -1; configureRound(round+1); }
+let countSaid = -1;
+
+/* ================= painting each state ================= */
 function paint(now){
   ctx.clearRect(0,0,W,H);
   if(state === 'idle' || state === 'over'){ ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H); return; }
 
-  if(state === 'setup' || state === 'calibrating'){
-    drawVideo(0.34); drawFloor(); drawSkeleton(0.95);
-    if(state === 'calibrating' && calIdx < CAL_SEQ.length){
-      const cfg = byId[CAL_SEQ[calIdx]];
-      const bw = Math.min(260, W*0.3), bh = Math.min(190, H*0.42);
-      ctx.save(); ctx.fillStyle='rgba(11,13,16,0.78)';
-      ctx.beginPath(); ctx.roundRect(W-bw-16, 16, bw, bh+54, 12); ctx.fill(); ctx.restore();
-      drawConfigDiagram(cfg, W-bw-16, 32, bw, bh, 'rgba(224,183,98,0.95)', 6);
-      text(cfg.name.toUpperCase(), W-bw-16+bw/2, bh+68, 17, '#e9e4d8', 'center', 700);
-      const frac = Math.min(1,(nowClock()-calHoldStart)/CAL_HOLD_MS);
-      pill(W-bw-6, bh+80, bw-20, 7, frac, 'rgba(127,212,162,0.95)');
-      text(cfg.cue, 18, H-20, 15, '#cdc7ba');
-      text('hold it — '+(calIdx+1)+' of '+CAL_SEQ.length, 18, H-44, 13, '#8c8679');
+  drawVideo(state === 'play' ? 0.52 : 0.34);
+  drawFloor();
+  if(state !== 'play') drawSkeleton(0.95);
+
+  if(state === 'boot'){ bigText(['STARTING UP','put the phone down and step back']); return; }
+
+  if(state === 'guide'){
+    stepGuide(now);
+    const g = guidance();
+    bigText([g.big, g.ok ? 'hold still' : 'the phone is listening, not waiting for a tap'],
+            { col: g.ok ? '#7fd4a2' : '#e0b762' });
+    return;
+  }
+
+  if(state === 'settle' || state === 'calfail'){
+    const left = Math.max(0, SETTLE_MS - (now - settleFrom));
+    bigText(['DOWN ONTO HANDS AND FEET', 'starting in '+Math.ceil(left/1000)]);
+    if(left <= 0) startCalibration(now);
+    return;
+  }
+
+  if(state === 'calibrating'){
+    if(calIdx >= CAL_SEQ.length){ finishCalibration(now); return; }
+    const cfg = byId[CAL_SEQ[calIdx]];
+    const frac = Math.min(1, (now - calHoldStart) / CAL_HOLD_MS);
+    const bw = Math.min(300, W*0.26), bh = bw*0.7;
+    drawConfigDiagram(cfg, W - bw - 18, H/2 - bh/2, bw, bh, 'rgba(224,183,98,0.95)', 7);
+    bigText([cfg.name.toUpperCase(), cfg.cue], { y:H*0.30, col:'#e0b762' });
+    pill(W*0.25, H*0.72, W*0.5, 16, frac, 'rgba(127,212,162,0.95)');
+    text((calIdx+1)+' of '+CAL_SEQ.length, W/2, H*0.72 - 18, 22, '#8c8679', 'center', 700);
+    if(frac >= 1){
+      calIdx++; calHoldStart = now;
+      if(calIdx < CAL_SEQ.length) sayCalPosture(calIdx); else finishCalibration(now);
     }
     return;
   }
 
   if(state === 'countin'){
-    drawVideo(0.42); drawFloor(); drawSkeleton(0.95);
-    const left = Math.max(0, COUNTIN_MS - (nowClock()-countFrom));
+    const left = Math.max(0, COUNTIN_MS - (now - countFrom));
     const s = Math.ceil(left/1000);
-    text(String(s), W/2, H/2+26, Math.min(130, H*0.4), '#e9e4d8', 'center', 700);
-    text('get down onto your hands and feet', W/2, H/2+72, 17, '#cdc7ba', 'center');
-    const n = roundCfgs.length, bw = Math.min(150, W/(n+1)), bh = bw*0.72;
-    for(let i=0;i<n;i++){
-      const x = W/2 - (n*bw + (n-1)*12)/2 + i*(bw+12);
-      drawConfigDiagram(roundCfgs[i], x, 18, bw, bh, 'rgba(140,134,121,0.9)', 4);
-      text(roundCfgs[i].name, x+bw/2, bh+34, 12, '#8c8679', 'center');
-    }
-    if(left <= 0){ state='play'; nextExchange(); }
+    if(s !== countSaid && s <= 3 && s >= 1){ countSaid = s; say(String(s), { cut:false, gap:0 }); }
+    bigText([String(s), 'brace yourself'], { scale:0.16 });
+    if(left <= 0){ state='play'; startRound(); }
     return;
   }
 
   /* ---- playing ---- */
-  const t = nowClock();
-  drawVideo(0.52);
-  drawFloor();
-
+  const t = now;
   if(ex){
-    // phase bookkeeping
-    if(ex.phase === 'telegraph' && t >= ex.commitAt){ ex.phase = 'commit'; }
+    if(ex.phase === 'telegraph' && t >= ex.commitAt) ex.phase = 'commit';
     if(ex.phase === 'commit' && t >= ex.lockAt){ ex.phase = 'locking'; lockBeat(); }
-    if(ex.phase === 'locking' && t >= ex.judgeAt){ doJudge(); }
+    if(ex.phase === 'locking' && t >= ex.judgeAt) doJudge();
     if(ex.phase === 'resolve' && t >= ex.resolveAt + RESOLVE_MS){
       if(damage > budget){ endRound(); return; }
       nextExchange();
     }
   }
-
   const phase = ex ? (ex.phase === 'telegraph'
       ? (t-ex.teleAt)/TELE_MS
       : Math.min(1,(t-ex.commitAt)/Math.max(1,ex.lockAt-ex.commitAt))) : 0;
@@ -1800,8 +1976,6 @@ function paint(now){
   const masked = t < maskUntil;
   if(!masked){
     drawSkeleton(0.95);
-    // The ghost of the answer is a TEACHING aid, so it is shown in round one and
-    // not after. Showing it always would delete the game.
     if(assist && ex && (ex.phase === 'commit' || ex.phase === 'locking')){
       const want = answerFor(ex.load);
       if(want){
@@ -1814,12 +1988,10 @@ function paint(now){
     // so nothing about the player is drawn while the result lands.
     ctx.save(); ctx.fillStyle='rgba(11,13,16,0.55)'; ctx.fillRect(0,0,W,H); ctx.restore();
   }
-
   drawHud(t, topH);
 }
 
-// Which configuration answers this load, for the ghost. If two do, the one that
-// fully carries it.
+// Which configuration answers this load. If two do, the one that fully carries it.
 function answerFor(loadId){
   let full = null, part = null;
   for(const cfg of roundCfgs){
@@ -1830,189 +2002,81 @@ function answerFor(loadId){
   return full || part;
 }
 function ghostFallback(cfg){
-  const bw = Math.min(190, W*0.24), bh = bw*0.74;
+  const bw = Math.min(230, W*0.24), bh = bw*0.74;
   ctx.save(); ctx.fillStyle='rgba(11,13,16,0.8)';
-  ctx.beginPath(); ctx.roundRect(W-bw-14, H-bh-52, bw, bh+40, 11); ctx.fill(); ctx.restore();
-  drawConfigDiagram(cfg, W-bw-14, H-bh-44, bw, bh, 'rgba(224,183,98,0.95)', 5);
-  text(cfg.name, W-bw-14+bw/2, H-20, 14, '#e9e4d8', 'center', 700);
+  ctx.beginPath(); ctx.roundRect(W-bw-14, H-bh-62, bw, bh+50, 11); ctx.fill(); ctx.restore();
+  drawConfigDiagram(cfg, W-bw-14, H-bh-54, bw, bh, 'rgba(224,183,98,0.95)', 5);
+  text(cfg.name, W-bw-14+bw/2, H-22, 20, '#e9e4d8', 'center', 700);
 }
 
 function drawHud(t, topH){
-  const y = topH + 26;
-  text('EXCHANGE '+(ex?ex.no:results.length)+' / '+exchanges.length, 16, y, 13, '#8c8679', 'left', 700);
-  text(String(score), W-16, y, 24, '#e9e4d8', 'right', 700);
-  // damage
-  const dw = Math.min(190, W*0.26);
-  pill(16, y+10, dw, 9, damage/budget, damage>=budget ? 'rgba(224,122,98,0.95)' : 'rgba(224,183,98,0.9)');
-  text('DAMAGE '+damage+' / '+budget, 16, y+38, 12, '#8c8679');
+  const y = topH + 30, S = Math.max(16, Math.min(W,H*1.9)*0.022);
+  text('EXCHANGE '+(ex?ex.no:results.length)+' / '+exchanges.length, 16, y, S, '#8c8679', 'left', 700);
+  text(String(score), W-16, y, S*1.9, '#e9e4d8', 'right', 700);
+  const dw = Math.min(240, W*0.26);
+  pill(16, y+12, dw, 12, damage/budget, damage>=budget ? 'rgba(224,122,98,0.95)' : 'rgba(224,183,98,0.9)');
+  text('DAMAGE '+damage+' / '+budget, 16, y+44, S*0.95, '#8c8679');
 
   if(ex && ex.phase === 'telegraph'){
     const l = loadById[ex.load];
-    text('LISTEN', W/2, y+6, 15, '#8c8679', 'center', 700);
-    text(l ? l.name : ex.load, W/2, y+34, 24, '#d8744f', 'center', 700);
-    if(l) text(l.cue, W/2, y+58, 14, '#cdc7ba', 'center');
+    bigText([l ? l.name.toUpperCase() : ex.load, l ? l.cue : ''], { y:H*0.50, col:'#d8744f', scale:0.055 });
   } else if(ex && (ex.phase === 'commit' || ex.phase === 'locking')){
-    const l = loadById[ex.load];
-    text('BRACE', W/2, y+6, 15, '#8c8679', 'center', 700);
-    // The LOAD stays on screen through the commit window, not the answer. A
-    // player who looks up late still knows what is coming; they still have to
-    // know what carries it.
-    text(l ? l.name.toUpperCase() : ex.load, W/2, y+34, 24, '#d8744f', 'center', 700);
-    if(assist){
-      const want = answerFor(ex.load);
-      if(want) text('\u2192 '+want.name.toUpperCase()+' \u00b7 '+want.cue, W/2, y+58, 14, '#e0b762', 'center');
-    } else if(l) text(l.cue, W/2, y+58, 13, '#8c8679', 'center');
+    const l = loadById[ex.load], want = assist ? answerFor(ex.load) : null;
+    bigText(want ? [want.name.toUpperCase(), want.cue]
+                 : [(l?l.name.toUpperCase():ex.load), 'brace for it'],
+            { y:H*0.50, col: want ? '#e0b762' : '#d8744f', scale:0.055 });
     const left = Math.max(0, ex.lockAt - t), span = ex.lockAt - ex.commitAt;
-    pill(W/2 - 110, y+70, 220, 10, left/span, 'rgba(224,183,98,0.95)');
+    pill(W/2 - W*0.18, H*0.72, W*0.36, 14, left/span, 'rgba(224,183,98,0.95)');
   } else if(ex && ex.phase === 'resolve'){
     const r = ex.resolved, j = ex.judged;
     if(r.unscored){
-      text('NOT SEEN', W/2, y+30, 26, '#6fa8c7', 'center', 700);
-      text(j.reason || 'the camera lost you', W/2, y+56, 14, '#cdc7ba', 'center');
-      text('not counted against you', W/2, y+78, 13, '#8c8679', 'center');
+      bigText(['NOT SEEN', j.reason || 'the camera lost you', 'not counted against you'],
+              { y:H*0.50, col:'#6fa8c7', scale:0.055 });
     } else {
       const label = r.outcome === 'F' ? 'IT HOLDS' : r.outcome === 'P' ? 'IT STRAINS' : 'IT GIVES';
       const col = r.outcome === 'F' ? '#7fd4a2' : r.outcome === 'P' ? '#e0b762' : '#e07a62';
-      text(label, W/2, y+30, 26, col, 'center', 700);
-      text('you held '+(ex.heldId ? byId[ex.heldId].name : '—')+
-           ' · '+j.verdict.toLowerCase()+' · '+Math.round(j.quality*100)+'%',
-           W/2, y+54, 14, '#cdc7ba', 'center');
-      if(r.points) text('+'+r.points, W/2, y+76, 15, col, 'center', 700);
+      const sub = 'you held '+(ex.heldId ? byId[ex.heldId].name : '—')+
+                  ' · '+Math.round(j.quality*100)+'%'+(r.points?'  +'+r.points:'');
+      const lines = [label, sub];
       if(r.outcome !== 'F'){
-        const want = answerFor(ex.load);
-        const l = loadById[ex.load];
-        if(want) text((l?l.name:ex.load)+' is carried by '+want.name.toUpperCase(),
-                      W/2, y+98, 14, '#8c8679', 'center', 700);
+        const want = answerFor(ex.load), l = loadById[ex.load];
+        if(want) lines.push((l?l.name:ex.load)+' is carried by '+want.name.toUpperCase());
       }
+      bigText(lines, { y:H*0.50, col, scale:0.055 });
     }
   }
 
-  // what the game thinks you are in right now, always visible, because "why did
-  // it not score me" should be answerable by looking at the screen
+  // what the game thinks you are in right now, always visible
   if(bestNow){
     text(byId[bestNow].name.toUpperCase()+'  '+Math.round(bestQ*100)+'%',
-         16, H-18, 14, bestQ >= TUNE.LOCK_FULL ? '#7fd4a2' : bestQ >= TUNE.LOCK_PART ? '#e0b762' : '#8c8679', 'left', 700);
+         16, H-18, S*1.1, bestQ >= TUNE.LOCK_FULL ? '#7fd4a2' : bestQ >= TUNE.LOCK_PART ? '#e0b762' : '#8c8679', 'left', 700);
   } else {
-    const fr = bodyInFrame();
-    text(fr.edge ? ('MOVE AWAY FROM THE '+fr.edge.toUpperCase()+' EDGE')
-                 : 'CANNOT SEE ENOUGH OF YOU', 16, H-18, 14, '#e07a62', 'left', 700);
+    text('I CANNOT SEE ENOUGH OF YOU', 16, H-18, S*1.1, '#e07a62', 'left', 700);
   }
-  if(banner && t < banner.until) text(banner.msg, W/2, H-18, 15, '#e0b762', 'center', 700);
+  if(banner && t < banner.until) text(banner.msg, W-16, H-18, S, '#e0b762', 'right', 700);
 }
 
-/* ================= setup and calibration ================= */
+/* ================= boot ================= */
 let calTorsos = [];
 
-async function enterSetup(){
-  show('sSetup');
-  state = 'setup';
-  el('fitline').textContent = 'starting the camera…';
+async function boot(){
+  show(null);
+  state = 'boot';
+  initAudio(); initVoice(); resumeAudio();
+  sayNow('Starting the camera. Put the phone down on its side and step back.');
   try {
     await startCamera();
     await loadTracker();
     recHeader();
   } catch(e){
-    el('fitline').innerHTML = '<span class="nomark">the camera did not start: '+
-      (e && e.message ? e.message : e)+'</span>';
+    state = 'idle'; show('sTitle');
+    sayNow('The camera did not start.');
+    alert('The camera did not start: ' + (e && e.message ? e.message : e));
     return;
   }
-  resize(); checkOrientation();
+  resize(); checkOrientation(); keepAwake();
+  state = 'guide'; guideOkSince = 0; calAttempt = 0;
   requestAnimationFrame(frame);
-  setInterval(updateFitLine, 320);
-}
-
-function updateFitLine(){
-  if(state !== 'setup' && state !== 'calibrating') return;
-  const fr = bodyInFrame();
-  const t = torsoNow();
-  const bits = [];
-  bits.push(fr.ok ? '<span class="okmark">the whole of you is in the picture</span>'
-                  : '<span class="nomark">'+(fr.edge ? 'you are off the '+fr.edge+' edge'
-                     : 'only '+fr.seen+' of '+fr.total+' key joints are visible')+'</span>');
-  if(t) bits.push('your torso reads '+t.toFixed(3)+' of the frame');
-  if(innerHeight > innerWidth) bits.push('<span class="nomark">turn the phone sideways</span>');
-  el('fitline').innerHTML = bits.join(' · ');
-}
-
-function startCalibration(){
-  if(!landmarker){ el('calmsg').textContent = 'the camera is not running yet.'; return; }
-  calPoints = []; calTorsos = []; calIdx = 0;
-  calPerPose = CAL_SEQ.map(id => ({ id, pts:[] }));
-  calStart = nowClock(); calHoldStart = nowClock();
-  state = 'calibrating';
-  el('bCal').disabled = true;
-  renderCalChips();
-  el('calmsg').textContent = 'hold each shape while the bar fills.';
-  const tick = setInterval(() => {
-    const t = torsoNow(); if(t) calTorsos.push(t);
-    if(nowClock() - calHoldStart >= CAL_HOLD_MS){
-      calIdx++; calHoldStart = nowClock(); renderCalChips();
-      if(calIdx >= CAL_SEQ.length){
-        clearInterval(tick);
-        finishCalibration();
-      }
-    }
-    el('calbar').firstElementChild.style.width =
-      (100*Math.min(1,(calIdx + (nowClock()-calHoldStart)/CAL_HOLD_MS)/CAL_SEQ.length))+'%';
-  }, 90);
-}
-
-function renderCalChips(){
-  el('calchips').innerHTML = CAL_SEQ.map((id,i) =>
-    '<span class="calchip '+(i<calIdx?'done':i===calIdx?'now':'')+'">'+byId[id].name+'</span>').join('');
-}
-
-function finishCalibration(){
-  state = 'setup';
-  el('bCal').disabled = false;
-  // Median by SCALE over readable frames, not a time median. Doc 14 lesson 9: a
-  // time-median frame landed on a collapsed estimate with the body below the
-  // bottom edge and reported the player's scale as five times its real value.
-  calTorsos.sort((a,b)=>a-b);
-  const torso = calTorsos.length ? calTorsos[Math.floor(calTorsos.length/2)] : null;
-  if(!torso){
-    el('calmsg').innerHTML = '<span class="nomark">the camera never saw your shoulders and hips together. '+
-      'Move back until all of you is in the picture, and try again.</span>';
-    return;
-  }
-  const r = acceptFloor(torso);
-  floorInfo = r.info || null;
-  recPush({ k:'calibration', t:nowClock(), ok:r.ok, why:r.why||null, info:floorInfo,
-            torsoSamples:calTorsos.length, points:calPoints.length });
-  if(r.ok){
-    floor = r.floor;
-    el('calmsg').innerHTML = '<span class="okmark">floor found.</span> Scores from here are measured against it.';
-  } else {
-    el('calmsg').innerHTML = '<span class="nomark">'+r.why+'</span> '+
-      'You can still play — the override is always there — but treat the scores as unreliable.';
-    if(r.info && r.info.per && r.info.per.length) floor = fitFloor(calPoints, torso);
-  }
-  renderCalReport(torso, r);
-}
-
-function renderCalReport(torso, r){
-  const i = r.info;
-  const L = [];
-  L.push('<p><b>Your torso</b> reads '+(torso?torso.toFixed(4):'—')+' of the frame height, from '+
-         calTorsos.length+' readable frames.</p>');
-  if(i){
-    L.push('<p><b>Floor line</b> at '+i.angle+'&deg; in the picture, from '+i.onLine+
-           ' landmarks resting on it, residual '+i.resid.toFixed(3)+' torsos.</p>');
-    L.push('<p><b>How well determined:</b> '+i.spread.toFixed(1)+'&deg; of spread when refitted on '+
-           'halves of the data. <span class="sub">Budget is 5&deg;.</span></p>');
-    L.push('<p><b>Do the postures agree?</b> worst disagreement '+i.disagree.toFixed(1)+'&deg;'+
-           (i.worstPair?' ('+i.worstPair+')':'')+'. <span class="sub">Budget is 6&deg;. This is the check '+
-           'that catches a floor which is confidently wrong — refitting on halves cannot, '+
-           'because every half makes the same mistake.</span></p>');
-    L.push('<p class="sub">'+i.per.map(p=>p.id+' '+p.ang+'&deg;').join(' · ')+'</p>');
-  }
-  L.push('<p class="'+(r.ok?'good':'bad')+'">'+(r.ok?'Usable.':'Not usable: '+r.why)+'</p>');
-  L.push('<h2>Still unmeasured</h2>');
-  L.push('<p class="sub">The pipeline delay is still an assumed 200 ms, in the middle of the '+
-    'published band, because measuring it needs the camera reading a counter off the screen '+
-    'with nobody in the loop. It is written into the recording, so this session can be '+
-    're-judged once the real figure exists.</p>');
-  el('calreport').innerHTML = L.join('');
 }
 
 /* ================= the end screen ================= */
@@ -2025,9 +2089,6 @@ function renderEnd(cleared){
   const reps = results.filter(r=>r.rep).length;
   const f = fpsReport();
   const bracedS = bracedMs/1000;
-  // The session floor: the workout has to stay real, so clearing a round while
-  // barely holding anything does not count as having done the work. Separate
-  // from score, exactly as Gap keeps score and repetition apart.
   const floorNeed = Math.round(exchanges.length * 0.9);
   const floorOk = bracedS >= floorNeed;
 
@@ -2052,10 +2113,8 @@ function renderEnd(cleared){
   L.push('<p>pose '+f.poseFps+' fps, render '+f.renderFps+' fps, over '+f.seconds+'s.'+
          (f.poseFps < 15 ? ' <span class="warn">That is low.</span>' : '')+'</p>');
   if(floorInfo) L.push('<p class="sub">floor at '+floorInfo.angle+'&deg;, spread '+
-    floorInfo.spread.toFixed(1)+'&deg;, postures disagreeing by '+floorInfo.disagree.toFixed(1)+'&deg;</p>');
-  // The confusion data, which is the real point of this build: how well a camera
-  // on the floor tells these postures apart, measured on a body rather than on a
-  // generated figure.
+    floorInfo.spread.toFixed(1)+'&deg;, postures disagreeing by '+floorInfo.disagree.toFixed(1)+'&deg;'+
+    ' · found on attempt '+(calAttempt+1)+'</p>');
   const ids = roundCfgs.map(c=>c.id);
   const acc = {}; for(const a of ids){ acc[a] = {}; for(const b of ids) acc[a][b] = []; }
   for(const c of confusion){
@@ -2075,13 +2134,12 @@ function renderEnd(cleared){
     }
     tab += '</tr>';
   }
-  tab += '</table>';
-  L.push(tab);
+  L.push(tab + '</table>');
   L.push('<p class="sub">Rows are what you were judged to be holding, columns what each '+
     'posture scored. Off-diagonal numbers near '+TUNE.LOCK_PART+' or above mean the camera '+
     'cannot reliably tell those two apart from the floor, and the table they are part of has '+
     'to be rebuilt around the ones it can. On a generated figure the worst off-diagonal pair '+
-    'is 0.27; this is the first time it has been asked of a real body.</p>');
+    'is 0.46; this is the first time it has been asked of a real body.</p>');
   el('endBody').innerHTML = L.join('');
 
   el('endLog').innerHTML = '<table><tr><th>#</th><th>load</th><th>held</th><th>verdict</th>'+
@@ -2104,80 +2162,71 @@ function saveRecording(){
 }
 
 /* ================= wiring ================= */
-function renderFullTable(){
-  const ids = CONFIGS.map(c=>c.id), lds = LOADS.map(l=>l.id);
-  let t = '<table><tr><th></th>'+LOADS.map(l=>'<th>'+l.name+'</th>').join('')+'</tr>';
-  for(const id of ids){
-    t += '<tr><th class="rowh">'+byId[id].name+'</th>';
-    for(const l of lds){ const c = TABLE[id][l];
-      t += '<td class="'+c+'">'+(c==='F'?'carries':c==='P'?'partly':'\u2013')+'</td>'; }
-    t += '</tr>';
-  }
-  el('t2').innerHTML = t + '</table>';
-}
-
-function renderTitleTable(){
-  const ids = MILESTONE.configs, lds = MILESTONE.loads;
+function tableHtml(ids, lds, table){
   let t = '<table><tr><th></th>'+lds.map(l=>'<th>'+(loadById[l]?loadById[l].name:l)+'</th>').join('')+'</tr>';
   for(const id of ids){
     t += '<tr><th class="rowh">'+byId[id].name+'</th>';
-    for(const l of lds){
-      const c = MILESTONE.table[id][l];
-      t += '<td class="'+c+'">'+(c==='F'?'carries':c==='P'?'partly':'fails')+'</td>';
-    }
+    for(const l of lds){ const c = table[id][l];
+      t += '<td class="'+c+'">'+(c==='F'?'carries':c==='P'?'partly':'–')+'</td>'; }
     t += '</tr>';
   }
-  el('t1').innerHTML = t + '</table>';
+  return t + '</table>';
+}
+function renderTitleTable(){
+  el('t1').innerHTML = tableHtml(MILESTONE.configs, MILESTONE.loads, MILESTONE.table);
+  el('t2').innerHTML = '<p class="sub">The full six, for later rounds:</p>' +
+                       tableHtml(CONFIGS.map(c=>c.id), LOADS.map(l=>l.id), TABLE);
 }
 
-el('bGo').onclick = () => { initAudio(); enterSetup(); };
-el('bCal').onclick = startCalibration;
+el('bGo').onclick = () => { boot(); };
+el('bVoice').onclick = () => {
+  voiceOn = !voiceOn; if(!voiceOn) hush();
+  el('bVoice').textContent = 'Voice: ' + (voiceOn ? 'on' : 'off');
+};
 el('bAssist').onclick = () => {
   assistPref = assistPref === 'auto' ? 'on' : assistPref === 'on' ? 'off' : 'auto';
-  renderAssist();
+  el('bAssist').textContent = assistPref === 'auto' ? 'Prompts: round one only'
+                            : assistPref === 'on' ? 'Prompts: always on' : 'Prompts: off';
 };
-function renderAssist(){
-  const b = el('bAssist');
-  b.textContent = assistPref === 'auto' ? 'Prompts: round one only'
-                : assistPref === 'on' ? 'Prompts: always on' : 'Prompts: off';
-}
-renderAssist();
-el('bSkipCal').onclick = () => {
-  el('calmsg').innerHTML = '<span class="warn">Skipped.</span> Without a floor line nothing can be '+
-    'scored, so the game will guess one from your first few seconds. Treat the numbers as unreliable.';
+el('bAgain').onclick = () => {
+  // Going again must not need a tap at the phone either: it walks back through
+  // the guidance from wherever he is now.
+  show(null); hush(); state = 'guide'; guideOkSince = 0; calAttempt = 0;
+  sayNow('Going again. Get back into the picture.');
 };
-el('bStart').onclick = () => {
-  if(!landmarker){ el('calmsg').textContent = 'the camera is not running yet.'; return; }
-  if(!floor){
-    // The override is always enabled — the fit check is advice, not a lock — but a
-    // round with no floor cannot be scored at all, so one is estimated from
-    // whatever is on screen right now and the player is told it is a guess.
-    const t = torsoNow();
-    if(t){ const pts=[]; collectFloorPoints(pts); floor = fitFloor(pts.concat(pts), t); }
-    banner = { msg:'playing with a guessed floor line', until: nowClock()+6000 };
-  }
-  startRound();
-};
-el('bBack').onclick = () => { state='setup'; show('sTitle'); };
-el('bAgain').onclick = () => { startRound(); };
-el('bHome').onclick = () => { state='idle'; show('sTitle'); };
+el('bHome').onclick = () => { state='idle'; hush(); show('sTitle'); };
 el('bRec').onclick = saveRecording;
 
 renderTitleTable();
-renderFullTable();
 resize();
 
-/* ---- hooks for the offline render and smoke harnesses ----
-   Rebuilt from the live file on every run, never carried alongside it. */
+/* ---- hooks for the offline render and smoke harnesses ---- */
 window.__fp = {
   CONFIGS, LOADS, TABLE, MILESTONE, TUNE, byId,
   configSkeleton, skeletonLandmarks, features, match, judgeLock, resolve,
   featsFromPose, reachReport, fitFloor, floorOf, makeReader, J,
-  drawConfigDiagram, drawStructure, drawLoadMark, drawGhost, drawHud, text, pill,
+  drawConfigDiagram, drawStructure, drawLoadMark, drawGhost, drawHud, text, pill, bigText,
   setState: s => { state = s; },
   fakeRound(r){ round = r-1; configureRound(r); buildExchanges();
     score=0; damage=0; exNo=0; results=[]; samples=[]; confusion=[]; transitions=[]; bracedMs=0;
     return { cfgs:roundCfgs.map(c=>c.id), loads:roundLoads, n:roundN }; },
+  paintGuide(big, sub, col){
+    W=cv.clientWidth; H=cv.clientHeight;
+    ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+    bigText([big, sub], { col: col||'#e0b762' });
+    return { W, H };
+  },
+  paintCal(id, frac){
+    W=cv.clientWidth; H=cv.clientHeight;
+    ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+    const cfg = byId[id];
+    const bw = Math.min(300, W*0.26), bh = bw*0.7;
+    drawConfigDiagram(cfg, W - bw - 18, H/2 - bh/2, bw, bh, 'rgba(224,183,98,0.95)', 7);
+    bigText([cfg.name.toUpperCase(), cfg.cue], { y:H*0.30, col:'#e0b762' });
+    pill(W*0.25, H*0.72, W*0.5, 16, frac, 'rgba(127,212,162,0.95)');
+    text('1 of 3', W/2, H*0.72 - 18, 22, '#8c8679', 'center', 700);
+    return true;
+  },
   paintPlayFrame(opts){
     const o = opts||{};
     state='play'; W=cv.clientWidth; H=cv.clientHeight;
@@ -2190,19 +2239,16 @@ window.__fp = {
            heldId:o.heldId||null, openedF:null };
     bestNow = o.bestNow||null; bestQ = o.bestQ||0; maskUntil = 0;
     assist = (o.assist===undefined) ? false : o.assist;
-    ctx.clearRect(0,0,W,H);
     ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
     const topH = drawStructure(0, ex.load, o.phaseFrac===undefined?0.8:o.phaseFrac, damage, budget);
     if(ex.phase!=='resolve') drawLoadMark(ex.load, o.phaseFrac===undefined?0.8:o.phaseFrac, topH);
-    if(o.ghost){ const c=byId[o.ghost]; const bw=Math.min(190,W*0.24), bh=bw*0.74;
-      drawConfigDiagram(c, W-bw-14, H-bh-44, bw, bh, 'rgba(224,183,98,0.95)', 5);
-      text(c.name, W-bw-14+bw/2, H-20, 14, '#e9e4d8','center',700); }
+    if(o.ghost) ghostFallback(byId[o.ghost]);
     drawHud(0, topH);
     return { W, H, topH };
   },
   paintDiagrams(){
     W=cv.clientWidth; H=cv.clientHeight;
-    ctx.clearRect(0,0,W,H); ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#0b0d10'; ctx.fillRect(0,0,W,H);
     const n=CONFIGS.length, cols=3, rows=Math.ceil(n/cols);
     const bw=W/cols, bh=H/rows;
     for(let i=0;i<n;i++){
