@@ -1532,8 +1532,13 @@ const byId = {}; for(const c of CONFIGS) byId[c.id] = c;
 const loadById = {}; for(const l of LOADS) loadById[l.id] = l;
 
 const el = id => document.getElementById(id);
+// Named once, and tolerant of a screen that is not in the document. The first
+// version listed a screen that had been deleted: show() hid the title, threw on
+// the missing one, and boot() died on the line after - a black page the moment
+// the player tapped Start. Same shape as Sparks' fit gate that nothing called.
+const SCREENS = ['sTitle','sEnd'];
 function show(id){
-  for(const s of ['sTitle','sSetup','sEnd']) el(s).classList.toggle('on', s===id);
+  for(const s of SCREENS){ const n = el(s); if(n) n.classList.toggle('on', s === id); }
 }
 
 /* ---- round one is the milestone table ---- */
@@ -1868,7 +1873,8 @@ function startCalibration(now){
 }
 function sayCalPosture(i){
   const c = byId[CAL_SEQ[i]];
-  sayNow((i===0 ? 'First, ' : 'Now ') + c.cue + '. Hold it.');
+  const cue = c.cue.charAt(0).toLowerCase() + c.cue.slice(1);
+  sayNow((i===0 ? 'First, ' : 'Now ') + cue + '. Hold it.');
 }
 
 function finishCalibration(now){
@@ -2207,6 +2213,7 @@ window.__fp = {
   featsFromPose, reachReport, fitFloor, floorOf, makeReader, J,
   drawConfigDiagram, drawStructure, drawLoadMark, drawGhost, drawHud, text, pill, bigText,
   setState: s => { state = s; },
+  peekState: () => state,
   fakeRound(r){ round = r-1; configureRound(r); buildExchanges();
     score=0; damage=0; exNo=0; results=[]; samples=[]; confusion=[]; transitions=[]; bracedMs=0;
     return { cfgs:roundCfgs.map(c=>c.id), loads:roundLoads, n:roundN }; },
