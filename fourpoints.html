@@ -480,35 +480,35 @@ const SEG = { torso:1.0, upper:0.66, fore:0.52, thigh:0.88, shin:0.86,
               ankleFlat:0.16, ankleToe:0.30 };
 
 const CONFIGS = [
-  { id:'BEAST', name:'Beast', cue:'Hands under your shoulders, knees hovering',
+  { id:'BEAST', name:'Knees up', cue:'Hands under your shoulders, knees hovering',
     pose:{ hipH:0.95, torsoRise:0.15, handAhead:0.00, handH:0, footBehind:-1.15, footH:0.30,
            armMode:'hand', kneeDrop:0.14, elbowBulge:{x:-1,y:0}, footDir:-1, tucked:true },
     w:{ hipH:1.8, torsoRise:1.6, kneeRise:3.0, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.2, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
         legExt:1.4, armExt:1.0, asym:1.2 } },
 
-  { id:'FOREARM', name:'Forearm', cue:'Down onto your elbows, body long and low',
+  { id:'FOREARM', name:'Elbows', cue:'Down onto your elbows, body long and low',
     pose:{ hipH:0.52, torsoRise:0.10, handAhead:0.62, handH:0, footBehind:-1.70, footH:0.30,
            armMode:'forearm', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1}, footDir:-1, tucked:true },
     w:{ hipH:1.8, torsoRise:1.4, kneeRise:1.2, handRise:1.0, elbowRise:1.8, footRise:0.8,
         base:1.2, elbowA:1.4, elbowB:1.4, kneeA:0.8, kneeB:0.8,
         legExt:1.6, armExt:1.2, asym:1.2 } },
 
-  { id:'CRAB', name:'Crab', cue:'Hands behind you, hips up, face the ceiling',
+  { id:'CRAB', name:'Face up', cue:'Hands behind you, hips up, face the ceiling',
     pose:{ hipH:0.92, torsoRise:0.08, handAhead:0.38, handH:0, footBehind:-0.95, footH:0.16,
            armMode:'hand', kneeDrop:null, elbowBulge:{x:1,y:-0.3}, kneeBulge:{x:0,y:1}, footDir:-1 },
     w:{ hipH:1.8, torsoRise:1.6, kneeRise:3.0, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.4, elbowA:0.8, elbowB:0.8, kneeA:1.2, kneeB:1.2,
         legExt:1.4, armExt:1.0, asym:1.2 } },
 
-  { id:'ANCHOR', name:'Anchor', cue:'Sit right down, knees above your hips, hands planted',
+  { id:'ANCHOR', name:'Squat', cue:'Sit right down, knees above your hips, hands planted',
     pose:{ hipH:0.40, torsoRise:0.70, handAhead:0.18, handH:0, footBehind:0.21, footH:0.16,
            armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:-0.2}, kneeBulge:{x:1,y:0.6}, footDir:+1 },
     w:{ hipH:2.0, torsoRise:1.8, kneeRise:1.4, handRise:1.0, elbowRise:0.8, footRise:0.8,
         base:1.8, elbowA:0.8, elbowB:0.8, kneeA:1.4, kneeB:1.4,
         legExt:1.8, armExt:1.0, asym:1.2 } },
 
-  { id:'SIDE', name:'Side', cue:'One hand, one foot, chest turned open',
+  { id:'SIDE', name:'On your side', cue:'One hand, one foot, chest turned open',
     pose:{ hipH:0.62, torsoRise:0.40, handAhead:0.02, handH:0, footBehind:-1.60, footH:0.16,
            armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:0,y:-1},
            topArmUp:0.90, topFootUp:0.22, footDir:-1 },
@@ -516,7 +516,7 @@ const CONFIGS = [
         base:1.0, elbowA:0.8, elbowB:0.8, kneeA:0.8, kneeB:0.8,
         legExt:1.2, armExt:1.0, asym:2.4 } },
 
-  { id:'SPAN', name:'Span', cue:'Hands and feet planted, hips to the sky',
+  { id:'SPAN', name:'Hips up', cue:'Hands and feet planted, hips to the sky',
     pose:{ hipH:1.52, torsoRise:-0.46, handAhead:0.00, handH:0, footBehind:-0.66, footH:0.16,
            armMode:'hand', kneeDrop:null, elbowBulge:{x:-1,y:0}, kneeBulge:{x:-0.4,y:-1}, footDir:-1 },
     w:{ hipH:2.0, torsoRise:2.0, kneeRise:1.4, handRise:1.0, elbowRise:0.8, footRise:0.8,
@@ -709,12 +709,12 @@ function reachReport(cfg){
    on the table by eye. If the vocabulary changes, check that first.
    ------------------------------------------------------------------ */
 const LOADS = [
-  { id:'Compress', name:'Compression', cue:'a long groan from straight above' },
-  { id:'ShearL',   name:'Shear, left',  cue:'a creak pushing to your left' },
-  { id:'ShearR',   name:'Shear, right', cue:'a creak pushing to your right' },
-  { id:'Torsion',  name:'Torsion',      cue:'a dry twist through the frame' },
-  { id:'Settle',   name:'Settle',       cue:'a slow sag, everything going at once' },
-  { id:'Adjacent', name:'Adjacent',     cue:'a knock from the side of the room' },
+  { id:'Compress', name:'From above',    cue:'a long groan from straight overhead' },
+  { id:'ShearL',   name:'Pushing left',  cue:'a creak dragging to your left' },
+  { id:'ShearR',   name:'Pushing right', cue:'a creak dragging to your right' },
+  { id:'Torsion',  name:'Twist',         cue:'a dry wring through the frame' },
+  { id:'Settle',   name:'Sag',           cue:'everything going down at once' },
+  { id:'Adjacent', name:'Knock',         cue:'a thump from the side of the room' },
 ];
 const TABLE = {
   BEAST:   { Compress:'X', ShearL:'X', ShearR:'P', Torsion:'F', Settle:'X', Adjacent:'X' },
@@ -1538,7 +1538,7 @@ function pill(x, y, w, h, frac, col, bgcol){
    time the beat lands the decision was made seconds ago. That is what makes a
    floor game survivable here, and it is doc 12's whole argument. */
 
-const TELE_MS    = 1700;      // the load announces itself
+const TELE_MS    = 2100;      // the load announces itself, with room for the voice
 const COMMIT0    = 2800;      // window to get there, first exchange
 const COMMIT1    = 1900;      // and by the last one
 const RESOLVE_MS = 1600;      // long enough for the voice to finish the verdict
@@ -1852,6 +1852,7 @@ const ORIENT_STABLE_MS= 1500;     // and to settle side-on before the floor is r
 const ORIENT_GIVEUP_MS= 25000;    // after which it stops insisting and says so
 const CAL_HOLD_MS     = 3200;     // each calibration posture
 const COUNTIN_MS      = 5000;
+const COUNTIN_FIRST_MS= 14000;    // round one, with room to say how it is played
 
 let guideOkSince = 0, orientOkSince = 0, settleFrom = 0, calAttempt = 0, lastGuide = '';
 let lastFacing = null, playFaceWarn = -1e9, orientFrom = 0, orientWaived = false;
@@ -1983,7 +1984,19 @@ function finishCalibration(now){
   beginCountin(now);
 }
 
-function beginCountin(now){ state = 'countin'; countFrom = now; countSaid = -1; configureRound(round+1); }
+function beginCountin(now){
+  state = 'countin'; countFrom = now; countSaid = -1;
+  configureRound(round + 1);
+  if(round + 1 === 1){
+    sayNow('Round one. Three shapes. I call out the weight coming down on you, '
+         + 'you get into the shape that holds it, and you hold still for the beat. '
+         + 'This round I tell you which shape. From above means elbows. '
+         + 'Knock means squat. Pushing right means hips up.');
+  } else {
+    sayNow('Round ' + (round + 1) + '. All six shapes, and I only call the weight.');
+  }
+}
+function countinLength(){ return (round + 1) === 1 ? COUNTIN_FIRST_MS : COUNTIN_MS; }
 let countSaid = -1;
 
 /* ================= painting each state ================= */
@@ -2047,10 +2060,11 @@ function paint(now){
   }
 
   if(state === 'countin'){
-    const left = Math.max(0, COUNTIN_MS - (now - countFrom));
+    const left = Math.max(0, countinLength() - (now - countFrom));
     const s = Math.ceil(left/1000);
     if(s !== countSaid && s <= 3 && s >= 1){ countSaid = s; say(String(s), { cut:false, gap:0 }); }
-    bigText([String(s), 'brace yourself'], { scale:0.16 });
+    if(s > 4) bigText(['ROUND '+(round+1), roundCfgs.map(c=>c.name).join('  \u00b7  ')], { scale:0.07 });
+    else bigText([String(s), 'brace yourself'], { scale:0.16 });
     if(left <= 0){ state='play'; startRound(); }
     return;
   }
