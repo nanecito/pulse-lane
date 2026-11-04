@@ -45,11 +45,18 @@
   td.k{color:var(--dim);text-align:right}
   td.v{text-align:left;color:var(--gold)}
   #score{font-size:clamp(60px,26vh,220px);color:var(--hot);line-height:1}
+  #tools{position:fixed;left:1vw;bottom:1vh;z-index:4;display:flex;gap:1vw}
+  #tools[hidden]{display:none}
+  button.mini{font-size:clamp(11px,2.2vh,15px);padding:.8vh 2.4vw;opacity:.75}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="band" hidden><b id="bandA"></b><span id="bandB"></span></div>
+<!-- BUILD 2: a way to save the recording and skip a step WITHOUT reaching the
+     end screen. Build 1 only offered Save on the end screen, so when the
+     calibration stuck there was no recording to read. -->
+<div id="tools" hidden><button id="bSaveNow" class="ghost mini">Save recording</button><button id="bSkipStep" class="ghost mini">Skip step</button></div>
 
 <div class="ov" id="oRot" hidden>
   <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
@@ -426,7 +433,7 @@ const LOOK_YAW = 0.42;        // nose offset over ear spacing, either way
 function makeSignals(){
   let angSm = null, angPrev = 0, angSpd = 0, wingsOn = false;
   let hipRef = null, shRef = null, refTorso = 0;
-  let bankSm = 0;
+  let bankSm = 0, baseAng = 0;
   function steerFilter(raw, dt){
     if(angSm==null){ angSm = raw; angPrev = raw; }
     const sp = Math.abs(raw - angPrev)/Math.max(dt, 1e-3); angPrev = raw;
@@ -442,9 +449,11 @@ function makeSignals(){
     return (s<0?-1:1) * Math.pow(n, BANK_CURVE);
   }
   return {
-    reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; },
+    reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; baseAng=0; },
+    setBase(a){ baseAng = a; angSm = null; },
+    base(){ return baseAng; },
     read(L, dt){
-      const out = { bank:0, squat:0, wings:false, look:false, span:0, valid:{wings:false, squat:false, look:false} };
+      const out = { bank:0, squat:0, wings:false, look:false, span:0, wa:0, valid:{wings:false, squat:false, look:false} };
       if(!(L.shA && L.shB && L.hipC)) { bankSm *= Math.pow(0.85, dt*60); out.bank = bankSm; return out; }
       const sw = Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
       const torso = Math.max(1e-6, Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y));
@@ -455,11 +464,18 @@ function makeSignals(){
         else if(wingsOn && span < WING_SPAN_OFF) wingsOn = false;
         out.valid.wings = true;
         if(wingsOn){
-          /* bank = wrist line minus shoulder line, so a torso lean does not
-             read as a bank and a bank does not need one. */
+          /* BUILD 2. Build 1 read bank as wrist line MINUS shoulder line, so
+             a torso lean would not count as a bank (doc 22). Hugo's first
+             play: "dip your left wing" never registered. Reproduced on the
+             signal code: a body dips a wing BY leaning, the shoulders tilt
+             with the arms, and the subtraction cancelled the bank — 20°
+             of arm dip with 20° of shoulder lean read 0.00. Now the wrist
+             line is measured against a base angle captured while the
+             player holds their wings level in the calibration, which is
+             what the racing game does with its wheel. */
           const wa = Math.atan2(L.wrB.y - L.wrA.y, L.wrB.x - L.wrA.x);
-          const sa = Math.atan2(L.shB.y - L.shA.y, L.shB.x - L.shA.x);
-          const raw = wa - sa;                    // right wrist up = left wing down = left turn = positive
+          out.wa = wa;
+          const raw = wa - baseAng;               // right wrist up = left wing down = left turn = positive
           bankSm = bankFrom(steerFilter(raw, dt));
         } else { angSm = null; bankSm *= Math.pow(0.85, dt*60); }
       } else { wingsOn = wingsOn && false; bankSm *= Math.pow(0.85, dt*60); }
@@ -502,7 +518,7 @@ async function loadTracker(){
   catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
 }
 
-const BUILD = 'sixoclock-1';
+const BUILD = 'sixoclock-2';
 const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. This game
    has no timed event: every judgment is a hold longer than a second, so
    the figure is recorded, not used. */
@@ -604,10 +620,10 @@ function say(text, force, cooldownMs){
 /* ================= state ================= */
 let state='idle', phase='', lastRaf=0, lastFrameAt=0, clockT0=0, fitSince=0;
 let world=null, sig=makeSignals(), inp={bank:0,squat:0,wings:false,look:false,span:0,valid:{}};
-let roundStart=0, calT=0, calStep=0, calSpan=0, calSquat=0, lastStep=0;
+let roundStart=0, calT=0, calStep=0, calSpan=0, calSquat=0, lastStep=0, baseSum=0, baseN=0;
 let bandA='', bandB='', bandUntil=0, flashes=[], tracerT=0, lastLook=-1e9;
 const ui={};
-for(const id of ['oStart','oFit','oEnd','oRot','band','bandA','bandB','loadMsg','errMsg','fitMsg','fitBig','score','endRows','endTag','endNote'])
+for(const id of ['oStart','oFit','oEnd','oRot','band','bandA','bandB','loadMsg','errMsg','fitMsg','fitBig','score','endRows','endTag','endNote','tools'])
   ui[id]=document.getElementById(id);
 function setBand(a,b,ms){ bandA=a; bandB=b||''; ui.bandA.textContent=a; ui.bandB.textContent=bandB;
   ui.band.hidden = !a; bandUntil = ms ? performance.now()+ms : 0; }
@@ -623,24 +639,26 @@ const CAL = [
   { say:'Level. Now squat, that is your dive.', band:['SQUAT','that is a dive'], need:'squat', hold:1.0 },
   { say:'Good. Stand up. Bandits ahead. Fly.', band:['FLY','ninety seconds'], need:'stand', hold:0.8 },
 ];
-function startCal(){ state='play'; phase='cal'; calStep=0; calT=0; sig.reset(); setBand(CAL[0].band[0], CAL[0].band[1]); say(CAL[0].say, true); lastStep=performance.now(); }
+function startCal(){ state='play'; phase='cal'; calStep=0; calT=0; baseSum=0; baseN=0; sig.reset(); ui.tools.hidden=false; setBand(CAL[0].band[0], CAL[0].band[1]); say(CAL[0].say, true); lastStep=performance.now(); }
 function calTick(now, dt){
   const c = CAL[calStep]; let met = false;
-  if(c.need==='wings') met = inp.wings && Math.abs(inp.bank) < 0.35;
+  if(c.need==='wings') met = inp.wings;   // level is whatever THIS body calls level: the base is taken from it
   else if(c.need==='left') met = inp.wings && inp.bank > 0.5;
   else if(c.need==='right') met = inp.wings && inp.bank < -0.5;
   else if(c.need==='squat') met = inp.squat > 0.6;
   else if(c.need==='stand') met = inp.squat < 0.25;
-  if(met){ calT += dt; if(c.need==='wings') calSpan = Math.max(calSpan, inp.span); if(c.need==='squat') calSquat = Math.max(calSquat, inp.squat); }
+  if(met){ calT += dt; if(c.need==='wings'){ calSpan = Math.max(calSpan, inp.span); baseSum += inp.wa; baseN++; } if(c.need==='squat') calSquat = Math.max(calSquat, inp.squat); }
   else calT = Math.max(0, calT - dt*0.5);
   // nag if nothing is happening for a while
   if(now - lastStep > 9000 && !met){ say(c.say, true); lastStep = now; }
-  if(calT >= c.hold){ calStep++; calT = 0; lastStep = now;
+  if(calT >= c.hold){
+    if(c.need==='wings' && baseN > 0){ sig.setBase(baseSum/baseN); recPush({ k:'base', t:+(now-clockT0).toFixed(1), ang:+(baseSum/baseN).toFixed(3), n:baseN }); }
+    calStep++; calT = 0; lastStep = now;
     if(calStep >= CAL.length){ startRound(now); return; }
     const n = CAL[calStep]; setBand(n.band[0], n.band[1]); say(n.say, true); }
 }
 function startRound(now){
-  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1);
+  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1); ui.tools.hidden=false;
   setBand('', ''); flashes = [];
   recPush({ k:'round', t:+(now-clockT0).toFixed(1), seed:world.seed, calSpan:+calSpan.toFixed(2), calSquat:+calSquat.toFixed(2) });
 }
@@ -675,7 +693,7 @@ function handleEvents(now){
 }
 
 function endRound(now){
-  phase='end'; state='end'; setBand('', '');
+  phase='end'; state='end'; setBand('', ''); ui.tools.hidden=true;
   const w = world; const k = w.work;
   ui.score.textContent = w.score;
   ui.endTag.textContent = w.kills === 0 ? 'NO KILLS' : (w.kills + (w.kills===1?' SPLASHED':' SPLASHED'));
@@ -865,7 +883,7 @@ function frame(){
 
   if(state==='play' || state==='fit'){
     const q = {}; if(pose) for(const k of NEEDS_REC){ const v = read(pose, J[k]); if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.v||0).toFixed(2) ]; }
-    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
+    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), wa:+(inp.wa||0).toFixed(3), span:+(inp.span||0).toFixed(2), sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
   }
 
   if(state==='fit'){
@@ -920,11 +938,18 @@ async function begin(){
 bStart.addEventListener('click', begin);
 bSkip.addEventListener('click', ()=>{ ui.oFit.hidden=true; startCal(); });
 bAgain.addEventListener('click', ()=>{ ui.oEnd.hidden=true; world=null; state='fit'; fitSince=0; ui.oFit.hidden=false; });
-bSave.addEventListener('click', ()=>{
+function saveRec(){
   const blob = new Blob([rec.map(o=>JSON.stringify(o)).join('\n')], {type:'application/x-ndjson'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'sixoclock-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
   a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+bSave.addEventListener('click', saveRec);
+document.getElementById('bSaveNow').addEventListener('click', saveRec);
+document.getElementById('bSkipStep').addEventListener('click', ()=>{
+  if(phase!=='cal') return;
+  recPush({ k:'skip', t:+(performance.now()-clockT0).toFixed(1), step:calStep });
+  calT = CAL[calStep].hold;     // the next tick advances it
 });
 resize(); checkRotation();
 requestAnimationFrame(frame);
