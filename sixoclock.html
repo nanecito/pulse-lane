@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b1a2b">
+<title>Six O'Clock</title>
+<style>
+  :root{ --ink:#0b1a2b; --sky:#20466b; --warm:#f4efe4; --dim:#9fb3c8;
+         --hot:#ff7a3d; --gold:#ffd166; --cyan:#4fd5e8; --good:#7be495; --bad:#ff5c5c; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  /* Everything that matters while standing back is sized in vh, not px. */
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;justify-content:safe center;padding:3vh 3vw;text-align:center;gap:1.6vh;
+    overflow-y:auto;overscroll-behavior:contain;
+    background:radial-gradient(130% 95% at 50% 15%,#1d3a5c 0%,var(--ink) 70%);z-index:5}
+  .ov[hidden]{display:none}
+  /* the fit screen sits over the mirror and must not hide it: the player is
+     using the picture to find the spot */
+  #oFit{background:radial-gradient(130% 95% at 50% 15%,rgba(29,58,92,.55) 0%,rgba(11,26,43,.75) 70%)}
+  h1{font-size:clamp(28px,11vh,80px);margin:0;letter-spacing:.14em;font-weight:400;line-height:1.05}
+  h1 .g{color:var(--hot)}
+  .sub{color:var(--dim);font-size:clamp(14px,3.4vh,24px);line-height:1.45;max-width:36ch;margin:0}
+  .big{font-size:clamp(20px,7vh,56px);letter-spacing:.06em;margin:0;color:var(--gold)}
+  button{font:inherit;font-size:clamp(17px,4vh,30px);letter-spacing:.05em;padding:1.6vh 5vw;
+    border-radius:999px;border:2px solid var(--hot);background:var(--hot);color:#2a0e00;cursor:pointer}
+  button.ghost{background:transparent;color:var(--hot)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:2vw;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:clamp(11px,2.3vh,16px);max-width:48ch;line-height:1.4;margin:0}
+  .err{color:var(--bad);font-size:clamp(12px,2.6vh,18px);max-width:34ch;line-height:1.4}
+  /* THE BAND: the one line he reads while flying. Plate behind it so it
+     survives lying across a lit limb or a cloud. */
+  #band{position:fixed;left:0;right:0;top:12%;text-align:center;z-index:4;pointer-events:none;
+    text-shadow:0 3px 14px #000;padding:1vh 0 1.2vh;
+    background:linear-gradient(90deg,rgba(11,26,43,0),rgba(11,26,43,.82) 12%,rgba(11,26,43,.82) 88%,rgba(11,26,43,0))}
+  #band[hidden]{display:none}
+  #bandA{display:block;font-size:clamp(28px,11vh,96px);letter-spacing:.1em;color:var(--gold);line-height:1}
+  #bandB{display:block;font-size:clamp(13px,3.2vh,24px);color:var(--warm);margin-top:.8vh}
+  table{border-collapse:collapse;font-size:clamp(13px,3vh,22px)}
+  td{padding:.4vh 2vw}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--gold)}
+  #score{font-size:clamp(60px,26vh,220px);color:var(--hot);line-height:1}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="band" hidden><b id="bandA"></b><span id="bandB"></span></div>
+
+<div class="ov" id="oRot" hidden>
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Sideways. A phone camera is landscape whatever you do with it.</p>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>SIX<br><span class="g">O'CLOCK</span></h1>
+  <p class="sub">Your arms are the wings. Tilt them to turn. Squat to dive for speed. Get behind a bandit, hold the lock, then pull — and keep an eye on your own six.</p>
+  <div class="row"><button id="bStart">Fly</button></div>
+  <p class="note" id="loadMsg" hidden>Starting the camera…</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Ninety seconds. One tap, then it talks you through it. Nothing leaves your phone.</p>
+</div>
+
+<div class="ov" id="oFit" hidden>
+  <h1 id="fitBig">FIND YOUR<br><span class="g">SPOT</span></h1>
+  <p class="big" id="fitMsg">Looking for you…</p>
+  <div class="row"><button id="bSkip" class="ghost">Start anyway</button></div>
+  <p class="note">It needs to see you from head to knees, with room either side for your arms out.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <p class="big" id="endTag">SPLASHED</p>
+  <div><span id="score">0</span></div>
+  <table id="endRows"></table>
+  <div class="row"><button id="bAgain">Fly again</button><button id="bSave" class="ghost">Save recording</button></div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { FilesetResolver, PoseLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12";
+
+/*====== sim.js ======*/
+/* ==================================================================
+   SIX O'CLOCK — the flight model and the bandits. No DOM in this block.
+   The Node simulation extracts it between the markers and drives it with
+   synthetic players, so the numbers below were tuned on the code that
+   ships, not on arithmetic about it.
+
+   The design law, from doc 22: everything that decided a real dogfight
+   played out over 3–40 s. A camera that is 150–250 ms late is fine for
+   geometry and useless for reflexes, so this game has no reflexes in it.
+   Every judged thing is a HOLD over a window longer than a second.
+   ================================================================== */
+const K = {
+  ROUND_MS: 90000,
+  // energy. speed in world units/s, altitude 0..1 as a store of speed
+  V_CRUISE: 1.00, V_MIN: 0.45, V_MAX: 1.80,
+  THRUST: 0.22,        // speed/s restored toward cruise
+  DRAG_TURN: 0.30,     // speed/s lost at full bank (energy cost of a turn)
+  DRAG_PULL: 0.55,     // speed/s lost in a hard pull on top of the bank
+  DIVE_GAIN: 0.75,     // speed/s gained at full squat, paid from altitude
+  DIVE_ALT: 0.22,      // altitude/s spent at full squat
+  ZOOM: 0.45,          // excess speed above cruise converted to altitude /s
+  ZOOM_ALT: 0.12,      // altitude/s gained while zooming at full excess
+  ALT_REGEN_CRUISE: 0.05,
+  // turning. degrees per second
+  TURN_BASE: 18,       // full bank, no pull — a Bf 109 did about 16-20
+  TURN_PULL: 42,       // bank plus squat — buys the angle, costs the energy
+  PULL_BANK: 0.55, PULL_SQUAT: 0.35,
+  STALL_TURN: 0.5,     // turn multiplier when below V_MIN+0.05
+  // G
+  G_FILL_S: 5.0,       // seconds of hard pull to black out (3-5 s buffer)
+  G_RECOVER_S: 3.0,
+  BLACKOUT_S: 8.0,
+  G_GREY_FROM: 0.55,   // edges start greying here
+  // guns
+  CONE_DEG: 14, RANGE: 3.0,
+  LOCK_S: 1.2,         // nose on the bandit this long to lock
+  COMMIT_S: 1.5,       // then hold the pull this long to fire
+  COMMIT_GRACE_S: 0.25,// dropout allowed inside the commit hold
+  // bandits
+  BANDITS_ALIVE: 3, BANDIT_V: 0.90, BANDIT_TURN: 22,
+  ALARM_RANGE: 3.6, ALARM_S: 0.8,    // how long you must be near before they notice
+  SPAWN_R: 7.5,
+  HUNTER_FROM_S: 12, HUNTER_V: 1.30, HUNTER_TURN: 26,
+  HUNTER_CONE_DEG: 16, HUNTER_RANGE: 2.6, THREAT_S: 3.0,
+  HUNTER_EXTEND_S: 6.0, HUNTER_REST_S: 5.0,
+  HIT_DMG: 25, HEALTH: 100, REGEN_CRUISE: 10,
+  CRUISE_EXPOSE_S: 6.0,  // arms down this long and the hunter comes for you
+  LOOK_S: 0.5, LOOK_MEMORY_S: 10,
+  VIEW_R: 4.2,           // world units visible from the player (5.2 drew 46 px planes on a phone)
+};
+
+function mulberry(seed){ let a = seed>>>0; return function(){
+  a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const RAD = Math.PI/180, DEG = 180/Math.PI;
+const wrap = a => { while(a > 180) a -= 360; while(a <= -180) a += 360; return a; };
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+// heading 0 = up (+y), clockwise positive. velocity from heading:
+const hx = h => Math.sin(h*RAD), hy = h => Math.cos(h*RAD);
+
+function makeWorld(seed){
+  const rng = mulberry(seed||1);
+  const w = { t:0, rng, seed:seed||1,
+    p:{ x:0, y:0, h:0, v:K.V_CRUISE, alt:0.7, g:0, blackout:0, health:K.HEALTH,
+        cruiseS:0, stall:false, lookS:0, lookedAt:-1e9 },
+    bandits:[], nextId:1,
+    lock:{ id:null, t:0, commit:0, drop:0, state:'none' },   // none|locking|locked|commit
+    hunter:{ id:null, state:'wait', t:0, threat:0, hits:0 },
+    kills:0, score:0, hits:0,
+    work:{ squats:0, pullS:0, wingS:0, diveS:0, cruiseS:0 }, _sq:false,
+    events:[] };
+  for(let i=0;i<K.BANDITS_ALIVE;i++) spawnBandit(w, true);
+  return w;
+}
+function spawnBandit(w, initial){
+  const a = (initial ? (w.rng()*120-60) : (w.rng()*200-100)) ;      // mostly ahead
+  const r = initial ? 2.2 + w.rng()*2.5 : K.SPAWN_R*(0.85+w.rng()*0.3);
+  const ang = w.p.h + a;
+  const b = { id:w.nextId++, x:w.p.x + hx(ang)*r, y:w.p.y + hy(ang)*r,
+    h: wrap(w.p.h + (w.rng()*90-45)), v:K.BANDIT_V, turn:0, state:'patrol',
+    nearS:0, wander:(w.rng()*2-1)*8, wanderT:0, alive:true };
+  w.bandits.push(b);
+  return b;
+}
+function rel(w, b){
+  // bandit position in the player's frame: ahead (+y), right (+x), plus
+  // range and the bearing off the player's nose (deg, right positive)
+  const dx = b.x - w.p.x, dy = b.y - w.p.y;
+  const h = w.p.h*RAD, c = Math.cos(h), s = Math.sin(h);
+  const ax =  dx*c - dy*s, ay = dx*s + dy*c;
+  const range = Math.hypot(dx,dy);
+  const bearing = wrap(Math.atan2(ax, ay)*DEG);
+  // their aspect: angle between their tail and the line to us. 0 = we are
+  // dead astern (their six), 180 = head on.
+  const toMe = Math.atan2(-dx, -dy)*DEG;          // their nose would point at us at toMe
+  const aspect = 180 - Math.abs(wrap(toMe - b.h)); // 0 = we are dead astern, 180 = head on
+  return { ax, ay, range, bearing, aspect };
+}
+
+/* The one function. inp = { bank:-1..1 (left positive), squat:0..1,
+   wings:bool, look:bool }, dt seconds. Returns nothing; mutates w and
+   pushes to w.events for the renderer and the voice. */
+function stepWorld(w, inp, dt){
+  const p = w.p, ev = w.events;
+  w.t += dt;
+  const wings = !!inp.wings && p.blackout <= 0;
+  let bank = wings ? clamp(inp.bank,-1,1) : 0;
+  const squat = clamp(inp.squat||0, 0, 1);
+  /* THE PULL IS CONTINUOUS. The first model made any squat plus any bank a
+     full hard pull, and a pilot flying the design as intended blacked out
+     4.3 times a round in the simulation — diving toward a bandit off to one
+     side was being charged as a 6 g break. Now pull = how hard the bank is
+     past a threshold times how deep the squat is past one: a gentle dive
+     while turning costs a little G, a full bank plus a full squat costs it
+     all in G_FILL_S seconds. */
+  const pullCmd = wings ? clamp((Math.abs(bank)-K.PULL_BANK)/(1-K.PULL_BANK), 0, 1) * clamp((squat-K.PULL_SQUAT)/(0.85-K.PULL_SQUAT), 0, 1) : 0;
+  /* YOU CANNOT PULL G WITHOUT SPEED. The simulation's pilot fell into a
+     death spiral: stalled, squatting to dive but still banked, the pull's
+     drag beat the thrust and G filled to blackout at 0.36 speed. The G a
+     turn produces goes with speed squared, so the pull is scaled by it: a
+     slow plane turns lazily and cannot black out, a fast one bites. */
+  const vq = clamp((p.v/K.V_CRUISE)*(p.v/K.V_CRUISE), 0, 1.6);
+  const pull = pullCmd * Math.min(1, vq);          // what the turn and the drag get
+  const gPull = pullCmd * clamp(vq, 0.6, 1.3);      // what the G meter gets: a slow pull still costs, less
+  const pulling = pullCmd > 0.5;
+
+  /* ---- work, counted separately from score ---- */
+  if(wings) w.work.wingS += dt;
+  if(squat >= 0.35) w.work.diveS += dt;
+  if(squat >= 0.8 && !w._sq){ w._sq = true; w.work.squats++; }
+  if(squat < 0.4) w._sq = false;
+
+  /* ---- G and blackout ---- */
+  if(p.blackout > 0){ p.blackout -= dt; if(p.blackout <= 0){ p.blackout = 0; p.g = 0; ev.push({k:'wake'}); } }
+  else if(gPull > 0){ p.g += gPull*dt/K.G_FILL_S; if(pulling) w.work.pullS += dt;
+    p.g -= (1-pullCmd)*dt/K.G_RECOVER_S; p.g = Math.max(0, p.g);
+    if(p.g >= 1){ p.g = 1; p.blackout = K.BLACKOUT_S; ev.push({k:'blackout'}); } }
+  else p.g = Math.max(0, p.g - dt/K.G_RECOVER_S);
+
+  /* ---- cruise: arms down is a state, not a pause ---- */
+  if(!wings){ p.cruiseS += dt; w.work.cruiseS += dt;
+    p.health = Math.min(K.HEALTH, p.health + K.REGEN_CRUISE*dt);
+    p.alt = Math.min(1, p.alt + K.ALT_REGEN_CRUISE*dt); }
+  else p.cruiseS = 0;
+
+  /* ---- energy ---- */
+  const diving = wings && squat >= 0.2;
+  let dv = 0;
+  if(p.v < K.V_CRUISE) dv += K.THRUST*(wings ? 1 : 1.4)*dt;
+  /* turn drag goes with speed too, or a full bank at minimum speed out-drags
+     the thrust and the plane sits pinned on the stall floor for ever —
+     which is where the pilot blacked out. Sustained full bank settles at
+     0.86 cruise; full bank plus full pull at 0.51, the stall edge. */
+  dv -= K.DRAG_TURN*Math.abs(bank)*Math.min(1, vq)*dt;
+  dv -= K.DRAG_PULL*pull*dt;
+  if(diving && p.alt > 0){ const take = Math.min(p.alt, K.DIVE_ALT*squat*dt);
+    p.alt -= take; dv += K.DIVE_GAIN*squat*dt * (take/(K.DIVE_ALT*squat*dt+1e-9)); }
+  if(!diving && p.v > K.V_CRUISE && p.alt < 1){
+    const ex = (p.v - K.V_CRUISE)/(K.V_MAX-K.V_CRUISE);
+    dv -= K.ZOOM*ex*dt; p.alt = Math.min(1, p.alt + K.ZOOM_ALT*ex*dt); }
+  p.v = clamp(p.v + dv, K.V_MIN*0.8, K.V_MAX);
+  const wasStall = p.stall; p.stall = p.v < K.V_MIN + 0.05;
+  if(p.stall && !wasStall) ev.push({k:'stall'});
+
+  /* ---- turning ---- */
+  let turn = 0;
+  if(w.lock.state === 'commit'){
+    // THE PULL TRACKS THE BANDIT. Once locked, holding the squat is pulling
+    // lead: the nose is drawn onto him at pull rate and the player's job is
+    // the hold, not the aim (Assault Horizon Legacy's trick). Only while the
+    // squat is held — the first model tracked from the lock alone and a
+    // statue with level wings sat locked on a bandit for sixty seconds.
+    const b = w.bandits.find(x => x.id === w.lock.id);
+    if(b){ const r = rel(w, b); turn = clamp(r.bearing*3, -K.TURN_PULL, K.TURN_PULL); }
+  } else {
+    const rate = K.TURN_BASE + (K.TURN_PULL - K.TURN_BASE)*pull;
+    turn = -bank * rate;              // left bank (positive) = heading decreases
+  }
+  if(p.stall) turn *= K.STALL_TURN;
+  p.h = wrap(p.h + turn*dt);
+  p.x += hx(p.h)*p.v*dt; p.y += hy(p.h)*p.v*dt;
+
+  /* ---- lookout ---- */
+  if(inp.look){ p.lookS += dt; if(p.lookS >= K.LOOK_S && w.t - p.lookedAt > 2){ p.lookedAt = w.t; ev.push({k:'look'}); } }
+  else p.lookS = 0;
+  const looked = (w.t - p.lookedAt) < K.LOOK_MEMORY_S;
+
+  /* ---- bandits ---- */
+  for(const b of w.bandits){
+    if(!b.alive) continue;
+    const r = rel(w, b);
+    if(b.id === w.hunter.id){ stepHunter(w, b, r, wings, pulling, bank, dt); continue; }
+    // do they notice us? near, and we are somewhere behind their wing line
+    if(r.range < K.ALARM_RANGE && r.aspect < 110) b.nearS += dt; else b.nearS = Math.max(0, b.nearS - dt);
+    if(b.state === 'patrol' && b.nearS >= K.ALARM_S){ b.state = 'alarmed'; ev.push({k:'alarm', id:b.id}); }
+    if(b.state === 'alarmed' && r.range > K.ALARM_RANGE*1.6){ b.state = 'patrol'; b.nearS = 0; }
+    if(b.state === 'patrol'){
+      b.wanderT -= dt; if(b.wanderT <= 0){ b.wander = (w.rng()*2-1)*10; b.wanderT = 2 + w.rng()*3; }
+      b.turn = b.wander;
+      // drift back toward the player's neighbourhood so the sky stays target-rich
+      if(r.range > K.VIEW_R*0.9){ const toP = wrap(Math.atan2(w.p.x-b.x, w.p.y-b.y)*DEG - b.h); b.turn = clamp(toP, -K.BANDIT_TURN, K.BANDIT_TURN); }
+    } else {
+      // BREAK INTO THE ATTACKER (Boelcke #6): turn the way that moves our
+      // nose off their tail fastest — toward the side we are on.
+      const dir = r.bearing >= 0 ? 1 : -1;  // we see them to our right → they turn right, into us
+      b.turn = dir*K.BANDIT_TURN;
+    }
+    b.h = wrap(b.h + b.turn*dt);
+    b.x += hx(b.h)*b.v*dt; b.y += hy(b.h)*b.v*dt;
+  }
+
+  /* ---- the hunter is appointed ---- */
+  if(w.hunter.state === 'wait' && w.t >= K.HUNTER_FROM_S && w.t - (w.hunterKilledAt||-1e9) > K.HUNTER_REST_S){
+    // THE HUNTER ARRIVES FROM BEHIND, fresh, at hunting range. The first
+    // model promoted a patrolling bandit, which by then had wandered twelve
+    // units off, and a cruising player went fifty seconds before the first hit.
+    const side = w.rng() < 0.5 ? -1 : 1;
+    const ang = wrap(p.h + 180 + side*(25 + w.rng()*35)), r = K.VIEW_R*1.15;
+    const b = { id:w.nextId++, x:p.x + hx(ang)*r, y:p.y + hy(ang)*r, h:wrap(ang+180), v:K.HUNTER_V, turn:0,
+                state:'hunt', nearS:0, wander:0, wanderT:0, alive:true };
+    w.bandits.push(b);
+    w.hunter.id = b.id; w.hunter.state = 'engage'; w.hunter.t = 0;
+    ev.push({k:'hunter', id:b.id, looked});
+  }
+
+  /* ---- lock and fire ---- */
+  const L = w.lock;
+  let target = null, tr = null;
+  if(wings){
+    let best = 1e9;
+    for(const b of w.bandits){ if(!b.alive) continue; const r = rel(w,b);
+      if(r.range <= K.RANGE && Math.abs(r.bearing) <= K.CONE_DEG && r.range < best){ best = r.range; target = b; tr = r; } }
+  }
+  if(L.state === 'none' || L.state === 'locking'){
+    if(target && (L.id === null || L.id === target.id)){ L.id = target.id; L.t += dt; L.state = 'locking';
+      if(L.t >= K.LOCK_S){ L.state = 'locked'; L.commit = 0; L.drop = 0; ev.push({k:'locked', id:target.id, aspect:tr.aspect}); } }
+    else { L.id = null; L.t = 0; L.state = 'none'; }
+  } else {
+    // locked or committing: lose it if the bandit leaves the cone or range
+    const b = w.bandits.find(x => x.id === L.id);
+    const r = b && b.alive ? rel(w,b) : null;
+    if(!r || r.range > K.RANGE*1.15 || Math.abs(r.bearing) > K.CONE_DEG*1.6 || !wings){
+      L.state = 'none'; L.id = null; L.t = 0; L.commit = 0; ev.push({k:'lost'});
+    } else {
+      if(squat >= K.PULL_SQUAT){ L.drop = 0; L.commit += dt; L.state = 'commit';
+        if(L.commit >= K.COMMIT_S){
+          b.alive = false; w.kills++;
+          const bonus = r.aspect < 45 ? 50 : 0;     // from their six: the historically decisive position
+          w.score += 100 + bonus; ev.push({k:'kill', id:b.id, bonus, x:b.x, y:b.y});
+          if(b.id === w.hunter.id){ w.hunter.state = 'wait'; w.hunter.id = null; w.hunter.threat = 0; w.hunterKilledAt = w.t; }
+          L.state = 'none'; L.id = null; L.t = 0; L.commit = 0;
+          spawnBandit(w, false);
+        }
+      } else { L.drop += dt; if(L.drop > K.COMMIT_GRACE_S){ L.commit = 0; L.state = 'locked'; } }
+    }
+  }
+  // tidy dead bandits
+  w.bandits = w.bandits.filter(b => b.alive);
+  while(w.bandits.filter(b => b.id !== w.hunter.id).length < K.BANDITS_ALIVE) spawnBandit(w, false);
+}
+
+function stepHunter(w, b, r, wings, pulling, bank, dt){
+  const H = w.hunter, p = w.p;
+  H.t += dt;
+  // where is the player from the hunter: bearing off the hunter's nose
+  const toP = wrap(Math.atan2(p.x-b.x, p.y-b.y)*DEG - b.h);
+  // are they on our six: they are behind us (bearing from our nose > 120) and close
+  const behind = Math.abs(r.bearing) > 180 - K.HUNTER_CONE_DEG*2 && r.range < K.HUNTER_RANGE;
+  if(H.state === 'engage'){
+    // pure pursuit on a point behind the player
+    const tx = p.x - hx(p.h)*0.8, ty = p.y - hy(p.h)*0.8;
+    const toT = wrap(Math.atan2(tx-b.x, ty-b.y)*DEG - b.h);
+    b.turn = clamp(toT*2.5, -K.HUNTER_TURN, K.HUNTER_TURN);
+    // a cruising player is the easy target: the hunter closes faster
+    b.v = p.cruiseS > K.CRUISE_EXPOSE_S ? K.HUNTER_V*1.3 : K.HUNTER_V;
+    // his nose on us, close, and from behind our wing line — a head-on pass is not a kill here
+    const inGuns = Math.abs(toP) < K.HUNTER_CONE_DEG && r.range < K.HUNTER_RANGE && Math.abs(r.bearing) > 60;
+    if(inGuns){ H.threat += dt/K.THREAT_S;
+      if(H.threat >= 1){ H.threat = 0; p.health -= K.HIT_DMG; w.hits++; H.hits++; w.events.push({k:'hit', health:p.health});
+        H.state = 'extend'; H.t = 0; }
+    } else H.threat = Math.max(0, H.threat - dt/(K.THREAT_S*0.7));
+    // THE BREAK: a hard pull while they are on our tail makes them overshoot.
+    // Geometry, not reflex — the threat arc fills over three seconds and the
+    // pull is a held bank plus a squat.
+    if(pulling && r.range < K.HUNTER_RANGE*1.2 && Math.abs(r.bearing) > 90){
+      H.state = 'extend'; H.t = 0; H.threat = 0; w.events.push({k:'broke'});
+    }
+  } else if(H.state === 'extend'){
+    // overshoot: fly straight past, then come round again
+    b.turn = 0;
+    if(H.t > K.HUNTER_EXTEND_S){ H.state = 'rest'; H.t = 0; }
+  } else if(H.state === 'rest'){
+    b.turn = clamp(toP*2, -K.HUNTER_TURN, K.HUNTER_TURN)*0.5;
+    if(H.t > K.HUNTER_REST_S) { H.state = 'engage'; H.t = 0; }
+  }
+  b.h = wrap(b.h + b.turn*dt);
+  b.x += hx(b.h)*b.v*dt; b.y += hy(b.h)*b.v*dt;
+}
+
+const SIM = { K, makeWorld, stepWorld, rel, wrap, clamp, hx, hy, mulberry };
+/*====== endsim ======*/
+
+/*====== signal.js ======*/
+/* ---- the landmark reader, lifted from Sparks and Second Line unchanged ---- */
+const VIS_GET = 0.15, VIS_KEEP = 0.04;
+const J = { nose:0, earA:7, earB:8, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? VIS_KEEP : VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };       // mirrored, normalised to the frame
+  };
+}
+
+/* ---- the body becomes four signals: bank, squat, wings, look ----------
+   All scale-free. The ruler is SHOULDER WIDTH (doc 16: a bend about a
+   horizontal axis does not touch it) for the arms, and the TRACKED torso
+   for the squat (doc 02: standing height is tracked, not frozen). */
+const WING_SPAN_ON  = 2.35;   // wrist-to-wrist / shoulder width: arms out (straight out ≈ 3.9, 45° ≈ 3.1, down ≈ 1.2)
+const WING_SPAN_OFF = 1.9;    // hysteresis: below this the arms are down
+const BANK_FULL = 0.42;       // radians of wrist-line tilt for full bank: each arm about 30° off level. 0.62 needed 45° and the render's dip never passed the calibration
+const BANK_DEAD = 0.14;       // fraction of full — the research's 2-3° plus camera noise
+const BANK_CURVE = 1.3;
+const STEER_MINCUT = 0.7, STEER_BETA = 1.6, STEER_DCUT = 0.80;   // the racing game's filter
+const SQUAT_DEPTH = 0.26;     // hip drop, in torsos, that is a full squat (racing game)
+/* REF_DOWN is 12 s here, not the racing game's 3.5. There a low stance was
+   something to forgive; here a HELD squat is the pull and the commit, and
+   with 3.5 s the render read a squat held 1.4 s as 0.60 of itself and a
+   five-second pull would have decayed to standing. */
+const REF_UP = 0.5, REF_DOWN = 12, REF_SHRINK = 0.10;
+const LOOK_YAW = 0.42;        // nose offset over ear spacing, either way
+
+function makeSignals(){
+  let angSm = null, angPrev = 0, angSpd = 0, wingsOn = false;
+  let hipRef = null, shRef = null, refTorso = 0;
+  let bankSm = 0;
+  function steerFilter(raw, dt){
+    if(angSm==null){ angSm = raw; angPrev = raw; }
+    const sp = Math.abs(raw - angPrev)/Math.max(dt, 1e-3); angPrev = raw;
+    angSpd += (sp - angSpd) * (1 - Math.pow(STEER_DCUT, dt*60));
+    const cut = STEER_MINCUT + STEER_BETA*angSpd;
+    angSm += (raw - angSm) * (1 - Math.exp(-2*Math.PI*cut*dt));
+    return angSm;
+  }
+  function bankFrom(ang){
+    let s = Math.max(-1, Math.min(1, ang/BANK_FULL));
+    if(Math.abs(s) < BANK_DEAD) return 0;
+    const n = (Math.abs(s)-BANK_DEAD)/(1-BANK_DEAD);
+    return (s<0?-1:1) * Math.pow(n, BANK_CURVE);
+  }
+  return {
+    reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; },
+    read(L, dt){
+      const out = { bank:0, squat:0, wings:false, look:false, span:0, valid:{wings:false, squat:false, look:false} };
+      if(!(L.shA && L.shB && L.hipC)) { bankSm *= Math.pow(0.85, dt*60); out.bank = bankSm; return out; }
+      const sw = Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
+      const torso = Math.max(1e-6, Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y));
+      /* wings: both wrists seen, arms spread. */
+      if(L.wrA && L.wrB){
+        const span = Math.abs(L.wrB.x - L.wrA.x)/sw; out.span = span;
+        if(!wingsOn && span >= WING_SPAN_ON) wingsOn = true;
+        else if(wingsOn && span < WING_SPAN_OFF) wingsOn = false;
+        out.valid.wings = true;
+        if(wingsOn){
+          /* bank = wrist line minus shoulder line, so a torso lean does not
+             read as a bank and a bank does not need one. */
+          const wa = Math.atan2(L.wrB.y - L.wrA.y, L.wrB.x - L.wrA.x);
+          const sa = Math.atan2(L.shB.y - L.shA.y, L.shB.x - L.shA.x);
+          const raw = wa - sa;                    // right wrist up = left wing down = left turn = positive
+          bankSm = bankFrom(steerFilter(raw, dt));
+        } else { angSm = null; bankSm *= Math.pow(0.85, dt*60); }
+      } else { wingsOn = wingsOn && false; bankSm *= Math.pow(0.85, dt*60); }
+      out.wings = wingsOn; out.bank = bankSm;
+      /* squat: the racing game's tracked reference. Up fast, down slow,
+         and a body shrinking in the frame (walking back) is followed. */
+      const hy = L.hipC.y, sy = L.shC.y;        // y is UP here
+      if(hipRef === null){ hipRef = hy; shRef = sy; refTorso = torso; }
+      refTorso += (torso - refTorso)*Math.min(1, dt/0.6);
+      if(refTorso > 0 && (refTorso - torso)/refTorso > REF_SHRINK){ hipRef = hy; shRef = sy; }
+      const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y > ref ? REF_UP : REF_DOWN));
+      hipRef = follow(hipRef, hy); shRef = follow(shRef, sy);
+      const hipDrop = (hipRef - hy)/refTorso, shDrop = (shRef - sy)/refTorso;
+      out.squat = clamp(Math.max(0, Math.max(hipDrop, shDrop))/SQUAT_DEPTH, 0, 1);
+      out.valid.squat = true;
+      /* look: nose off the ear midpoint, over ear spacing. Coarse on purpose. */
+      if(L.nose && L.earA && L.earB){
+        const ec = (L.earA.x + L.earB.x)/2, es = Math.max(1e-6, Math.abs(L.earB.x - L.earA.x));
+        out.look = Math.abs((L.nose.x - ec)/es) > LOOK_YAW; out.valid.look = true;
+      }
+      return out;
+    }
+  };
+}
+/*====== endsignal ======*/
+
+/* ================= camera, pose, recording ================= */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+const BUILD = 'sixoclock-1';
+const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. This game
+   has no timed event: every judgment is a hold longer than a second, so
+   the figure is recorded, not used. */
+const REC_CAP = 40000; const rec = []; let recDropped = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'sixoclock', build:BUILD,
+    orientation:(innerHeight>innerWidth)?'portrait':'landscape',
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    poseLatencyMs:POSE_LATENCY_MS, K,
+    tune:{ WING_SPAN_ON, WING_SPAN_OFF, BANK_FULL, BANK_DEAD, BANK_CURVE, SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, LOOK_YAW },
+    coords:'MediaPipe normalised to the camera frame, mirrored; the signals read them aspect corrected and y-up' });
+}
+const NEEDS_REC = ['nose','earA','earB','shA','shB','elA','elB','wrA','wrB','hipA','hipB','knA','knB','ankA','ankB'];
+
+/* ================= canvas, orientation, fit ================= */
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){ DPR = Math.min(2, devicePixelRatio||1); W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); }
+function landscapeOK(){ return innerWidth > innerHeight; }
+function checkRotation(){ if(ui && ui.oRot) ui.oRot.hidden = landscapeOK(); }
+addEventListener('resize', ()=>{ resize(); checkRotation(); });
+addEventListener('orientationchange', ()=>{ resize(); checkRotation(); });
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw||!vh) return { dx:0,dy:0,dw:W,dh:H,vw:0,vh:0 };
+  const sc = Math.min(W/vw, H/vh);
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+function frameAR(){ const vw=video.videoWidth||4, vh=video.videoHeight||3; return vw/vh; }
+function pxRaw(p){ const f=videoFit(); return { x:f.dx+p.x*f.dw, y:f.dy+p.y*f.dh }; }
+function readPose(p){
+  const ar = frameAR(), L = {}, have = {};
+  for(const k in J){ const q = read(p, J[k]);
+    if(q){ L[k] = { x:q.x*ar, y:-q.y }; have[k] = true; } }
+  if(L.hipA && L.hipB) L.hipC = { x:(L.hipA.x+L.hipB.x)/2, y:(L.hipA.y+L.hipB.y)/2 };
+  if(L.shA && L.shB)  L.shC  = { x:(L.shA.x+L.shB.x)/2,  y:(L.shA.y+L.shB.y)/2 };
+  return { L, have };
+}
+function sidesOk(L){
+  if(!(L.shA&&L.shB&&L.hipA&&L.hipB)) return false;
+  const sw = L.shB.x - L.shA.x, hw = L.hipB.x - L.hipA.x;
+  const span = Math.max(Math.abs(sw), 1e-6);
+  if(sw <= 0 || hw <= -span*0.2) return false;              // labels swapped
+  const torsoV = Math.abs((L.shA.y+L.shB.y)/2 - (L.hipA.y+L.hipB.y)/2);
+  if(!torsoV || Math.abs(sw)/torsoV < 0.52) return false;   // turned side on
+  return true;
+}
+
+/* ---- the fit gate: head to knees, and room for the wings ---- */
+function fitState(raw){
+  if(!raw) return { ok:false, why:'nobody' };
+  const g={}; for(const k of ['nose','shA','shB','hipA','hipB','knA','knB']){
+    const q=read(raw,J[k]); if(q) g[k]=q; }
+  if(!(g.shA&&g.shB&&g.hipA&&g.hipB)) return { ok:false, why:'nobody' };
+  if(!(g.knA||g.knB)) return { ok:false, why:'knees' };
+  const shY=(g.shA.y+g.shB.y)/2, hipY=(g.hipA.y+g.hipB.y)/2;
+  const torso=Math.abs(hipY-shY);
+  const headY = g.nose ? g.nose.y : shY - torso*0.44;
+  if(headY < 0.03) return { ok:false, why:'high' };
+  const kneeY = Math.max(g.knA?g.knA.y:0, g.knB?g.knB.y:0);
+  if(kneeY > 0.985) return { ok:false, why:'low' };
+  // wings need room: a fingertip is 1.18 torsos from the shoulder, in frame-x
+  // units that is torso*1.18/ar, and the shoulders sit 0.4 torso either side
+  const ar = frameAR(), shC = (g.shA.x+g.shB.x)/2, reach = (0.40+1.18)*torso/ar;
+  if(shC - reach < 0.02 || shC + reach > 0.98) return { ok:false, why:'arms' };
+  return { ok:true, torso };
+}
+const FIT_SAY = {
+  nobody:['STEP INTO THE PICTURE','I cannot see you yet. Step in front of the phone.'],
+  knees :['STEP BACK','I cannot see your knees. Step back a little.'],
+  high  :['STEP BACK','Your head is at the top of the picture. Step back.'],
+  low   :['STEP BACK','Your knees are off the bottom. Step back a little.'],
+  arms  :['STEP BACK','No room for your wings. Step back, or move to the middle.'],
+};
+
+/* ================= voice ================= */
+/* Two guards, because one was not enough: the render's voice log showed
+   "Arms up" and "Check your six" alternating EVERY FRAME through a cruise —
+   each one was "not the same as the last line", so the last-line guard let
+   them leapfrog. Now every line has its own cooldown and unforced lines
+   also keep a global gap. */
+let voiceOn = true, lastSaidAt = 0; const saidAt = {};
+function say(text, force, cooldownMs){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  const now = performance.now();
+  const cd = cooldownMs || 4000;
+  if(!force && ((saidAt[text] && now - saidAt[text] < cd) || now - lastSaidAt < 1500)) return;
+  saidAt[text] = now; lastSaidAt = now;
+  try { if(force) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; u.pitch = 1.0; u.volume = 1;
+    speechSynthesis.speak(u); } catch(e){}
+}
+
+/* ================= state ================= */
+let state='idle', phase='', lastRaf=0, lastFrameAt=0, clockT0=0, fitSince=0;
+let world=null, sig=makeSignals(), inp={bank:0,squat:0,wings:false,look:false,span:0,valid:{}};
+let roundStart=0, calT=0, calStep=0, calSpan=0, calSquat=0, lastStep=0;
+let bandA='', bandB='', bandUntil=0, flashes=[], tracerT=0, lastLook=-1e9;
+const ui={};
+for(const id of ['oStart','oFit','oEnd','oRot','band','bandA','bandB','loadMsg','errMsg','fitMsg','fitBig','score','endRows','endTag','endNote'])
+  ui[id]=document.getElementById(id);
+function setBand(a,b,ms){ bandA=a; bandB=b||''; ui.bandA.textContent=a; ui.bandB.textContent=bandB;
+  ui.band.hidden = !a; bandUntil = ms ? performance.now()+ms : 0; }
+
+/* ---- the short teaching phase: measure the player's own wings and squat.
+   Doc 00: score a player against their own best wherever a teaching phase
+   makes it possible. Here it also tells the game what "arms out" looks
+   like on this body in this room. */
+const CAL = [
+  { say:'Arms out, like wings. Hold them there.', band:['WINGS OUT','hold them level'], need:'wings', hold:2.5 },
+  { say:'Now dip your left wing.', band:['DIP LEFT','left hand down, right hand up'], need:'left', hold:1.2 },
+  { say:'And your right wing.', band:['DIP RIGHT','right hand down, left hand up'], need:'right', hold:1.2 },
+  { say:'Level. Now squat, that is your dive.', band:['SQUAT','that is a dive'], need:'squat', hold:1.0 },
+  { say:'Good. Stand up. Bandits ahead. Fly.', band:['FLY','ninety seconds'], need:'stand', hold:0.8 },
+];
+function startCal(){ state='play'; phase='cal'; calStep=0; calT=0; sig.reset(); setBand(CAL[0].band[0], CAL[0].band[1]); say(CAL[0].say, true); lastStep=performance.now(); }
+function calTick(now, dt){
+  const c = CAL[calStep]; let met = false;
+  if(c.need==='wings') met = inp.wings && Math.abs(inp.bank) < 0.35;
+  else if(c.need==='left') met = inp.wings && inp.bank > 0.5;
+  else if(c.need==='right') met = inp.wings && inp.bank < -0.5;
+  else if(c.need==='squat') met = inp.squat > 0.6;
+  else if(c.need==='stand') met = inp.squat < 0.25;
+  if(met){ calT += dt; if(c.need==='wings') calSpan = Math.max(calSpan, inp.span); if(c.need==='squat') calSquat = Math.max(calSquat, inp.squat); }
+  else calT = Math.max(0, calT - dt*0.5);
+  // nag if nothing is happening for a while
+  if(now - lastStep > 9000 && !met){ say(c.say, true); lastStep = now; }
+  if(calT >= c.hold){ calStep++; calT = 0; lastStep = now;
+    if(calStep >= CAL.length){ startRound(now); return; }
+    const n = CAL[calStep]; setBand(n.band[0], n.band[1]); say(n.say, true); }
+}
+function startRound(now){
+  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1);
+  setBand('', ''); flashes = [];
+  recPush({ k:'round', t:+(now-clockT0).toFixed(1), seed:world.seed, calSpan:+calSpan.toFixed(2), calSquat:+calSquat.toFixed(2) });
+}
+
+/* ---- the voice during the round: few words, each tied to something the
+   player can act on in the next few seconds, never to something that just
+   happened to them. */
+function handleEvents(now){
+  for(const e of world.events){
+    if(e.k==='locked'){ setBand('PULL', e.aspect < 45 ? 'from his six — hold the squat' : 'hold the squat', 3000); say('Lock. Pull.', true); }
+    else if(e.k==='kill'){ setBand('SPLASH', e.bonus ? 'from behind — he never saw you' : 'one down', 2200); say(e.bonus ? 'Splash one. He never saw you.' : 'Splash one.', true); flashes.push({x:e.x,y:e.y,t:now}); }
+    else if(e.k==='lost'){ setBand('', ''); }
+    else if(e.k==='alarm'){ say('He has seen you. Pull to stay with him.'); }
+    else if(e.k==='hunter'){ if(e.looked){ setBand('BANDIT', 'behind you — turn into him', 3000); say('Bandit, six o\'clock. Turn into him when he is close.', true); } }
+    else if(e.k==='hit'){ setBand('HIT', 'break — bank hard and squat', 2500); say('Hit. Break. Bank hard and squat.', true); }
+    else if(e.k==='broke'){ setBand('HE OVERSHOT', 'turn after him', 2500); say('He overshot. Turn after him.', true); }
+    else if(e.k==='blackout'){ setBand('BLACKOUT', 'ease off — stand up', 4000); say('Blacking out. Stand up.', true); }
+    else if(e.k==='wake'){ say('You are back. Wings out.', true); }
+    else if(e.k==='stall'){ setBand('DIVE', 'squat for speed', 2500); say('Speed is life. Squat and dive.', true); }
+    else if(e.k==='look'){ lastLook = now; }
+  }
+  world.events.length = 0;
+  // standing cues that are not events
+  const p = world.p;
+  if(!inp.wings && p.cruiseS > K.CRUISE_EXPOSE_S && p.blackout<=0){ say('Arms up. You are a sitting duck.', false, 8000); if(!bandA) setBand('WINGS OUT', 'arms out to fly', 2000); }
+  const H = world.hunter;
+  if(H.state==='engage' && H.threat > 0.45 && !bandA){ const b = world.bandits.find(x=>x.id===H.id);
+    if(b){ const r = rel(world,b); setBand('BREAK ' + (r.bearing>=0?'RIGHT':'LEFT'), 'bank hard and squat', 1500); say('Break ' + (r.bearing>=0?'right':'left') + '.', false, 3000); } }
+  if(H.state==='engage' && now - lastLook > 12000 && H.threat === 0 && world.t > K.HUNTER_FROM_S + 3){
+    const b = world.bandits.find(x=>x.id===H.id); if(b && rel(world,b).range < 4.5) say('Check your six. Look over a shoulder.', false, 10000);
+  }
+}
+
+function endRound(now){
+  phase='end'; state='end'; setBand('', '');
+  const w = world; const k = w.work;
+  ui.score.textContent = w.score;
+  ui.endTag.textContent = w.kills === 0 ? 'NO KILLS' : (w.kills + (w.kills===1?' SPLASHED':' SPLASHED'));
+  const rows = [
+    ['kills', w.kills], ['hits taken', w.hits],
+    ['squats counted', k.squats], ['dive seconds', k.diveS.toFixed(0)],
+    ['hard pull seconds', k.pullS.toFixed(0)], ['wings out', Math.round(100*k.wingS/(K.ROUND_MS/1000))+'%'],
+    ['arms down', k.cruiseS.toFixed(0)+' s'],
+  ];
+  ui.endRows.innerHTML = rows.map(r=>`<tr><td class="k">${r[0]}</td><td class="v">${r[1]}</td></tr>`).join('');
+  ui.endNote.textContent = 'Score and work are counted separately. A near miss can score; only a full squat counts as one.';
+  ui.oEnd.hidden = false;
+  say(w.kills ? ('Round over. ' + w.kills + (w.kills===1?' kill.':' kills.')) : 'Round over. No kills. Get behind them next time.', true);
+  recPush({ k:'end', t:+(now-clockT0).toFixed(1), score:w.score, kills:w.kills, hits:w.hits, work:k });
+}
+
+/* ================= drawing ================= */
+const CSSVAR = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function drawMirror(alpha){
+  const f = videoFit(); if(!f.vw) return;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(f.dx+f.dw, f.dy); ctx.scale(-1,1);
+  ctx.drawImage(video, 0, 0, f.dw, f.dh); ctx.restore();
+}
+const BONES=[['shA','elA'],['elA','wrA'],['shB','elB'],['elB','wrB'],['shA','shB'],
+             ['shA','hipA'],['shB','hipB'],['hipA','hipB'],['hipA','knA'],['hipB','knB'],['knA','ankA'],['knB','ankB']];
+function drawPlayerFigure(raw, x0, y0, w, h, alpha){
+  // the tracking you can trust, small, in a corner: the stick figure the
+  // game sees, with the wing line coloured by what it read.
+  if(!raw) return;
+  const P = {}; for(const k in J){ const q = read(raw, J[k]); if(q) P[k] = { x:x0 + q.x*w, y:y0 + q.y*h }; }
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap='round'; ctx.lineWidth = Math.max(2, w*0.012);
+  ctx.strokeStyle = 'rgba(244,239,228,.7)';
+  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  if(P.wrA && P.wrB){ ctx.strokeStyle = inp.wings ? CSSVAR('--cyan') : CSSVAR('--dim'); ctx.lineWidth = Math.max(2, w*0.009); ctx.globalAlpha = alpha*0.85;
+    ctx.beginPath(); ctx.moveTo(P.wrA.x,P.wrA.y); ctx.lineTo(P.wrB.x,P.wrB.y); ctx.stroke(); }
+  ctx.restore();
+}
+
+function planePath(s, tilt){
+  // top-down silhouette, nose up, in a unit frame; tilt foreshortens the
+  // low wing so a bank is visible
+  const lw = 1 - 0.5*Math.max(0, tilt), rw = 1 - 0.5*Math.max(0, -tilt);
+  ctx.beginPath();
+  ctx.moveTo(0, -1.0*s);
+  ctx.lineTo(0.14*s, -0.55*s); ctx.lineTo(1.05*s*rw, -0.05*s); ctx.lineTo(1.0*s*rw, 0.2*s); ctx.lineTo(0.16*s, 0.12*s);
+  ctx.lineTo(0.14*s, 0.72*s); ctx.lineTo(0.42*s*rw, 0.95*s); ctx.lineTo(0.0, 0.9*s);
+  ctx.lineTo(-0.42*s*lw, 0.95*s); ctx.lineTo(-0.14*s, 0.72*s); ctx.lineTo(-0.16*s, 0.12*s);
+  ctx.lineTo(-1.0*s*lw, 0.2*s); ctx.lineTo(-1.05*s*lw, -0.05*s); ctx.lineTo(-0.14*s, -0.55*s);
+  ctx.closePath();
+}
+
+let cloudSeed = null;
+function drawSky(now){
+  const w = world, p = w.p;
+  // the player at centre, nose up. scale: VIEW_R world units = half the shorter side
+  const cx = W/2, cy = H*0.56, sc = Math.min(W, H)*0.5/K.VIEW_R;
+  // sky by altitude: higher is deeper blue
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, p.alt > 0.5 ? '#163a62' : '#2b5a86'); g.addColorStop(1, p.alt > 0.5 ? '#0b1a2b' : '#1b3350');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(-p.h*RAD); ctx.scale(sc, -sc); ctx.translate(-p.x, -p.y);
+  // clouds: a fixed field in world space, seeded, so motion reads
+  if(!cloudSeed){ const r = mulberry(7); cloudSeed = []; for(let i=0;i<260;i++) cloudSeed.push({ x:(r()*2-1)*60, y:(r()*2-1)*60, s:0.25+r()*0.6, a:0.12+r()*0.18 }); }
+  for(const cl of cloudSeed){
+    const dx = cl.x - p.x, dy = cl.y - p.y; if(dx*dx+dy*dy > (K.VIEW_R*1.6)**2) continue;
+    ctx.fillStyle = `rgba(255,255,255,${cl.a*(0.6+0.4*(1-p.alt))})`;
+    ctx.beginPath(); ctx.arc(cl.x, cl.y, cl.s, 0, 7); ctx.arc(cl.x+cl.s*0.8, cl.y+cl.s*0.3, cl.s*0.7, 0, 7); ctx.arc(cl.x-cl.s*0.7, cl.y+cl.s*0.2, cl.s*0.6, 0, 7); ctx.fill();
+  }
+  // bandits
+  const H_ = w.hunter, looked = (performance.now() - lastLook) < K.LOOK_MEMORY_S*1000;
+  for(const b of w.bandits){
+    const r = rel(w,b); const isH = b.id === H_.id;
+    const far = r.range > K.VIEW_R*0.95;
+    if(far) continue;
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(-b.h*RAD); ctx.scale(1,-1);
+    ctx.fillStyle = isH ? '#ff5c5c' : (b.state==='alarmed' ? '#ffd166' : '#dfe7ef');
+    planePath(0.55, 0); ctx.fill();
+    ctx.restore();
+    // lock ring
+    if(w.lock.id === b.id && w.lock.state !== 'none'){
+      const f = w.lock.state==='locking' ? w.lock.t/K.LOCK_S : 1;
+      ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(-p.h*RAD);
+      ctx.lineWidth = 0.08; ctx.strokeStyle = w.lock.state==='locking' ? '#ffd166' : '#ff7a3d';
+      ctx.beginPath(); ctx.arc(0,0,0.75, -Math.PI/2, -Math.PI/2 + f*Math.PI*2); ctx.stroke();
+      if(w.lock.state==='commit' || w.lock.state==='locked'){ const cf = w.lock.commit/K.COMMIT_S;
+        ctx.strokeStyle = '#7be495'; ctx.lineWidth = 0.14; ctx.beginPath(); ctx.arc(0,0,0.55, -Math.PI/2, -Math.PI/2 + cf*Math.PI*2); ctx.stroke(); }
+      ctx.restore();
+    }
+  }
+  // kill flashes
+  for(const fl of flashes){ const a = 1 - (now - fl.t)/900; if(a<=0) continue;
+    ctx.fillStyle = `rgba(255,209,102,${a*0.8})`; ctx.beginPath(); ctx.arc(fl.x, fl.y, 0.3 + (1-a)*1.2, 0, 7); ctx.fill(); }
+  flashes = flashes.filter(fl => now - fl.t < 900);
+  ctx.restore();
+
+  // the player's plane, fixed at centre, nose up, tilted by the read bank
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.fillStyle = p.blackout>0 ? '#6b7a8a' : '#f4efe4';
+  const tilt = -inp.bank;      // left bank: left wing dips (draws shorter on the left)
+  ctx.rotate(tilt*0.45);       // the render at 0.25 showed almost no tilt at 0.83 bank
+  planePath(sc*0.85, -tilt); ctx.fill();
+  // gun cone
+  if(inp.wings && p.blackout<=0){ ctx.save(); ctx.rotate(0);
+    ctx.fillStyle = w.lock.state==='none' ? 'rgba(255,255,255,.05)' : 'rgba(255,122,61,.10)';
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0, K.RANGE*sc, -Math.PI/2 - K.CONE_DEG*RAD, -Math.PI/2 + K.CONE_DEG*RAD); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  // tracers during commit
+  if(w.lock.state==='commit' && tracerT < now){ tracerT = now + 90;
+    ctx.strokeStyle = 'rgba(255,209,102,.9)'; ctx.lineWidth = 2;
+    for(const s of [-1,1]){ ctx.beginPath(); ctx.moveTo(s*sc*0.35, -sc*0.3); ctx.lineTo(s*sc*0.1, -K.RANGE*sc*(0.6+0.4*Math.random())); ctx.stroke(); } }
+  ctx.restore();
+
+  // off-screen bandit markers at the edge: the hunter only if you looked, or if it is already on you
+  for(const b of w.bandits){
+    const r = rel(w,b); if(r.range <= K.VIEW_R*0.95) continue;
+    const isH = b.id === H_.id;
+    if(isH && !looked && H_.threat <= 0) continue;
+    if(!isH && Math.abs(r.bearing) > 70) continue;   // only forward ones; the rear is what lookout is for
+    const ang = r.bearing*RAD; const rr = Math.min(W,H)*0.47;
+    const mx = cx + Math.sin(ang)*rr, my = cy - Math.cos(ang)*rr;
+    ctx.save(); ctx.translate(mx,my); ctx.rotate(ang);
+    ctx.fillStyle = isH ? '#ff5c5c' : 'rgba(223,231,239,.7)';
+    ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(10,8); ctx.lineTo(-10,8); ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  /* ---- the threat arc, bottom centre: the hunter's guns on you ---- */
+  if(H_.state==='engage' && H_.threat > 0){
+    ctx.save(); ctx.translate(cx, cy); ctx.lineWidth = Math.max(6, H*0.018); ctx.strokeStyle = `rgba(255,92,92,${0.5+0.5*H_.threat})`;
+    const span = H_.threat*Math.PI*0.9; ctx.beginPath(); ctx.arc(0,0, sc*1.2, Math.PI/2 - span/2, Math.PI/2 + span/2); ctx.stroke(); ctx.restore();
+  }
+  /* ---- G: the edges grey, then everything ---- */
+  const gv = p.blackout > 0 ? 1 : Math.max(0, (p.g - K.G_GREY_FROM)/(1-K.G_GREY_FROM));
+  if(gv > 0){ const vg = ctx.createRadialGradient(cx,cy, Math.min(W,H)*(0.55 - 0.45*gv), cx,cy, Math.max(W,H)*0.75);
+    vg.addColorStop(0, 'rgba(40,40,40,0)'); vg.addColorStop(1, `rgba(30,30,30,${0.85*Math.min(1, 0.35+gv)})`);
+    ctx.fillStyle = vg; ctx.fillRect(0,0,W,H); }
+  if(p.blackout > 0){ ctx.fillStyle = `rgba(20,20,20,${0.6})`; ctx.fillRect(0,0,W,H); }
+}
+
+function drawHud(now){
+  const w = world, p = w.p; const m = Math.min(W,H);
+  const left = Math.max(0, K.ROUND_MS - (now - roundStart));
+  ctx.save(); ctx.font = `${Math.round(m*0.075)}px Georgia`; ctx.textBaseline='top'; ctx.fillStyle = CSSVAR('--warm'); ctx.shadowColor='#000'; ctx.shadowBlur=8;
+  // left: time and score
+  ctx.textAlign='left'; ctx.fillText(Math.floor(left/60000)+':'+String(Math.floor(left/1000)%60).padStart(2,'0'), m*0.03, m*0.02);
+  ctx.textAlign='right'; ctx.fillStyle = CSSVAR('--gold'); ctx.fillText(String(w.score), W - m*0.03, m*0.02);
+  ctx.restore();
+  // bars: speed (gold), altitude (cyan), G (red), health (green) — left column, big
+  const bx = m*0.035, bw = m*0.05, bh = H*0.40, by = H*0.5 - bh/2;
+  const bar = (i, frac, col, label) => { const x = bx + i*(bw*2.3);   // 1.6 ran SPEED into HEIGHT
+    ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(x, by, bw, bh);
+    ctx.fillStyle=col; ctx.fillRect(x, by + bh*(1-frac), bw, bh*frac);
+    ctx.fillStyle='rgba(244,239,228,.8)'; ctx.font = `${Math.round(m*0.03)}px Georgia`; ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText(label, x+bw/2, by+bh+m*0.012); };
+  bar(0, (p.v-K.V_MIN*0.8)/(K.V_MAX-K.V_MIN*0.8), p.stall ? CSSVAR('--bad') : CSSVAR('--gold'), 'SPEED');
+  bar(1, p.alt, CSSVAR('--cyan'), 'HEIGHT');
+  bar(2, p.g, CSSVAR('--bad'), 'G');
+  bar(3, p.health/K.HEALTH, CSSVAR('--good'), 'HULL');
+  // the figure the game sees, bottom right
+  const fw = m*0.30, fh = fw*0.75;
+  ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(W - fw - m*0.03, H - fh - m*0.03, fw, fh);
+  drawPlayerFigure(pose, W - fw - m*0.03, H - fh - m*0.03, fw, fh, 0.9);
+  if(!inp.wings && !inp.lost && p.blackout<=0){ ctx.fillStyle = CSSVAR('--dim'); ctx.font = `${Math.round(m*0.034)}px Georgia`; ctx.textAlign='center'; ctx.textBaseline='bottom';
+    ctx.fillText('ARMS DOWN', W - fw/2 - m*0.03, H - fh - m*0.045); }   // 'ARMS DOWN · CRUISE' ran off the right edge
+}
+
+/* ================= the frame ================= */
+let halted = false, lastNow = 0;
+function frame(){
+  requestAnimationFrame(frame);
+  if(halted) return;
+  const now = performance.now();
+  const dt = Math.min(0.1, lastNow ? (now - lastNow)/1000 : 1/30); lastNow = now;
+
+  let raw = null;
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    try { const res = landmarker.detectForVideo(video, now);
+          raw = (res && res.landmarks && res.landmarks[0]) || null; } catch(e){}
+    if(raw){ pose = raw; lastFrameAt = now; }
+    else if(now - lastFrameAt > 600) pose = null;
+  }
+  const r = pose ? readPose(pose) : null;
+  if(r && sidesOk(r.L)) inp = sig.read(r.L, dt);
+  else { inp = { bank: inp.bank*Math.pow(0.85, dt*60), squat: inp.squat, wings:false, look:false, span:0, valid:{} }; }
+  // A LOST BODY IS NOT A PLAYER DOING NOTHING. With nobody readable the plane
+  // holds its last state and the lock does not advance; nothing is charged.
+  if(!r && world && phase==='fly') inp = { bank:0, squat:0, wings:inp.wings, look:false, span:0, valid:{}, lost:true };
+
+  if(state==='play' || state==='fit'){
+    const q = {}; if(pose) for(const k of NEEDS_REC){ const v = read(pose, J[k]); if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.v||0).toFixed(2) ]; }
+    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
+  }
+
+  if(state==='fit'){
+    const f = fitState(pose);
+    const msg = f.ok ? ['HOLD IT THERE','Hold it there.'] : (FIT_SAY[f.why] || FIT_SAY.nobody);
+    ui.fitBig.innerHTML = f.ok ? 'READY' : 'FIND YOUR<br><span class="g">SPOT</span>';
+    ui.fitMsg.textContent = msg[0]; say(msg[1]);
+    if(f.ok){ if(!fitSince) fitSince = now; if(now - fitSince > 1400){ ui.oFit.hidden=true; startCal(); } }
+    else fitSince = 0;
+    drawMirror(0.6); return;
+  }
+  if(state==='play' && phase==='cal'){
+    drawMirror(0.7); calTick(now, dt);
+    // a big wing line over the mirror so he sees what the game reads
+    if(pose){ const f = videoFit(); drawPlayerFigure(pose, f.dx, f.dy, f.dw, f.dh, 0.9); }
+    return;
+  }
+  if(state==='play' && phase==='fly'){
+    const steps = Math.max(1, Math.round(dt/(1/60)));
+    for(let i=0;i<steps;i++) stepWorld(world, inp.lost ? {bank:0,squat:0,wings:inp.wings,look:false} : inp, dt/steps);
+    handleEvents(now);
+    if(bandUntil && now > bandUntil) setBand('', '');
+    drawSky(now); drawHud(now);
+    if(inp.lost){ ctx.fillStyle='rgba(255,92,92,.9)'; ctx.font=`${Math.round(Math.min(W,H)*0.06)}px Georgia`; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText('I CANNOT SEE YOU', W/2, H - 8); say('I cannot see you. Step back into the picture.'); }
+    recPush({ k:'s', t:+(now-clockT0).toFixed(1), h:+world.p.h.toFixed(0), v:+world.p.v.toFixed(2), alt:+world.p.alt.toFixed(2), g:+world.p.g.toFixed(2), lock:world.lock.state, thr:+world.hunter.threat.toFixed(2) });
+    if(now - roundStart >= K.ROUND_MS) endRound(now);
+    return;
+  }
+  if(state==='end'){ drawSky(now); }
+}
+
+/* ================= startup ================= */
+const bStart=document.getElementById('bStart'), bSkip=document.getElementById('bSkip'),
+      bAgain=document.getElementById('bAgain'), bSave=document.getElementById('bSave');
+async function begin(){
+  bStart.disabled = true; ui.loadMsg.hidden = false; ui.errMsg.hidden = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'user', width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30} }, audio:false });
+    video.srcObject = stream; await video.play();
+    ui.loadMsg.textContent = 'Loading the tracker…';
+    await loadTracker();
+  } catch(e){
+    ui.errMsg.hidden=false; bStart.disabled=false; ui.loadMsg.hidden=true;
+    ui.errMsg.textContent = 'Could not start: ' + (e && e.message ? e.message : e) + '. The camera needs a https page and permission.';
+    return;
+  }
+  clockT0 = performance.now(); recHeader();
+  ui.oStart.hidden = true; ui.oFit.hidden = false; state='fit'; fitSince=0;
+  say('Stand back until I can see you from head to knees, with room for your arms.', true);
+}
+bStart.addEventListener('click', begin);
+bSkip.addEventListener('click', ()=>{ ui.oFit.hidden=true; startCal(); });
+bAgain.addEventListener('click', ()=>{ ui.oEnd.hidden=true; world=null; state='fit'; fitSince=0; ui.oFit.hidden=false; });
+bSave.addEventListener('click', ()=>{
+  const blob = new Blob([rec.map(o=>JSON.stringify(o)).join('\n')], {type:'application/x-ndjson'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'sixoclock-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+});
+resize(); checkRotation();
+requestAnimationFrame(frame);
+
+/* ---- harness hook: the renderer and the boot test drive the real page ---- */
+window.__six = {
+  SIM, K, makeSignals, fitState:raw=>fitState(raw), sidesOk, readPose,
+  halt:()=>{halted=true}, resume:()=>{halted=false},
+  peek:()=>({ state, phase, calStep, inp, world: world && { t:world.t, kills:world.kills, score:world.score, hits:world.hits, lock:world.lock.state, hunter:world.hunter.state, g:world.p.g, v:world.p.v, alt:world.p.alt } }),
+  setPose:(raw)=>{ pose = raw; lastFrameAt = performance.now(); },
+  setLandmarker:(lm)=>{ landmarker = lm; },
+  jump:(s)=>{ if(s==='cal'){ ui.oStart.hidden=true; ui.oFit.hidden=true; clockT0=performance.now(); startCal(); }
+             else if(s==='fly'){ ui.oStart.hidden=true; ui.oFit.hidden=true; state='play'; clockT0=performance.now(); startRound(performance.now()); }
+             else if(s==='end'){ endRound(performance.now()); } },
+  world:()=>world, say:(t)=>say(t,true),
+};
+</script>
+</body>
+</html>
