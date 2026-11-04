@@ -118,7 +118,7 @@ const K = {
   // turning. degrees per second
   TURN_BASE: 18,       // full bank, no pull — a Bf 109 did about 16-20
   TURN_PULL: 42,       // bank plus squat — buys the angle, costs the energy
-  PULL_BANK: 0.55, PULL_SQUAT: 0.35,
+  PULL_BANK: 0.55, PULL_SQUAT: 0.45,   // was 0.35; the first recording showed a hard lean alone moves the hips 0.3 of a squat
   STALL_TURN: 0.5,     // turn multiplier when below V_MIN+0.05
   // G
   G_FILL_S: 5.0,       // seconds of hard pull to black out (3-5 s buffer)
@@ -416,8 +416,15 @@ function makeReader(){
    All scale-free. The ruler is SHOULDER WIDTH (doc 16: a bend about a
    horizontal axis does not touch it) for the arms, and the TRACKED torso
    for the squat (doc 02: standing height is tracked, not frozen). */
-const WING_SPAN_ON  = 2.35;   // wrist-to-wrist / shoulder width: arms out (straight out ≈ 3.9, 45° ≈ 3.1, down ≈ 1.2)
-const WING_SPAN_OFF = 1.9;    // hysteresis: below this the arms are down
+/* BUILD 3. Wings used to be a horizontal wrist-to-wrist span over shoulder
+   width (on ≥ 2.35, off < 1.9). Hugo's recording: on his deeper dips — left
+   hand near the hip, right hand over the head — the horizontal span fell
+   to 1.9 and the wings switched off mid-dip. Now each arm's angle from
+   straight down is measured and the mean of the two must be past
+   WING_ABD_ON: hanging arms read ~5°, wings level 90°, a steep dip 20°
+   and 160° — mean 90°. A tilt cannot switch it off. Still scale-free. */
+const WING_ABD_ON  = 50;      // degrees, mean of both arms from straight down
+const WING_ABD_OFF = 36;
 const BANK_FULL = 0.42;       // radians of wrist-line tilt for full bank: each arm about 30° off level. 0.62 needed 45° and the render's dip never passed the calibration
 const BANK_DEAD = 0.14;       // fraction of full — the research's 2-3° plus camera noise
 const BANK_CURVE = 1.3;
@@ -433,7 +440,7 @@ const LOOK_YAW = 0.42;        // nose offset over ear spacing, either way
 function makeSignals(){
   let angSm = null, angPrev = 0, angSpd = 0, wingsOn = false;
   let hipRef = null, shRef = null, refTorso = 0;
-  let bankSm = 0, baseAng = 0;
+  let bankSm = 0, baseAng = 0, impossibleS = 0;
   function steerFilter(raw, dt){
     if(angSm==null){ angSm = raw; angPrev = raw; }
     const sp = Math.abs(raw - angPrev)/Math.max(dt, 1e-3); angPrev = raw;
@@ -451,17 +458,20 @@ function makeSignals(){
   return {
     reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; baseAng=0; },
     setBase(a){ baseAng = a; angSm = null; },
+    reseedSquat(){ hipRef = null; shRef = null; impossibleS = 0; },
     base(){ return baseAng; },
     read(L, dt){
-      const out = { bank:0, squat:0, wings:false, look:false, span:0, wa:0, valid:{wings:false, squat:false, look:false} };
+      const out = { bank:0, squat:0, wings:false, look:false, span:0, abd:0, wa:0, valid:{wings:false, squat:false, look:false} };
       if(!(L.shA && L.shB && L.hipC)) { bankSm *= Math.pow(0.85, dt*60); out.bank = bankSm; return out; }
       const sw = Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
       const torso = Math.max(1e-6, Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y));
       /* wings: both wrists seen, arms spread. */
       if(L.wrA && L.wrB){
         const span = Math.abs(L.wrB.x - L.wrA.x)/sw; out.span = span;
-        if(!wingsOn && span >= WING_SPAN_ON) wingsOn = true;
-        else if(wingsOn && span < WING_SPAN_OFF) wingsOn = false;
+        const abd = (sh, wr) => Math.atan2(Math.abs(wr.x - sh.x), -(wr.y - sh.y))*180/Math.PI;  // 0 = hanging, 90 = out, 180 = up
+        const abdM = (abd(L.shA, L.wrA) + abd(L.shB, L.wrB))/2; out.abd = abdM;
+        if(!wingsOn && abdM >= WING_ABD_ON) wingsOn = true;
+        else if(wingsOn && abdM < WING_ABD_OFF) wingsOn = false;
         out.valid.wings = true;
         if(wingsOn){
           /* BUILD 2. Build 1 read bank as wrist line MINUS shoulder line, so
@@ -481,15 +491,28 @@ function makeSignals(){
       } else { wingsOn = wingsOn && false; bankSm *= Math.pow(0.85, dt*60); }
       out.wings = wingsOn; out.bank = bankSm;
       /* squat: the racing game's tracked reference. Up fast, down slow,
-         and a body shrinking in the frame (walking back) is followed. */
+         and a body shrinking in the frame (walking back) is followed.
+         BUILD 3: seeded only from an UPRIGHT frame, and re-seeded if the
+         drop reads more than twice a full squat for 1.5 s, which no body
+         does — the recording showed a poisoned seed holding squat at 1.00
+         for twenty-five seconds of standing. */
       const hy = L.hipC.y, sy = L.shC.y;        // y is UP here
-      if(hipRef === null){ hipRef = hy; shRef = sy; refTorso = torso; }
+      const upright = (sy - hy) > 0.7*torso;
+      if(hipRef === null){ if(!upright) return out; hipRef = hy; shRef = sy; refTorso = torso; impossibleS = 0; }
       refTorso += (torso - refTorso)*Math.min(1, dt/0.6);
       if(refTorso > 0 && (refTorso - torso)/refTorso > REF_SHRINK){ hipRef = hy; shRef = sy; }
       const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y > ref ? REF_UP : REF_DOWN));
       hipRef = follow(hipRef, hy); shRef = follow(shRef, sy);
-      const hipDrop = (hipRef - hy)/refTorso, shDrop = (shRef - sy)/refTorso;
-      out.squat = clamp(Math.max(0, Math.max(hipDrop, shDrop))/SQUAT_DEPTH, 0, 1);
+      /* HIPS ONLY. The racing game takes the deeper of hip drop and shoulder
+         drop, which is safe with both hands on a wheel. Here the arms move
+         all the time and MediaPipe's shoulder points move with them: the
+         recording read 0.2-0.5 of a squat from a man standing still with his
+         wings out. */
+      const hipDrop = (hipRef - hy)/refTorso;
+      const dropT = hipDrop;
+      if(dropT > 2*SQUAT_DEPTH && upright){ impossibleS += dt; if(impossibleS > 1.5){ hipRef = hy; shRef = sy; refTorso = torso; impossibleS = 0; } }
+      else impossibleS = 0;
+      out.squat = clamp(Math.max(0, hipDrop)/SQUAT_DEPTH, 0, 1);
       out.valid.squat = true;
       /* look: nose off the ear midpoint, over ear spacing. Coarse on purpose. */
       if(L.nose && L.earA && L.earB){
@@ -518,7 +541,7 @@ async function loadTracker(){
   catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
 }
 
-const BUILD = 'sixoclock-2';
+const BUILD = 'sixoclock-3';
 const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. This game
    has no timed event: every judgment is a hold longer than a second, so
    the figure is recorded, not used. */
@@ -531,7 +554,7 @@ function recHeader(){
     video:{ w:video.videoWidth, h:video.videoHeight },
     ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
     poseLatencyMs:POSE_LATENCY_MS, K,
-    tune:{ WING_SPAN_ON, WING_SPAN_OFF, BANK_FULL, BANK_DEAD, BANK_CURVE, SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, LOOK_YAW },
+    tune:{ WING_ABD_ON, WING_ABD_OFF, BANK_FULL, BANK_DEAD, BANK_CURVE, SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, LOOK_YAW },
     coords:'MediaPipe normalised to the camera frame, mirrored; the signals read them aspect corrected and y-up' });
 }
 const NEEDS_REC = ['nose','earA','earB','shA','shB','elA','elB','wrA','wrB','hipA','hipB','knA','knB','ankA','ankB'];
@@ -562,18 +585,39 @@ function readPose(p){
   if(L.shA && L.shB)  L.shC  = { x:(L.shA.x+L.shB.x)/2,  y:(L.shA.y+L.shB.y)/2 };
   return { L, have };
 }
+/*====== gate.js ======*/
+/* BUILD 3. Second Line's guard measured shoulder width HORIZONTALLY over
+   torso height and rejected the frame under 0.52 as "turned side on". A
+   dancer stays upright; a pilot dips a wing by tilting the shoulders, and
+   the horizontal width shrinks with the tilt. Hugo's recording: level
+   stance 0.55-0.58, every dip 0.39-0.48 — the dip registered at bank
+   +1.00 for three frames and then the guard threw the frames away. Now the
+   width is the distance between the shoulders, which a tilt does not
+   change, over the torso length, and the bar is 0.38. */
 function sidesOk(L){
   if(!(L.shA&&L.shB&&L.hipA&&L.hipB)) return false;
   const sw = L.shB.x - L.shA.x, hw = L.hipB.x - L.hipA.x;
   const span = Math.max(Math.abs(sw), 1e-6);
   if(sw <= 0 || hw <= -span*0.2) return false;              // labels swapped
-  const torsoV = Math.abs((L.shA.y+L.shB.y)/2 - (L.hipA.y+L.hipB.y)/2);
-  if(!torsoV || Math.abs(sw)/torsoV < 0.52) return false;   // turned side on
+  const shD = Math.hypot(L.shB.x - L.shA.x, L.shB.y - L.shA.y);
+  const torso = Math.hypot((L.shA.x+L.shB.x)/2 - (L.hipA.x+L.hipB.x)/2, (L.shA.y+L.shB.y)/2 - (L.hipA.y+L.hipB.y)/2);
+  if(!torso || shD/torso < 0.38) return false;              // turned side on
   return true;
+}
+/* An upright body: shoulders above the hips by most of a torso. The
+   recording's first calibration frames had the hips ABOVE the shoulders —
+   MediaPipe's guess at a body half out of the picture — and that frame
+   seeded the standing height, so every honest frame after it read as a
+   full squat. */
+function uprightOk(L){
+  if(!(L.shC && L.hipC)) return false;
+  const torso = Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y);
+  return torso > 0.06 && (L.shC.y - L.hipC.y) > 0.7*torso;
 }
 
 /* ---- the fit gate: head to knees, and room for the wings ---- */
-function fitState(raw){
+let fitPrev = null;
+function fitState(raw, now){
   if(!raw) return { ok:false, why:'nobody' };
   const g={}; for(const k of ['nose','shA','shB','hipA','hipB','knA','knB']){
     const q=read(raw,J[k]); if(q) g[k]=q; }
@@ -581,6 +625,16 @@ function fitState(raw){
   if(!(g.knA||g.knB)) return { ok:false, why:'knees' };
   const shY=(g.shA.y+g.shB.y)/2, hipY=(g.hipA.y+g.hipB.y)/2;
   const torso=Math.abs(hipY-shY);
+  // UPRIGHT AND STEADY, doc 00's build-39 rule, which build 1 skipped:
+  // shoulders above hips, and the hips not moving across the frame
+  if(!(shY < hipY - 0.04)) return { ok:false, why:'upright' };
+  const hipX=(g.hipA.x+g.hipB.x)/2;
+  let moving = false;
+  if(fitPrev && now !== undefined){ const dt = Math.max(1e-3, (now - fitPrev.t)/1000);
+    const v = Math.hypot(hipX - fitPrev.x, hipY - fitPrev.y)/dt;     // frame units per second
+    fitPrev.v = fitPrev.v*0.7 + v*0.3; moving = fitPrev.v > 0.12; fitPrev.x=hipX; fitPrev.y=hipY; fitPrev.t=now; }
+  else fitPrev = { x:hipX, y:hipY, t:now||0, v:0 };
+  if(moving) return { ok:false, why:'moving' };
   const headY = g.nose ? g.nose.y : shY - torso*0.44;
   if(headY < 0.03) return { ok:false, why:'high' };
   const kneeY = Math.max(g.knA?g.knA.y:0, g.knB?g.knB.y:0);
@@ -597,7 +651,10 @@ const FIT_SAY = {
   high  :['STEP BACK','Your head is at the top of the picture. Step back.'],
   low   :['STEP BACK','Your knees are off the bottom. Step back a little.'],
   arms  :['STEP BACK','No room for your wings. Step back, or move to the middle.'],
+  upright:['STAND UP','Stand up straight, facing the phone.'],
+  moving:['HOLD STILL','Hold still a moment.'],
 };
+/*====== endgate ======*/
 
 /* ================= voice ================= */
 /* Two guards, because one was not enough: the render's voice log showed
@@ -658,7 +715,7 @@ function calTick(now, dt){
     const n = CAL[calStep]; setBand(n.band[0], n.band[1]); say(n.say, true); }
 }
 function startRound(now){
-  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1); ui.tools.hidden=false;
+  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1); ui.tools.hidden=false; sig.reseedSquat();
   setBand('', ''); flashes = [];
   recPush({ k:'round', t:+(now-clockT0).toFixed(1), seed:world.seed, calSpan:+calSpan.toFixed(2), calSquat:+calSquat.toFixed(2) });
 }
@@ -883,11 +940,11 @@ function frame(){
 
   if(state==='play' || state==='fit'){
     const q = {}; if(pose) for(const k of NEEDS_REC){ const v = read(pose, J[k]); if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.v||0).toFixed(2) ]; }
-    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), wa:+(inp.wa||0).toFixed(3), span:+(inp.span||0).toFixed(2), sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
+    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), wa:+(inp.wa||0).toFixed(3), span:+(inp.span||0).toFixed(2), abd:+(inp.abd||0).toFixed(0), sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
   }
 
   if(state==='fit'){
-    const f = fitState(pose);
+    const f = fitState(pose, now);
     const msg = f.ok ? ['HOLD IT THERE','Hold it there.'] : (FIT_SAY[f.why] || FIT_SAY.nobody);
     ui.fitBig.innerHTML = f.ok ? 'READY' : 'FIND YOUR<br><span class="g">SPOT</span>';
     ui.fitMsg.textContent = msg[0]; say(msg[1]);
