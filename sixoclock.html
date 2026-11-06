@@ -541,7 +541,7 @@ async function loadTracker(){
   catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
 }
 
-const BUILD = 'sixoclock-3';
+const BUILD = 'sixoclock-4';
 const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. This game
    has no timed event: every judgment is a hold longer than a second, so
    the figure is recorded, not used. */
@@ -750,7 +750,7 @@ function handleEvents(now){
 }
 
 function endRound(now){
-  phase='end'; state='end'; setBand('', ''); ui.tools.hidden=true;
+  phase='end'; state='end'; setBand('', ''); ui.tools.hidden=true; letSleep();
   const w = world; const k = w.work;
   ui.score.textContent = w.score;
   ui.endTag.textContent = w.kills === 0 ? 'NO KILLS' : (w.kills + (w.kills===1?' SPLASHED':' SPLASHED'));
@@ -975,7 +975,22 @@ function frame(){
 /* ================= startup ================= */
 const bStart=document.getElementById('bStart'), bSkip=document.getElementById('bSkip'),
       bAgain=document.getElementById('bAgain'), bSave=document.getElementById('bSave');
+/* ---- keep the screen awake while flying — the racing game's code, which
+   build 1-3 did not carry over, so the phone dimmed on Hugo at two metres ---- */
+let wakeLock = null;
+async function keepAwake(){
+  try { if('wakeLock' in navigator && !wakeLock){ wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', ()=>{ wakeLock = null; }); } } catch(e){ wakeLock = null; }
+}
+function letSleep(){ try { if(wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){ wakeLock = null; } }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && (state==='fit'||state==='play')) keepAwake(); });
+
 async function begin(){
+  /* FULLSCREEN, so the browser bar goes away — Sparks' code. It may only be
+     asked inside the user gesture, so it runs first, before any await, and
+     a refusal is ignored. */
+  try { const el = document.documentElement; const go = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(go && !document.fullscreenElement){ const pr = go.call(el, { navigationUI:'hide' }); if(pr && pr.catch) pr.catch(()=>{}); } } catch(e){}
   bStart.disabled = true; ui.loadMsg.hidden = false; ui.errMsg.hidden = true;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -988,13 +1003,13 @@ async function begin(){
     ui.errMsg.textContent = 'Could not start: ' + (e && e.message ? e.message : e) + '. The camera needs a https page and permission.';
     return;
   }
-  clockT0 = performance.now(); recHeader();
+  clockT0 = performance.now(); recHeader(); keepAwake();
   ui.oStart.hidden = true; ui.oFit.hidden = false; state='fit'; fitSince=0;
   say('Stand back until I can see you from head to knees, with room for your arms.', true);
 }
 bStart.addEventListener('click', begin);
 bSkip.addEventListener('click', ()=>{ ui.oFit.hidden=true; startCal(); });
-bAgain.addEventListener('click', ()=>{ ui.oEnd.hidden=true; world=null; state='fit'; fitSince=0; ui.oFit.hidden=false; });
+bAgain.addEventListener('click', ()=>{ ui.oEnd.hidden=true; world=null; state='fit'; fitSince=0; ui.oFit.hidden=false; keepAwake(); });
 function saveRec(){
   const blob = new Blob([rec.map(o=>JSON.stringify(o)).join('\n')], {type:'application/x-ndjson'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
