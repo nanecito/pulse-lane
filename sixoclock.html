@@ -38,6 +38,11 @@
     text-shadow:0 3px 14px #000;padding:1vh 0 1.2vh;
     background:linear-gradient(90deg,rgba(11,26,43,0),rgba(11,26,43,.82) 12%,rgba(11,26,43,.82) 88%,rgba(11,26,43,0))}
   #band[hidden]{display:none}
+  /* in flight the target is straight ahead of the nose, top middle: the band
+     goes to the top right so it never sits over what it is telling him to shoot */
+  #band.side{left:auto;right:1.5vw;top:13vh;text-align:right;padding:.8vh 2vw;max-width:44vw;
+    background:rgba(11,26,43,.78);border-radius:1.5vh}
+  #band.side #bandA{font-size:clamp(24px,9vh,80px)}
   #bandA{display:block;font-size:clamp(28px,11vh,96px);letter-spacing:.1em;color:var(--gold);line-height:1}
   #bandB{display:block;font-size:clamp(13px,3.2vh,24px);color:var(--warm);margin-top:.8vh}
   table{border-collapse:collapse;font-size:clamp(13px,3vh,22px)}
@@ -65,7 +70,7 @@
 
 <div class="ov" id="oStart">
   <h1>SIX<br><span class="g">O'CLOCK</span></h1>
-  <p class="sub">Your arms are the wings. Tilt them to turn. Squat to dive for speed. Get behind a bandit, hold the lock, then pull — and keep an eye on your own six.</p>
+  <p class="sub">Your arms are the wings. Tilt them to turn. Squat to dive. Put a bandit in front of your nose until he locks, then clap your hands together to fire.</p>
   <div class="row"><button id="bStart">Fly</button></div>
   <p class="note" id="loadMsg" hidden>Starting the camera…</p>
   <p class="err" id="errMsg" hidden></p>
@@ -128,8 +133,13 @@ const K = {
   // guns
   CONE_DEG: 14, RANGE: 3.0,
   LOCK_S: 1.2,         // nose on the bandit this long to lock
-  COMMIT_S: 1.5,       // then hold the pull this long to fire
-  COMMIT_GRACE_S: 0.25,// dropout allowed inside the commit hold
+  /* BUILD 5. The trigger is a CLAP, not the squat. Hugo, 7 Nov: "the squat
+     is the only thing that fires, or the squat also dives?" — one movement
+     meaning two things, and from the mark he never knew which he was
+     getting. Now: squat = dive and pull, always; hands together in front
+     of the chest = guns, and only once a lock has formed, so the clap's
+     own lag never matters. */
+  COMMIT_S: 0.8,       // the burst: from the clap to the kill, nose tracking the target
   // bandits
   BANDITS_ALIVE: 3, BANDIT_V: 0.90, BANDIT_TURN: 22,
   ALARM_RANGE: 3.6, ALARM_S: 0.8,    // how long you must be near before they notice
@@ -147,6 +157,7 @@ function mulberry(seed){ let a = seed>>>0; return function(){
   a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
   t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const RAD = Math.PI/180, DEG = 180/Math.PI;
+const DRAW_R = 2.6, BANDIT_SIZE = 0.85, PLAYER_SIZE = 0.75;   // drawing only
 const wrap = a => { while(a > 180) a -= 360; while(a <= -180) a += 360; return a; };
 const clamp = (v,a,b) => v<a?a:v>b?b:v;
 // heading 0 = up (+y), clockwise positive. velocity from heading:
@@ -200,6 +211,8 @@ function stepWorld(w, inp, dt){
   const wings = !!inp.wings && p.blackout <= 0;
   let bank = wings ? clamp(inp.bank,-1,1) : 0;
   const squat = clamp(inp.squat||0, 0, 1);
+  const fire = !!inp.fire && p.blackout <= 0;
+  const fireEdge = fire && !w._fire; w._fire = fire;
   /* THE PULL IS CONTINUOUS. The first model made any squat plus any bank a
      full hard pull, and a pilot flying the design as intended blacked out
      4.3 times a round in the simulation — diving toward a bandit off to one
@@ -325,6 +338,7 @@ function stepWorld(w, inp, dt){
     for(const b of w.bandits){ if(!b.alive) continue; const r = rel(w,b);
       if(r.range <= K.RANGE && Math.abs(r.bearing) <= K.CONE_DEG && r.range < best){ best = r.range; target = b; tr = r; } }
   }
+  if(fireEdge && (L.state === 'none' || L.state === 'locking')) ev.push({k:'dry'});
   if(L.state === 'none' || L.state === 'locking'){
     if(target && (L.id === null || L.id === target.id)){ L.id = target.id; L.t += dt; L.state = 'locking';
       if(L.t >= K.LOCK_S){ L.state = 'locked'; L.commit = 0; L.drop = 0; ev.push({k:'locked', id:target.id, aspect:tr.aspect}); } }
@@ -333,10 +347,12 @@ function stepWorld(w, inp, dt){
     // locked or committing: lose it if the bandit leaves the cone or range
     const b = w.bandits.find(x => x.id === L.id);
     const r = b && b.alive ? rel(w,b) : null;
-    if(!r || r.range > K.RANGE*1.15 || Math.abs(r.bearing) > K.CONE_DEG*1.6 || !wings){
+    // a burst in progress survives the arms coming in for the clap; a lock waiting for one does not survive arms down
+    if(!r || r.range > K.RANGE*1.15 || Math.abs(r.bearing) > K.CONE_DEG*1.6 || (!wings && L.state !== 'commit')){
       L.state = 'none'; L.id = null; L.t = 0; L.commit = 0; ev.push({k:'lost'});
     } else {
-      if(squat >= K.PULL_SQUAT){ L.drop = 0; L.commit += dt; L.state = 'commit';
+      if(L.state === 'locked' && fire){ L.state = 'commit'; L.commit = 0; ev.push({k:'fire'}); }
+      if(L.state === 'commit'){ L.commit += dt;
         if(L.commit >= K.COMMIT_S){
           b.alive = false; w.kills++;
           const bonus = r.aspect < 45 ? 50 : 0;     // from their six: the historically decisive position
@@ -345,7 +361,7 @@ function stepWorld(w, inp, dt){
           L.state = 'none'; L.id = null; L.t = 0; L.commit = 0;
           spawnBandit(w, false);
         }
-      } else { L.drop += dt; if(L.drop > K.COMMIT_GRACE_S){ L.commit = 0; L.state = 'locked'; } }
+      }
     }
   }
   // tidy dead bandits
@@ -423,8 +439,15 @@ function makeReader(){
    straight down is measured and the mean of the two must be past
    WING_ABD_ON: hanging arms read ~5°, wings level 90°, a steep dip 20°
    and 160° — mean 90°. A tilt cannot switch it off. Still scale-free. */
+/* BUILD 5, the clap: both wrists closer together than CLAP_ON shoulder
+   widths, both above the middle of the torso (so hands hanging at the hips
+   never count). While the hands are together the wings are HELD on and the
+   bank is frozen — a clap pulls both arms to the middle, which would
+   otherwise read as arms down and drop the lock it is trying to fire on. */
+const CLAP_ON = 0.85, CLAP_OFF = 1.4, CLAP_MIN_S = 0.10, CLAP_VIS = 0.5;
 const WING_ABD_ON  = 50;      // degrees, mean of both arms from straight down
 const WING_ABD_OFF = 36;
+const WING_OFF_S = 0.25;
 const BANK_FULL = 0.42;       // radians of wrist-line tilt for full bank: each arm about 30° off level. 0.62 needed 45° and the render's dip never passed the calibration
 const BANK_DEAD = 0.14;       // fraction of full — the research's 2-3° plus camera noise
 const BANK_CURVE = 1.3;
@@ -440,7 +463,7 @@ const LOOK_YAW = 0.42;        // nose offset over ear spacing, either way
 function makeSignals(){
   let angSm = null, angPrev = 0, angSpd = 0, wingsOn = false;
   let hipRef = null, shRef = null, refTorso = 0;
-  let bankSm = 0, baseAng = 0, impossibleS = 0;
+  let bankSm = 0, baseAng = 0, impossibleS = 0, clapOn = false, clapS = 0, offS = 0;
   function steerFilter(raw, dt){
     if(angSm==null){ angSm = raw; angPrev = raw; }
     const sp = Math.abs(raw - angPrev)/Math.max(dt, 1e-3); angPrev = raw;
@@ -456,22 +479,40 @@ function makeSignals(){
     return (s<0?-1:1) * Math.pow(n, BANK_CURVE);
   }
   return {
-    reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; baseAng=0; },
+    reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; baseAng=0; clapOn=false; clapS=0; },
     setBase(a){ baseAng = a; angSm = null; },
     reseedSquat(){ hipRef = null; shRef = null; impossibleS = 0; },
     base(){ return baseAng; },
     read(L, dt){
-      const out = { bank:0, squat:0, wings:false, look:false, span:0, abd:0, wa:0, valid:{wings:false, squat:false, look:false} };
+      const out = { bank:0, squat:0, wings:false, look:false, fire:false, span:0, abd:0, wa:0, valid:{wings:false, squat:false, look:false, fire:false} };
       if(!(L.shA && L.shB && L.hipC)) { bankSm *= Math.pow(0.85, dt*60); out.bank = bankSm; return out; }
       const sw = Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
       const torso = Math.max(1e-6, Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y));
       /* wings: both wrists seen, arms spread. */
       if(L.wrA && L.wrB){
         const span = Math.abs(L.wrB.x - L.wrA.x)/sw; out.span = span;
+        const gap = Math.hypot(L.wrB.x - L.wrA.x, L.wrB.y - L.wrA.y)/sw;
+        const midY = (L.shC.y + L.hipC.y)/2;
+        const high = L.wrA.y > midY && L.wrB.y > midY;      // y is up
+        /* and both wrists actually SEEN: the first recording's walk-up to the
+           phone, hips off the frame and wrists guessed at confidence 0.25,
+           read as a clap for two frames */
+        const seen = (L.wrA.v === undefined || L.wrA.v >= CLAP_VIS) && (L.wrB.v === undefined || L.wrB.v >= CLAP_VIS);
+        if(!clapOn && gap < CLAP_ON && high && seen) clapOn = true;
+        else if(clapOn && (gap > CLAP_OFF || !high || !seen)) clapOn = false;
+        clapS = clapOn ? clapS + dt : 0;
+        out.fire = clapS >= CLAP_MIN_S; out.valid.fire = true;
+        if(clapOn){ out.wings = wingsOn; out.bank = bankSm; }   // hold, do not read the arms
+        else {
         const abd = (sh, wr) => Math.atan2(Math.abs(wr.x - sh.x), -(wr.y - sh.y))*180/Math.PI;  // 0 = hanging, 90 = out, 180 = up
         const abdM = (abd(L.shA, L.wrA) + abd(L.shB, L.wrB))/2; out.abd = abdM;
-        if(!wingsOn && abdM >= WING_ABD_ON) wingsOn = true;
-        else if(wingsOn && abdM < WING_ABD_OFF) wingsOn = false;
+        /* off only after WING_OFF_S below the bar: on the way in to a clap
+           each wrist passes in front of its shoulder, where the 2D angle
+           reads near zero for a frame or two, and that would drop the lock
+           at the moment the player fires on it */
+        if(!wingsOn && abdM >= WING_ABD_ON){ wingsOn = true; offS = 0; }
+        else if(wingsOn && abdM < WING_ABD_OFF){ offS += dt; if(offS >= WING_OFF_S) wingsOn = false; }
+        else offS = 0;
         out.valid.wings = true;
         if(wingsOn){
           /* BUILD 2. Build 1 read bank as wrist line MINUS shoulder line, so
@@ -488,7 +529,8 @@ function makeSignals(){
           const raw = wa - baseAng;               // right wrist up = left wing down = left turn = positive
           bankSm = bankFrom(steerFilter(raw, dt));
         } else { angSm = null; bankSm *= Math.pow(0.85, dt*60); }
-      } else { wingsOn = wingsOn && false; bankSm *= Math.pow(0.85, dt*60); }
+        }
+      } else { wingsOn = wingsOn && false; clapOn = false; clapS = 0; bankSm *= Math.pow(0.85, dt*60); }
       out.wings = wingsOn; out.bank = bankSm;
       /* squat: the racing game's tracked reference. Up fast, down slow,
          and a body shrinking in the frame (walking back) is followed.
@@ -541,7 +583,7 @@ async function loadTracker(){
   catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
 }
 
-const BUILD = 'sixoclock-4';
+const BUILD = 'sixoclock-5';
 const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. This game
    has no timed event: every judgment is a hold longer than a second, so
    the figure is recorded, not used. */
@@ -554,7 +596,7 @@ function recHeader(){
     video:{ w:video.videoWidth, h:video.videoHeight },
     ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
     poseLatencyMs:POSE_LATENCY_MS, K,
-    tune:{ WING_ABD_ON, WING_ABD_OFF, BANK_FULL, BANK_DEAD, BANK_CURVE, SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, LOOK_YAW },
+    tune:{ CLAP_ON, CLAP_OFF, CLAP_MIN_S, DRAW_R, WING_ABD_ON, WING_ABD_OFF, BANK_FULL, BANK_DEAD, BANK_CURVE, SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, LOOK_YAW },
     coords:'MediaPipe normalised to the camera frame, mirrored; the signals read them aspect corrected and y-up' });
 }
 const NEEDS_REC = ['nose','earA','earB','shA','shB','elA','elB','wrA','wrB','hipA','hipB','knA','knB','ankA','ankB'];
@@ -580,7 +622,7 @@ function pxRaw(p){ const f=videoFit(); return { x:f.dx+p.x*f.dw, y:f.dy+p.y*f.dh
 function readPose(p){
   const ar = frameAR(), L = {}, have = {};
   for(const k in J){ const q = read(p, J[k]);
-    if(q){ L[k] = { x:q.x*ar, y:-q.y }; have[k] = true; } }
+    if(q){ L[k] = { x:q.x*ar, y:-q.y, v:q.v }; have[k] = true; } }
   if(L.hipA && L.hipB) L.hipC = { x:(L.hipA.x+L.hipB.x)/2, y:(L.hipA.y+L.hipB.y)/2 };
   if(L.shA && L.shB)  L.shC  = { x:(L.shA.x+L.shB.x)/2,  y:(L.shA.y+L.shB.y)/2 };
   return { L, have };
@@ -694,9 +736,10 @@ const CAL = [
   { say:'Now dip your left wing.', band:['DIP LEFT','left hand down, right hand up'], need:'left', hold:1.2 },
   { say:'And your right wing.', band:['DIP RIGHT','right hand down, left hand up'], need:'right', hold:1.2 },
   { say:'Level. Now squat, that is your dive.', band:['SQUAT','that is a dive'], need:'squat', hold:1.0 },
-  { say:'Good. Stand up. Bandits ahead. Fly.', band:['FLY','ninety seconds'], need:'stand', hold:0.8 },
+  { say:'Stand up. Now clap your hands together in front of your chest. That fires your guns.', band:['CLAP','hands together = fire'], need:'fire', hold:0.3 },
+  { say:'Wings out again. Get a bandit in front of your nose, wait for the lock, then clap. Fly.', band:['FLY','lock on, then clap'], need:'wings', hold:0.8 },
 ];
-function startCal(){ state='play'; phase='cal'; calStep=0; calT=0; baseSum=0; baseN=0; sig.reset(); ui.tools.hidden=false; setBand(CAL[0].band[0], CAL[0].band[1]); say(CAL[0].say, true); lastStep=performance.now(); }
+function startCal(){ ui.band.classList.remove('side'); state='play'; phase='cal'; calStep=0; calT=0; baseSum=0; baseN=0; sig.reset(); ui.tools.hidden=false; setBand(CAL[0].band[0], CAL[0].band[1]); say(CAL[0].say, true); lastStep=performance.now(); }
 function calTick(now, dt){
   const c = CAL[calStep]; let met = false;
   if(c.need==='wings') met = inp.wings;   // level is whatever THIS body calls level: the base is taken from it
@@ -704,18 +747,19 @@ function calTick(now, dt){
   else if(c.need==='right') met = inp.wings && inp.bank < -0.5;
   else if(c.need==='squat') met = inp.squat > 0.6;
   else if(c.need==='stand') met = inp.squat < 0.25;
-  if(met){ calT += dt; if(c.need==='wings'){ calSpan = Math.max(calSpan, inp.span); baseSum += inp.wa; baseN++; } if(c.need==='squat') calSquat = Math.max(calSquat, inp.squat); }
+  else if(c.need==='fire') met = inp.fire && inp.squat < 0.4;
+  if(met){ calT += dt; if(c.need==='wings' && calStep===0){ calSpan = Math.max(calSpan, inp.span); baseSum += inp.wa; baseN++; } if(c.need==='squat') calSquat = Math.max(calSquat, inp.squat); }
   else calT = Math.max(0, calT - dt*0.5);
   // nag if nothing is happening for a while
   if(now - lastStep > 9000 && !met){ say(c.say, true); lastStep = now; }
   if(calT >= c.hold){
-    if(c.need==='wings' && baseN > 0){ sig.setBase(baseSum/baseN); recPush({ k:'base', t:+(now-clockT0).toFixed(1), ang:+(baseSum/baseN).toFixed(3), n:baseN }); }
+    if(c.need==='wings' && calStep===0 && baseN > 0){ sig.setBase(baseSum/baseN); recPush({ k:'base', t:+(now-clockT0).toFixed(1), ang:+(baseSum/baseN).toFixed(3), n:baseN }); }
     calStep++; calT = 0; lastStep = now;
     if(calStep >= CAL.length){ startRound(now); return; }
     const n = CAL[calStep]; setBand(n.band[0], n.band[1]); say(n.say, true); }
 }
 function startRound(now){
-  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1); ui.tools.hidden=false; sig.reseedSquat();
+  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1); ui.tools.hidden=false; ui.band.classList.add('side'); sig.reseedSquat();
   setBand('', ''); flashes = [];
   recPush({ k:'round', t:+(now-clockT0).toFixed(1), seed:world.seed, calSpan:+calSpan.toFixed(2), calSquat:+calSquat.toFixed(2) });
 }
@@ -725,7 +769,9 @@ function startRound(now){
    happened to them. */
 function handleEvents(now){
   for(const e of world.events){
-    if(e.k==='locked'){ setBand('PULL', e.aspect < 45 ? 'from his six — hold the squat' : 'hold the squat', 3000); say('Lock. Pull.', true); }
+    if(e.k==='locked'){ setBand('CLAP!', e.aspect < 45 ? 'locked from his six — fire' : 'locked — fire', 3000); say('Locked. Clap!', true); }
+    else if(e.k==='fire'){ setBand('FIRING', 'hold him there', 1200); }
+    else if(e.k==='dry'){ say('No lock yet. Put him in front of your nose first.', false, 7000); }
     else if(e.k==='kill'){ setBand('SPLASH', e.bonus ? 'from behind — he never saw you' : 'one down', 2200); say(e.bonus ? 'Splash one. He never saw you.' : 'Splash one.', true); flashes.push({x:e.x,y:e.y,t:now}); }
     else if(e.k==='lost'){ setBand('', ''); }
     else if(e.k==='alarm'){ say('He has seen you. Pull to stay with him.'); }
@@ -750,7 +796,7 @@ function handleEvents(now){
 }
 
 function endRound(now){
-  phase='end'; state='end'; setBand('', ''); ui.tools.hidden=true; letSleep();
+  phase='end'; state='end'; setBand('', ''); ui.band.classList.remove('side'); ui.tools.hidden=true; letSleep();
   const w = world; const k = w.work;
   ui.score.textContent = w.score;
   ui.endTag.textContent = w.kills === 0 ? 'NO KILLS' : (w.kills + (w.kills===1?' SPLASHED':' SPLASHED'));
@@ -789,6 +835,10 @@ function drawPlayerFigure(raw, x0, y0, w, h, alpha){
   ctx.restore();
 }
 
+function onScreen(r, cx, cy, sc, padUnits){
+  const x = cx + r.ax*sc, y = cy - r.ay*sc, pad = padUnits*sc;
+  return x > -pad && x < W + pad && y > -pad && y < H + pad;
+}
 function planePath(s, tilt){
   // top-down silhouette, nose up, in a unit frame; tilt foreshortens the
   // low wing so a bank is visible
@@ -805,8 +855,11 @@ function planePath(s, tilt){
 let cloudSeed = null;
 function drawSky(now){
   const w = world, p = w.p;
-  // the player at centre, nose up. scale: VIEW_R world units = half the shorter side
-  const cx = W/2, cy = H*0.56, sc = Math.min(W, H)*0.5/K.VIEW_R;
+  /* BUILD 5: zoomed in. Hugo, 7 Nov: from two metres the planes were dots
+     and there was nothing to chase. DRAW_R is a camera, not physics — K.VIEW_R
+     still drives the bandits — so the simulation is untouched by it. The
+     player sits low so the gun range is all on screen ahead of him. */
+  const cx = W/2, cy = H*0.68, sc = Math.min(W, H)*0.5/DRAW_R;
   // sky by altitude: higher is deeper blue
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, p.alt > 0.5 ? '#163a62' : '#2b5a86'); g.addColorStop(1, p.alt > 0.5 ? '#0b1a2b' : '#1b3350');
@@ -815,64 +868,74 @@ function drawSky(now){
   // clouds: a fixed field in world space, seeded, so motion reads
   if(!cloudSeed){ const r = mulberry(7); cloudSeed = []; for(let i=0;i<260;i++) cloudSeed.push({ x:(r()*2-1)*60, y:(r()*2-1)*60, s:0.25+r()*0.6, a:0.12+r()*0.18 }); }
   for(const cl of cloudSeed){
-    const dx = cl.x - p.x, dy = cl.y - p.y; if(dx*dx+dy*dy > (K.VIEW_R*1.6)**2) continue;
-    ctx.fillStyle = `rgba(255,255,255,${cl.a*(0.6+0.4*(1-p.alt))})`;
+    const dx = cl.x - p.x, dy = cl.y - p.y; if(dx*dx+dy*dy > (DRAW_R*2.8)**2) continue;
+    ctx.fillStyle = `rgba(255,255,255,${0.5*cl.a*(0.6+0.4*(1-p.alt))})`;   // fainter since build 5's zoom made them plane-sized
     ctx.beginPath(); ctx.arc(cl.x, cl.y, cl.s, 0, 7); ctx.arc(cl.x+cl.s*0.8, cl.y+cl.s*0.3, cl.s*0.7, 0, 7); ctx.arc(cl.x-cl.s*0.7, cl.y+cl.s*0.2, cl.s*0.6, 0, 7); ctx.fill();
   }
   // bandits
   const H_ = w.hunter, looked = (performance.now() - lastLook) < K.LOOK_MEMORY_S*1000;
   for(const b of w.bandits){
     const r = rel(w,b); const isH = b.id === H_.id;
-    const far = r.range > K.VIEW_R*0.95;
-    if(far) continue;
+    if(!onScreen(r, cx, cy, sc, 0.4)) continue;
     ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(-b.h*RAD); ctx.scale(1,-1);
     ctx.fillStyle = isH ? '#ff5c5c' : (b.state==='alarmed' ? '#ffd166' : '#dfe7ef');
-    planePath(0.55, 0); ctx.fill();
+    planePath(BANDIT_SIZE, 0); ctx.fill();
+    ctx.lineWidth = 0.05; ctx.strokeStyle = 'rgba(11,26,43,.8)'; ctx.stroke();
     ctx.restore();
     // lock ring
     if(w.lock.id === b.id && w.lock.state !== 'none'){
       const f = w.lock.state==='locking' ? w.lock.t/K.LOCK_S : 1;
       ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(-p.h*RAD);
-      ctx.lineWidth = 0.08; ctx.strokeStyle = w.lock.state==='locking' ? '#ffd166' : '#ff7a3d';
-      ctx.beginPath(); ctx.arc(0,0,0.75, -Math.PI/2, -Math.PI/2 + f*Math.PI*2); ctx.stroke();
-      if(w.lock.state==='commit' || w.lock.state==='locked'){ const cf = w.lock.commit/K.COMMIT_S;
-        ctx.strokeStyle = '#7be495'; ctx.lineWidth = 0.14; ctx.beginPath(); ctx.arc(0,0,0.55, -Math.PI/2, -Math.PI/2 + cf*Math.PI*2); ctx.stroke(); }
+      ctx.lineWidth = 0.12; ctx.strokeStyle = w.lock.state==='locking' ? '#ffd166' : '#ff7a3d';
+      ctx.beginPath(); ctx.arc(0,0,1.2, -Math.PI/2, -Math.PI/2 + f*Math.PI*2); ctx.stroke();
+      if(w.lock.state==='locked'){   // locked and waiting for the clap: a pulsing full ring
+        const pulse = 0.5 + 0.5*Math.sin(now/120);
+        ctx.lineWidth = 0.10 + 0.08*pulse; ctx.strokeStyle = `rgba(255,122,61,${0.6+0.4*pulse})`;
+        ctx.beginPath(); ctx.arc(0,0,1.45, 0, 7); ctx.stroke(); }
+      if(w.lock.state==='commit'){ const cf = w.lock.commit/K.COMMIT_S;
+        ctx.strokeStyle = '#7be495'; ctx.lineWidth = 0.2; ctx.beginPath(); ctx.arc(0,0,0.95, -Math.PI/2, -Math.PI/2 + cf*Math.PI*2); ctx.stroke(); }
       ctx.restore();
     }
   }
   // kill flashes
   for(const fl of flashes){ const a = 1 - (now - fl.t)/900; if(a<=0) continue;
-    ctx.fillStyle = `rgba(255,209,102,${a*0.8})`; ctx.beginPath(); ctx.arc(fl.x, fl.y, 0.3 + (1-a)*1.2, 0, 7); ctx.fill(); }
+    ctx.fillStyle = `rgba(255,122,61,${a*0.9})`; ctx.beginPath(); ctx.arc(fl.x, fl.y, 0.3 + (1-a)*0.9, 0, 7); ctx.fill();
+    ctx.strokeStyle = `rgba(255,209,102,${a})`; ctx.lineWidth = 0.12; ctx.beginPath(); ctx.arc(fl.x, fl.y, 0.5 + (1-a)*1.4, 0, 7); ctx.stroke(); }
   flashes = flashes.filter(fl => now - fl.t < 900);
   ctx.restore();
 
   // the player's plane, fixed at centre, nose up, tilted by the read bank
   ctx.save(); ctx.translate(cx, cy);
   ctx.fillStyle = p.blackout>0 ? '#6b7a8a' : '#f4efe4';
+  // gun cone, drawn under the plane: where to put him
+  if(inp.wings && p.blackout<=0){ ctx.save();
+    ctx.fillStyle = w.lock.state==='none' ? 'rgba(255,255,255,.08)' : (w.lock.state==='locking' ? 'rgba(255,209,102,.16)' : 'rgba(255,122,61,.24)');
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0, K.RANGE*sc, -Math.PI/2 - K.CONE_DEG*RAD, -Math.PI/2 + K.CONE_DEG*RAD); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; ctx.setLineDash([8,8]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore(); }
   const tilt = -inp.bank;      // left bank: left wing dips (draws shorter on the left)
   ctx.rotate(tilt*0.45);       // the render at 0.25 showed almost no tilt at 0.83 bank
-  planePath(sc*0.85, -tilt); ctx.fill();
-  // gun cone
-  if(inp.wings && p.blackout<=0){ ctx.save(); ctx.rotate(0);
-    ctx.fillStyle = w.lock.state==='none' ? 'rgba(255,255,255,.05)' : 'rgba(255,122,61,.10)';
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0, K.RANGE*sc, -Math.PI/2 - K.CONE_DEG*RAD, -Math.PI/2 + K.CONE_DEG*RAD); ctx.closePath(); ctx.fill(); ctx.restore(); }
-  // tracers during commit
-  if(w.lock.state==='commit' && tracerT < now){ tracerT = now + 90;
-    ctx.strokeStyle = 'rgba(255,209,102,.9)'; ctx.lineWidth = 2;
-    for(const s of [-1,1]){ ctx.beginPath(); ctx.moveTo(s*sc*0.35, -sc*0.3); ctx.lineTo(s*sc*0.1, -K.RANGE*sc*(0.6+0.4*Math.random())); ctx.stroke(); } }
+  planePath(sc*PLAYER_SIZE, -tilt); ctx.fill();
+  // tracers for the whole burst, every frame
+  if(w.lock.state==='commit'){
+    ctx.strokeStyle = 'rgba(255,209,102,.95)'; ctx.lineWidth = Math.max(3, sc*0.06);
+    for(const s of [-1,1]){ ctx.beginPath(); ctx.moveTo(s*sc*0.45, -sc*0.2); ctx.lineTo(s*sc*0.08, -K.RANGE*sc*(0.55+0.45*Math.random())); ctx.stroke(); } }
   ctx.restore();
 
   // off-screen bandit markers at the edge: the hunter only if you looked, or if it is already on you
   for(const b of w.bandits){
-    const r = rel(w,b); if(r.range <= K.VIEW_R*0.95) continue;
+    const r = rel(w,b); if(onScreen(r, cx, cy, sc, 0.4)) continue;
     const isH = b.id === H_.id;
     if(isH && !looked && H_.threat <= 0) continue;
     if(!isH && Math.abs(r.bearing) > 70) continue;   // only forward ones; the rear is what lookout is for
-    const ang = r.bearing*RAD; const rr = Math.min(W,H)*0.47;
-    const mx = cx + Math.sin(ang)*rr, my = cy - Math.cos(ang)*rr;
+    // walk the ray from the plane toward him until it meets the screen edge, inset
+    const ang = r.bearing*RAD, ux = Math.sin(ang), uy = -Math.cos(ang), m = Math.min(W,H)*0.07;
+    let t = 1e9; if(ux>0) t = Math.min(t, (W-m-cx)/ux); if(ux<0) t = Math.min(t, (m-cx)/ux);
+    if(uy>0) t = Math.min(t, (H-m-cy)/uy); if(uy<0) t = Math.min(t, (m-cy)/uy);
+    const mx = cx + ux*t, my = cy + uy*t, a = Math.min(W,H)*0.045;
     ctx.save(); ctx.translate(mx,my); ctx.rotate(ang);
-    ctx.fillStyle = isH ? '#ff5c5c' : 'rgba(223,231,239,.7)';
-    ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(10,8); ctx.lineTo(-10,8); ctx.closePath(); ctx.fill(); ctx.restore();
+    ctx.fillStyle = isH ? '#ff5c5c' : 'rgba(223,231,239,.85)';
+    ctx.beginPath(); ctx.moveTo(0,-a*1.4); ctx.lineTo(a,a*0.8); ctx.lineTo(-a,a*0.8); ctx.closePath(); ctx.fill(); ctx.restore();
   }
 
   /* ---- the threat arc, bottom centre: the hunter's guns on you ---- */
@@ -940,7 +1003,7 @@ function frame(){
 
   if(state==='play' || state==='fit'){
     const q = {}; if(pose) for(const k of NEEDS_REC){ const v = read(pose, J[k]); if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.v||0).toFixed(2) ]; }
-    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), wa:+(inp.wa||0).toFixed(3), span:+(inp.span||0).toFixed(2), abd:+(inp.abd||0).toFixed(0), sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
+    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), wa:+(inp.wa||0).toFixed(3), span:+(inp.span||0).toFixed(2), abd:+(inp.abd||0).toFixed(0), fi:inp.fire?1:0, sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lk:inp.look?1:0, p:q });
   }
 
   if(state==='fit'){
