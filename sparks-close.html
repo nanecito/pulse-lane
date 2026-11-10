@@ -577,10 +577,48 @@ function arcObserved(samples, oi, ci, key){
 /* Credit inside a tolerance zone: full inside the inner bound, sliding to
    nothing at the outer, nothing past it. The implementation's tolerance is
    not the player's accuracy. */
+/* The worst of the two caps the score. An average barely notices one of
+   them being completely wrong, which is how a poke dead on centre would
+   otherwise pass. Lifted out of judgeTarget because SCORE_R below has to
+   solve it, and a second copy of this formula would drift from this one. */
+function qualityOf(amplitude, centrality){
+  return Math.min(amplitude, centrality) * 0.45
+       + ((amplitude + centrality) / 2) * 0.55;
+}
+
 function zone(v, inB, outB){
   if(inB > outB){ if(v >= inB) return 1; if(v <= outB) return 0; return (v - outB) / (inB - outB); }
   if(v <= inB) return 1; if(v >= outB) return 0; return (outB - v) / (outB - inB);
 }
+
+/* THE RADIUS THE RING SHOULD BE DRAWN AT, which is not HIT_R.
+   
+   HIT_R, 0.42, is where the scorer stops computing anything. But a strike
+   only PAYS if its quality clears PASS_PART, and with a full-amplitude
+   swing - which is what every honest reach produces; amplitude was 1.000
+   on all thirty-two of his blue sparks - that happens at a nearest
+   approach of about 0.349. Between there and 0.42 the hand is inside the
+   circle on screen and the spark pays nothing.
+
+   He reported it as "I reach out and they never go away". Ten sparks in
+   one run landed in that band and ten of them paid zero, and he missed
+   clearing the level by three reps.
+
+   Solved rather than typed, so it stays right if PASS_PART or the weights
+   in qualityOf ever move. The drawn ring under-promises very slightly: the
+   scorer compares dEff, which is the nearest approach minus a small
+   allowance for frames nobody saw, so a strike a hair outside this ring
+   can still pay. Under-promising is the correct direction for a ring whose
+   whole job is to say "get your hand in here". */
+const SCORE_R = (() => {
+  let lo = TUNE.CENTRE_R, hi = TUNE.HIT_R;
+  for(let i = 0; i < 48; i++){
+    const mid = (lo + hi) / 2;
+    if(qualityOf(1, zone(mid, TUNE.CENTRE_R, TUNE.HIT_R)) >= TUNE.PASS_PART) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+})();
 
 /* The arc, measured between two observations rather than accumulated along
    the path. Accumulated path length grows with landmark jitter in
@@ -953,8 +991,7 @@ function judgeTarget(t, samples){
   // The worst of the two caps the score. An average barely notices one of
   // them being completely wrong, which is how a poke dead on centre would
   // otherwise pass.
-  const quality = Math.min(amplitude, centrality) * 0.45
-                + ((amplitude + centrality) / 2) * 0.55;
+  const quality = qualityOf(amplitude, centrality);
 
   /* Named hip, not legs: it is hip travel. Called legs, it collided with the
      spark's own legs flag wherever the two were spread into one record, and
@@ -1854,7 +1891,7 @@ let clockOffset = null;          // performance-ms minus capture-ms
    new build by reading drift velocities out of it and matching them against
    the committed driftFor. A build string that never changes is not a build
    string. */
-const BUILD = 'sparks-close-6-rain';
+const BUILD = 'sparks-close-7-ring';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -2399,8 +2436,10 @@ function drawSpark(t, now){
      That difference is the player's own latency and is the same one the
      catch-tick exists to paper over; it is not an error in the score. */
   const q = px(sparkPos(t, now));
-  // the ring is sized off the player's own torso, so the target it draws is
-  // the target that is scored
+  // sized off the player's own torso. The ring that marks the target is
+  // drawn at SCORE_R, below, because HIT_R is where the scorer stops
+  // LOOKING, not where it starts PAYING, and this comment used to claim
+  // the two were the same thing.
   const torsoPx = o ? o.scale * videoFit().dh : Math.min(W,H)*0.18;
   const r = torsoPx * TUNE.HIT_R;
   const life = Math.max(0, Math.min(1, (t.dieAt - now) / t.life));
@@ -2471,10 +2510,15 @@ function drawSpark(t, now){
     ctx.beginPath(); ctx.arc(q.x, q.y, R*1.9 + Math.sin(now/120)*R*0.06, 0, 7); ctx.stroke();
   }
 
-  // the hit radius, drawn as what it is
-  ctx.strokeStyle = 'rgba('+col+','+(0.22 + g0*0.16).toFixed(3)+')';
-  ctx.lineWidth = Math.max(1.5, R*0.04);
-  ctx.beginPath(); ctx.arc(q.x, q.y, R, 0, 7); ctx.stroke();
+  /* The ring that says "get your hand in here", drawn at the radius that
+     actually pays rather than at HIT_R. Drawn a little stronger than the
+     old one too: it is now a promise the game keeps, so it is worth
+     seeing. Everything else - glow, orbit rings, the life countdown -
+     still scales off HIT_R, so the spark does not shrink on screen; only
+     the line he aims at moved. */
+  ctx.strokeStyle = 'rgba('+col+','+(0.34 + g0*0.18).toFixed(3)+')';
+  ctx.lineWidth = Math.max(2, R*0.055);
+  ctx.beginPath(); ctx.arc(q.x, q.y, R*(SCORE_R/TUNE.HIT_R), 0, 7); ctx.stroke();
   // the inner zone that earns full credit
   ctx.strokeStyle = 'rgba('+col+','+bright+')';
   ctx.lineWidth = Math.max(3, R*0.09*(0.7 + g0*0.6));
@@ -2525,7 +2569,10 @@ function checkCaught(t){
   const o = lastReadable();
   if(!o) return;
   const q = px(sparkPos(t, nowClock()));
-  const rad = o.scale * videoFit().dh * TUNE.HIT_R;
+  /* SCORE_R, not HIT_R. The tick used to fire anywhere inside HIT_R,
+     including the outer band that pays nothing - so the game said "got it"
+     in sound while scoring it a miss. Same lie as the ring, in audio. */
+  const rad = o.scale * videoFit().dh * SCORE_R;
   for(const k of [J.wrA, J.wrB]){
     const p = read(pose, k);
     if(!p) continue;
