@@ -1891,7 +1891,7 @@ let clockOffset = null;          // performance-ms minus capture-ms
    new build by reading drift velocities out of it and matching them against
    the committed driftFor. A build string that never changes is not a build
    string. */
-const BUILD = 'sparks-close-7-ring';
+const BUILD = 'sparks-close-8-figure';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -2394,28 +2394,159 @@ function drawMirror(dim){
   ctx.fillStyle = 'rgba(7,8,15,'+dim+')'; ctx.fillRect(0,0,W,H);
 }
 
-const BONES = [[J.shA,J.elA],[J.elA,J.wrA],[J.shB,J.elB],[J.elB,J.wrB],
-               [J.shA,J.shB],[J.shA,J.hipA],[J.shB,J.hipB],[J.hipA,J.hipB],
-               [J.hipA,J.knA],[J.knA,J.ankA],[J.hipB,J.knB],[J.knB,J.ankB]];
+
+/* THE FIGURE, as a Matisse paper cut-out.
+
+   It replaces a stick figure of uniform-width lines whose head was a dot at
+   the nose and whose hands were CYAN - the bloom tier's own colour, on a
+   screen where telling spark colours apart is the whole game.
+
+   Cut-outs are flat filled shapes with no outline and edges that curve the
+   way scissors curve, so every limb here is a filled ribbon that tapers
+   toward the end and bows to one side rather than a straight stroke. The
+   bow is a fixed number per limb, never random, because a shape that is
+   re-cut every frame shimmers.
+
+   Lean, not bulky - he looked at the first one and said dancer, not
+   bodybuilder - so the widths below are small fractions of his own torso
+   and taper hard toward wrist and ankle.
+
+   Cream, not Matisse blue. The sparks are amber, coral, cyan and violet; a
+   deep blue body would sit on top of two of them. Cream is the one value
+   that is clearly a body and clearly not a spark, and it keeps the sparks
+   the brightest things on screen. */
+
+/* [a, b, width at a, width at b, bow] - widths as fractions of torso,
+   bows mirrored left to right so the figure flows rather than leaning. */
+const LIMBS = [
+  [J.shA, J.elA, 0.090, 0.055,  0.105], [J.elA, J.wrA, 0.055, 0.034, -0.090],
+  [J.shB, J.elB, 0.090, 0.055, -0.105], [J.elB, J.wrB, 0.055, 0.034,  0.090],
+  [J.hipA, J.knA, 0.115, 0.072,  0.080], [J.knA, J.ankA, 0.072, 0.040, -0.070],
+  [J.hipB, J.knB, 0.115, 0.072, -0.080], [J.knB, J.ankB, 0.072, 0.040,  0.070],
+];
+
+/* One limb: a closed shape down one side, round the end, back up the other
+   and round the start. The two sides take opposite bows, which is what
+   makes it read as cut rather than drawn. */
+function cutLimb(a, b, wa, wb, bow){
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1e-6;
+  const ux = dx/len, uy = dy/len;          // along the limb
+  const nx = -uy,    ny = ux;              // across it
+  const mx = (a.x + b.x)/2, my = (a.y + b.y)/2;
+  const B = bow * len;
+  ctx.beginPath();
+  ctx.moveTo(a.x + nx*wa, a.y + ny*wa);
+  ctx.quadraticCurveTo(mx + nx*(B + (wa+wb)/2), my + ny*(B + (wa+wb)/2),
+                       b.x + nx*wb, b.y + ny*wb);
+  ctx.quadraticCurveTo(b.x + ux*wb*1.35, b.y + uy*wb*1.35,
+                       b.x - nx*wb, b.y - ny*wb);
+  ctx.quadraticCurveTo(mx + nx*(B - (wa+wb)/2), my + ny*(B - (wa+wb)/2),
+                       a.x - nx*wa, a.y - ny*wa);
+  ctx.quadraticCurveTo(a.x - ux*wa*1.35, a.y - uy*wa*1.35,
+                       a.x + nx*wa, a.y + ny*wa);
+  ctx.closePath();
+  ctx.fill();
+}
 
 function drawPlayer(alpha){
   if(!pose) return;
-  const P = {}; let any=false;
-  for(const k in J){ const p = read(pose, J[k]); if(p){ P[J[k]] = px(p); any=true; } }
+  const P = {}, VIS = {}; let any = false;
+  for(const k in J){
+    const i = J[k], p = read(pose, i);
+    if(p){ P[i] = px(p); any = true; }
+    /* Taken straight off the landmark rather than from read(), which has
+       already thrown the number away by the time it says no. A limb the
+       camera is losing DIMS before it goes, so he can see it happening
+       instead of discovering it from a score. */
+    const raw = pose[i] && pose[i].visibility;
+    VIS[i] = raw === undefined ? 1
+           : Math.max(0, Math.min(1, (raw - TUNE.VIS_GET) / 0.25));
+  }
   if(!any) return;
+
+  // his own torso, in pixels, so every width below scales with him
+  const sm = P[J.shA] && P[J.shB] ? { x:(P[J.shA].x+P[J.shB].x)/2, y:(P[J.shA].y+P[J.shB].y)/2 } : null;
+  const hm = P[J.hipA] && P[J.hipB] ? { x:(P[J.hipA].x+P[J.hipB].x)/2, y:(P[J.hipA].y+P[J.hipB].y)/2 } : null;
+  const torsoPx = sm && hm ? Math.hypot(sm.x-hm.x, sm.y-hm.y) : Math.min(W,H)*0.18;
+
   ctx.save();
-  ctx.lineCap='round'; ctx.lineJoin='round';
-  ctx.strokeStyle='rgba(246,241,230,'+alpha+')';
-  ctx.lineWidth = Math.max(5, Math.min(W,H)*0.015);
-  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  const cream = (a) => 'rgba(246,241,230,'+Math.max(0, a).toFixed(3)+')';
+
+  /* The trunk. NOT the whole shoulder-to-hip quad: filling that produced a
+     slab as wide as his arm span, which is the bulky thing he objected to.
+     A cut-out trunk is narrower than the shoulders and pinched at the
+     waist, so the shoulder corners come in by a third and the sides are
+     pulled toward the spine on the way down. */
+  const lerp = (p, q, t) => ({ x: p.x + (q.x-p.x)*t, y: p.y + (q.y-p.y)*t });
+  if(P[J.shA] && P[J.shB] && P[J.hipA] && P[J.hipB] && sm && hm){
+    const a = Math.min(VIS[J.shA], VIS[J.shB], VIS[J.hipA], VIS[J.hipB]) * alpha;
+    const sA = lerp(P[J.shA], sm, 0.42), sB = lerp(P[J.shB], sm, 0.42);
+    const hA = lerp(P[J.hipA], hm, 0.06), hB = lerp(P[J.hipB], hm, 0.06);
+    // waist pulled hard toward the spine, the line from shoulder-mid to hip-mid
+    const wA = lerp(lerp(sA, hA, 0.46), lerp(sm, hm, 0.46), 0.52);
+    const wB = lerp(lerp(sB, hB, 0.46), lerp(sm, hm, 0.46), 0.52);
+    ctx.fillStyle = cream(a);
+    ctx.beginPath();
+    ctx.moveTo(sA.x, sA.y);
+    ctx.quadraticCurveTo(sm.x, sm.y - torsoPx*0.055, sB.x, sB.y);   // collar, cut high
+    ctx.quadraticCurveTo(wB.x, wB.y, hB.x, hB.y);
+    ctx.quadraticCurveTo(hm.x, hm.y + torsoPx*0.055, hA.x, hA.y);
+    ctx.quadraticCurveTo(wA.x, wA.y, sA.x, sA.y);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // the limbs
+  for(const [ia, ib, wa, wb, bow] of LIMBS){
+    if(!P[ia] || !P[ib]) continue;
+    ctx.fillStyle = cream(Math.min(VIS[ia], VIS[ib]) * alpha);
+    cutLimb(P[ia], P[ib], torsoPx*wa, torsoPx*wb, bow);
+  }
+
+  /* Neck and head, drawn together. The first version put a small ellipse at
+     the nose with nothing joining it to the body, and it read as a pea
+     floating over a slab. A cut-out head is a solid egg on a short neck. */
   const n = P[J.nose];
-  if(n){ ctx.fillStyle='rgba(246,241,230,'+alpha+')'; ctx.beginPath();
-    ctx.arc(n.x, n.y, Math.max(8, Math.min(W,H)*0.022), 0, 7); ctx.fill(); }
-  // the hands are what strikes, so they are marked
-  for(const k of [J.wrA, J.wrB]){
+  if(n && sm && hm){
+    const a = Math.min(VIS[J.nose], VIS[J.shA], VIS[J.shB]) * alpha;
+    const tilt = P[J.shA] && P[J.shB]
+      ? Math.atan2(P[J.shB].y - P[J.shA].y, P[J.shB].x - P[J.shA].x) : 0;
+    const r = torsoPx * 0.205;
+    /* Sat a FIXED distance up the spine from the shoulders rather than at
+       the nose landmark, which is about 0.44 torsos above them - far enough
+       that hanging a head off it gave the figure a giraffe's neck. The nose
+       is still used, but only sideways, so turning his head still shows. */
+    const sx = (sm.x - hm.x), sy = (sm.y - hm.y);
+    const sl = Math.hypot(sx, sy) || 1e-6;
+    const head = { x: sm.x + sx/sl*torsoPx*0.30 + (n.x - sm.x)*0.35,
+                   y: sm.y + sy/sl*torsoPx*0.30 };
+    ctx.fillStyle = cream(a);
+    cutLimb(sm, head, torsoPx*0.100, torsoPx*0.080, 0);
+    ctx.save();
+    ctx.translate(head.x, head.y); ctx.rotate(tilt);
+    ctx.beginPath(); ctx.ellipse(0, 0, r*0.86, r, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  /* HANDS AND FEET, heavier than the rest, because they are what actually
+     hits a spark and they are what he is steering. Same cream rather than a
+     fifth colour: the old figure marked the hands in the bloom tier's cyan,
+     on a screen where spark colour is the thing he has to read. */
+  for(const [k, from, rad] of [[J.wrA,J.elA,0.090],[J.wrB,J.elB,0.090],
+                              [J.ankA,J.knA,0.078],[J.ankB,J.knB,0.078]]){
     if(!P[k]) continue;
-    ctx.fillStyle = 'rgba(79,214,224,'+alpha+')';
-    ctx.beginPath(); ctx.arc(P[k].x, P[k].y, Math.max(7, Math.min(W,H)*0.019), 0, 7); ctx.fill();
+    const a = VIS[k] * alpha;
+    ctx.fillStyle = 'rgba(255,251,242,'+Math.min(1, a*1.25).toFixed(3)+')';
+    /* Ovals lying along the limb rather than circles on the joint. Circles
+       read as the ball joints of a doll, which is the opposite of a shape
+       somebody cut out of paper. */
+    const u = P[from] ? Math.atan2(P[k].y - P[from].y, P[k].x - P[from].x) : 0;
+    ctx.save();
+    ctx.translate(P[k].x, P[k].y); ctx.rotate(u);
+    ctx.beginPath();
+    ctx.ellipse(torsoPx*rad*0.25, 0, torsoPx*rad*1.15, torsoPx*rad*0.78, 0, 0, 7);
+    ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
 }
