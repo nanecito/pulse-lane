@@ -1227,7 +1227,18 @@ const DRIFT_MAX = 0.20;   // torso per second
    column is bx 0.50, directly over the resting hand, which cannot be
    caught below by 0.479. One flat floor at 0.50 covers every column. */
 const FALL_RATE = 0.50;   // torsos per SECOND
-const RAIN_TOP  = 2.10;   // where it is born: above the top of the frame
+/* NOT where it is born. Where it is born is worked out per spawn from the
+   live frame, because this constant was wrong in the only way that
+   mattered: I sized it off what the fit gate RESERVES above the hip,
+   1.57 + HIT_R = 1.99, and treated that as the top of the screen. The gate
+   guarantees a MINIMUM. He stands further back than it demands, so his
+   real frame top measured a median 3.53 torsos above his hip across 93
+   sparks - meaning rain was born 1.43 torsos BELOW the top of the screen
+   and popped into mid-air a third of the way down. He reported it twice.
+
+   Kept only as the floor for the birth height, so a very tight frame still
+   gives the spark somewhere to fall from. */
+const RAIN_TOP  = 2.10;
 const RAIN_ARM  = 1.55;   // by the time it is here it is in frame and worth hitting
 const RAIN_DEAD = 0.50;   // below this a catch would be free, so the spark is gone
 
@@ -1249,7 +1260,7 @@ function makeSpark(def, obs, o){
   const d = o.drift || { vx:0, vy:0 };
   return { def, legs:def.legs, tier:o.tier || tierOf(def),
            ref: { hip:{ x:obs.hip.x, y:obs.hip.y }, torso:obs.scale || obs.torso, ar:obs.ar },
-           bx0:def.bx, by0:def.by, vx:d.vx, vy:d.vy,
+           bx0:def.bx, by0:(o.by0 === undefined ? def.by : o.by0), vx:d.vx, vy:d.vy,
            lightAt, dieAt: lightAt + life, life,
            finale: !!o.finale, judged:null, flash:0, caught:false };
 }
@@ -1891,7 +1902,7 @@ let clockOffset = null;          // performance-ms minus capture-ms
    new build by reading drift velocities out of it and matching them against
    the committed driftFor. A build string that never changes is not a build
    string. */
-const BUILD = 'sparks-close-8-figure';
+const BUILD = 'sparks-close-9-sky';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -2178,6 +2189,14 @@ function spawnTarget(entry){
      whether it is on screen where it was born would reject every one of
      them. The question that matters is whether it will be on screen by the
      time it is worth swinging at, so that is the height tested. */
+  /* Born at the ACTUAL top of this frame. Screen y 0 sits o.hip.y / k
+     torsos above the hip, so that plus the hit radius puts the whole
+     circle off the top edge, plus a margin so it slides in rather than
+     clipping into view. */
+  const kScale = o.scale || o.torso;
+  const bornBy = entry.def.fall
+    ? Math.max(RAIN_TOP, o.hip.y / kScale + TUNE.HIT_R + 0.20)
+    : entry.def.by;
   const fitAt = entry.def.fall
     ? placeTarget({ bx: entry.def.bx, by: RAIN_ARM }, o)
     : at;
@@ -2189,7 +2208,7 @@ function spawnTarget(entry){
      dies exactly where a catch would stop being worth anything, and not a
      frame later. */
   const life = entry.finale ? FINALE_LIFETIME
-             : (entry.def.fall ? Math.round((entry.def.by - RAIN_DEAD) / FALL_RATE * 1000)
+             : (entry.def.fall ? Math.round((bornBy - RAIN_DEAD) / FALL_RATE * 1000)
                                : lifetimeNow());
   const dieAt = lightAt + life;
   const ref = { hip:{ x:o.hip.x, y:o.hip.y }, torso:o.scale, ar:o.ar };
@@ -2201,7 +2220,7 @@ function spawnTarget(entry){
   for(let tryN = 0; tryN < 8; tryN++){
     const d = driftFor(entry.def, life);
     const c = { def: entry.def, ref, lightAt, dieAt, life,
-                bx0: entry.def.bx, by0: entry.def.by, vx: d.vx, vy: d.vy };
+                bx0: entry.def.bx, by0: bornBy, vx: d.vx, vy: d.vy };
     if(!wouldCrowd(live, c, lightAt, dieAt)){ cand = c; break; }
   }
   if(!cand) return false;              // it would crowd another: let it go
