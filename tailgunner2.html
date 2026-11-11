@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b1a2b">
+<title>Tail Gunner</title>
+<style>
+  :root{ --ink:#0b1a2b; --sky:#20466b; --warm:#f4efe4; --dim:#9fb3c8;
+         --hot:#ff7a3d; --gold:#ffd166; --cyan:#4fd5e8; --good:#7be495; --bad:#ff5c5c; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  /* Everything that matters while standing back is sized in vh, not px. */
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;justify-content:safe center;padding:3vh 3vw;text-align:center;gap:1.6vh;
+    overflow-y:auto;overscroll-behavior:contain;
+    background:radial-gradient(130% 95% at 50% 15%,#1d3a5c 0%,var(--ink) 70%);z-index:5}
+  .ov[hidden]{display:none}
+  /* the fit screen sits over the mirror and must not hide it: the player is
+     using the picture to find the spot */
+  #oFit{background:radial-gradient(130% 95% at 50% 15%,rgba(29,58,92,.55) 0%,rgba(11,26,43,.75) 70%)}
+  h1{font-size:clamp(28px,11vh,80px);margin:0;letter-spacing:.14em;font-weight:400;line-height:1.05}
+  h1 .g{color:var(--hot)}
+  .sub{color:var(--dim);font-size:clamp(14px,3.4vh,24px);line-height:1.45;max-width:36ch;margin:0}
+  .big{font-size:clamp(20px,7vh,56px);letter-spacing:.06em;margin:0;color:var(--gold)}
+  button{font:inherit;font-size:clamp(17px,4vh,30px);letter-spacing:.05em;padding:1.6vh 5vw;
+    border-radius:999px;border:2px solid var(--hot);background:var(--hot);color:#2a0e00;cursor:pointer}
+  button.ghost{background:transparent;color:var(--hot)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:2vw;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:clamp(11px,2.3vh,16px);max-width:48ch;line-height:1.4;margin:0}
+  .err{color:var(--bad);font-size:clamp(12px,2.6vh,18px);max-width:34ch;line-height:1.4}
+  /* THE BAND: the one line he reads while flying. Plate behind it so it
+     survives lying across a lit limb or a cloud. */
+  #band{position:fixed;left:0;right:0;top:12%;text-align:center;z-index:4;pointer-events:none;
+    text-shadow:0 3px 14px #000;padding:1vh 0 1.2vh;
+    background:linear-gradient(90deg,rgba(11,26,43,0),rgba(11,26,43,.82) 12%,rgba(11,26,43,.82) 88%,rgba(11,26,43,0))}
+  #band[hidden]{display:none}
+  /* in flight the target is straight ahead of the nose, top middle: the band
+     goes to the top right so it never sits over what it is telling him to shoot */
+  #band.side{left:auto;right:1.5vw;top:13vh;text-align:right;padding:.8vh 2vw;max-width:44vw;
+    background:rgba(11,26,43,.78);border-radius:1.5vh}
+  #band.side #bandA{font-size:clamp(24px,9vh,80px)}
+  #bandA{display:block;font-size:clamp(28px,11vh,96px);letter-spacing:.1em;color:var(--gold);line-height:1}
+  #bandB{display:block;font-size:clamp(13px,3.2vh,24px);color:var(--warm);margin-top:.8vh}
+  table{border-collapse:collapse;font-size:clamp(13px,3vh,22px)}
+  td{padding:.4vh 2vw}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--gold)}
+  #score{font-size:clamp(60px,26vh,220px);color:var(--hot);line-height:1}
+  #tools{position:fixed;left:1vw;bottom:1vh;z-index:4;display:flex;gap:1vw}
+  #tools[hidden]{display:none}
+  button.mini{font-size:clamp(11px,2.2vh,15px);padding:.8vh 2.4vw;opacity:.75}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="band" hidden><b id="bandA"></b><span id="bandB"></span></div>
+<!-- BUILD 2: a way to save the recording and skip a step WITHOUT reaching the
+     end screen. Build 1 only offered Save on the end screen, so when the
+     calibration stuck there was no recording to read. -->
+<div id="tools" hidden><button id="bSaveNow" class="ghost mini">Save recording</button><button id="bSkipStep" class="ghost mini">Skip step</button></div>
+
+<div class="ov" id="oRot" hidden>
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Sideways. A phone camera is landscape whatever you do with it.</p>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>TAIL<br><span class="g">GUNNER</span></h1>
+  <p class="sub">An enemy plane flies ahead of you. Arms out like wings and tilt them to move your circle. Squat to aim lower. When he is inside the circle, clap.</p>
+  <div class="row"><button id="bStart">Fly</button></div>
+  <p class="note" id="loadMsg" hidden>Starting the camera…</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Ninety seconds. One tap, then it talks you through it. Nothing leaves your phone.</p>
+</div>
+
+<div class="ov" id="oFit" hidden>
+  <h1 id="fitBig">FIND YOUR<br><span class="g">SPOT</span></h1>
+  <p class="big" id="fitMsg">Looking for you…</p>
+  <div class="row"><button id="bSkip" class="ghost">Start anyway</button></div>
+  <p class="note">It needs to see you from head to knees, with room either side for your arms out.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <p class="big" id="endTag">KILLS</p>
+  <div><span id="score">0</span></div>
+  <table id="endRows"></table>
+  <div class="row"><button id="bAgain">Fly again</button><button id="bSave" class="ghost">Save recording</button></div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { FilesetResolver, PoseLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12";
+
+/*====== sim.js ======*/
+/* ==================================================================
+   TAIL GUNNER — the chase. No DOM in this block; the Node simulation
+   extracts it between the markers and drives it with synthetic players.
+
+   Why it exists (doc 24): Six O'Clock asked for eight things at once and,
+   from two metres, none of them showed a result you could see. Hugo,
+   11 Nov: "I don't know what's happening. I don't know what that means
+   when I squat." This game has three movements and each one moves
+   something on screen the instant it is read:
+
+     tilt your arms  -> the gunsight slides left or right
+     squat           -> the gunsight drops (stand up and it rises)
+     clap            -> the guns fire
+
+   One enemy plane, seen from behind, ahead of you. Put him in the circle,
+   clap. No lock, no G meter, no hunter, no lookout.
+
+   POSITION control, not rate control: the sight sits where your arms
+   point, it does not drift while they are tilted. Under 150-250 ms of
+   lag, aiming a position is a thing you look at; steering a rate is a
+   thing you react to (doc 01, latency).
+
+   The enemy moves between resting points and RESTS there: a slow,
+   smoothed glide, then a hold. Most of the shooting happens on the hold.
+   Some resting points are low, and the only way to put the sight on a
+   low enemy is to squat and stay down: that is the workout, and it is
+   visible — the sight goes down with you.
+   ================================================================== */
+const K = {
+  ROUND_MS: 90000,
+  X_MAX: 1.6,          // aim space: x in [-1.6, 1.6] (full bank either way)
+  Y_MAX: 0.9,          // aim space: y in [0, 0.9] (standing .. full squat)
+  HIT_R: 0.30,         // the circle, in aim units
+  BURST_S: 0.7,        // one clap = this much gunfire
+  HP_S: 1.5,           // seconds of gunfire ON him to bring him down
+  ENEMY_LIFE_S: 14,    // not down by then: he gets away
+  NEXT_S: 1.6,         // gap before the next one appears
+  // the enemy's glide between resting points: slower early, faster late
+  MOVE_S0: 2.4, MOVE_S1: 1.5,
+  HOLD_S0: 3.0, HOLD_S1: 1.6,
+  LOW_P0: 0.4, LOW_P1: 0.7,   // chance a resting point is low (needs a squat)
+  X_RANGE: 1.25,
+  LEVELS: [0.05, 0.45, 0.82], // resting heights: standing, half squat, deep squat
+  BOB: 0.035,
+  BREAK_DMG: 0.25,
+  RELOAD_S: 0.5,
+  SIGHT_TAU: 0.12,     // BUILD 2: the circle glides to where the arms point instead of jumping there       // after a burst the guns are quiet: spamming claps is not aiming     // burst damage that makes him break to a new spot
+};
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+function mulberry(seed){ let a = seed>>>0; return function(){
+  a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const smooth = u => u<=0?0:u>=1?1:u*u*(3-2*u);
+
+function makeWorld(seed){
+  const w = { t:0, rng:mulberry(seed||1), seed:seed||1, n:0,
+    sight:{ x:0, y:0 }, enemy:null, gap:0.6,
+    fireT:0, _fire:false,
+    kills:0, escaped:0, score:0, claps:0, clapsOn:0,
+    work:{ squats:0, lowS:0, wingS:0, downS:0 }, _sq:false,
+    events:[] };
+  return w;
+}
+function difficulty(w){ return clamp(w.t / (K.ROUND_MS/1000), 0, 1); }
+function pickPoint(w, e){
+  const d = difficulty(w), r = w.rng;
+  // the next point is on the other side, mostly: it has to be a visible move
+  let x = (r()*0.7 + 0.35) * K.X_RANGE * (e.x > 0 ? -1 : 1);
+  if(r() < 0.25) x = (r()*2-1) * K.X_RANGE * 0.5;
+  const lowP = K.LOW_P0 + (K.LOW_P1 - K.LOW_P0)*d;
+  const y = r() < lowP ? K.LEVELS[r() < 0.5 ? 1 : 2] : K.LEVELS[0];
+  return { x, y };
+}
+function spawnEnemy(w){
+  w.n++;
+  const e = { id:w.n, x:(w.rng()*2-1)*0.6, y:K.LEVELS[0], hp:K.HP_S, age:0,
+              from:null, to:null, moveT:0, moveS:1, holdS:1.2, state:'arrive', arrive:0, hitFlash:0 };
+  // the first two enemies stay high: the first thing to learn is the arms
+  if(w.n > 2){ const p0 = pickPoint(w, { x:-e.x, y:0 }); e.y = p0.y; }
+  e.from = { x:e.x, y:e.y }; e.to = { x:e.x, y:e.y }; e.dmg = 0;
+  w.enemy = e; w.events.push({ k:'spawn', n:w.n });
+  return e;
+}
+function enemyAt(w, e, tBack){
+  // where he WAS tBack seconds ago — the sight is read from a body that is
+  // ~200 ms late, so both sides of the hit test are put in that one clock
+  // domain (doc 01). Only the glide moves him; holds are still.
+  if(!e) return null;
+  const mt = Math.max(0, e.moveT - tBack);
+  const u = e.state === 'move' ? smooth(mt / e.moveS) : 1;
+  const bob = K.BOB*Math.sin((w.t - tBack)*2.1 + e.id);
+  return { x: e.from.x + (e.to.x - e.from.x)*u, y: clamp(e.from.y + (e.to.y - e.from.y)*u + bob, 0, K.Y_MAX) };
+}
+
+/* inp = { bank:-1..1 (left positive), squat:0..1, wings:bool, fire:bool, lost:bool }
+   lagS = how late the body reading is (for the hit test's clock). */
+function stepWorld(w, inp, dt, lagS){
+  const ev = w.events; w.t += dt;
+  const lost = !!inp.lost;
+  const wings = !!inp.wings;
+  // the sight: where the arms point and how deep the squat is. Arms down
+  // = no steering: the sight eases back to the middle, still at squat height.
+  const tx = wings ? -clamp(inp.bank, -1, 1) * K.X_MAX : 0;   // left bank -> sight moves left (negative x)
+  const ty = clamp(inp.squat || 0, 0, 1) * K.Y_MAX;
+  /* BUILD 2. Hugo: "the circle is choppy, it's jumping". Replaying his
+     recording through this code: 24 deg of wrist tilt sweeps the whole
+     screen, so each 30-a-second camera reading moved the circle in one hop
+     (p90 30 px, median big jump 53 px). Now it glides toward the target. */
+  if(!lost){
+    const gx = 1 - Math.exp(-dt/(wings ? K.SIGHT_TAU : 0.8)), gy = 1 - Math.exp(-dt/K.SIGHT_TAU);
+    w.sight.x += (tx - w.sight.x) * gx;
+    w.sight.y += (ty - w.sight.y) * gy;
+  }
+  /* work, counted apart from score */
+  const sq = inp.squat || 0;
+  if(!lost){
+    if(sq >= 0.8 && !w._sq){ w._sq = true; w.work.squats++; }
+    if(sq < 0.4) w._sq = false;
+    if(sq >= 0.4) w.work.lowS += dt;
+    if(wings) w.work.wingS += dt; else w.work.downS += dt;
+  }
+  /* the enemy */
+  let e = w.enemy;
+  if(!e){ w.gap -= dt; if(w.gap <= 0) e = spawnEnemy(w); }
+  if(e){
+    if(!lost) e.age += dt;           // a lost body is not charged: his clock stops
+    e.hitFlash = Math.max(0, e.hitFlash - dt);
+    if(e.state === 'arrive'){ e.arrive += dt; if(e.arrive >= 1.0){ e.state = 'hold'; e.moveT = 0; e.holdS = 1.8; } }
+    else if(e.state === 'hold'){ e.moveT += dt;
+      if(e.moveT >= e.holdS){
+        const d = difficulty(w);
+        e.from = { x:e.to.x, y:e.to.y };
+        e.to = (w.n <= 2) ? { x: pickPoint(w, e.to).x, y: K.LEVELS[0] } : pickPoint(w, e.to);
+        e.moveS = K.MOVE_S0 + (K.MOVE_S1 - K.MOVE_S0)*d; e.moveT = 0; e.state = 'move';
+        if(e.to.y > 0.3 && e.from.y < 0.3) ev.push({ k:'dive' });
+      } }
+    else if(e.state === 'move'){ e.moveT += dt;
+      if(e.moveT >= e.moveS){ const d = difficulty(w);
+        e.state = 'hold'; e.moveT = 0; e.holdS = K.HOLD_S0 + (K.HOLD_S1 - K.HOLD_S0)*d; } }
+    else if(e.state === 'down' || e.state === 'gone'){ e.moveT += dt;
+      if(e.moveT >= 1.2){ w.enemy = null; w.gap = K.NEXT_S; e = null; } }
+  }
+  w.reloadT = Math.max(0, (w.reloadT||0) - dt);
+  /* the guns */
+  const fire = !!inp.fire && !lost;
+  if(fire && !w._fire && w.fireT === 0 && (w.reloadT||0) <= 0){ w.fireT = K.BURST_S; w.claps++; ev.push({ k:'clap' }); }
+  w._fire = fire;
+  let onTarget = false;
+  if(e && (e.state === 'hold' || e.state === 'move' || e.state === 'arrive')){
+    const p = enemyAt(w, e, lagS || 0);
+    const dx = p.x - w.sight.x, dy = p.y - w.sight.y;
+    onTarget = (dx*dx + dy*dy) < K.HIT_R*K.HIT_R && e.state !== 'arrive';
+    w.onTarget = onTarget;
+    if(w.fireT > 0 && onTarget){ e.hp -= dt; e.hitFlash = 0.12; }
+    if(e.hp <= 0){
+      e.state = 'down'; e.moveT = 0; w.kills++;
+      const fast = e.age < 6;
+      w.score += 100 + (fast ? 50 : 0);
+      ev.push({ k:'kill', fast, n:w.kills });
+    } else if(e.age >= K.ENEMY_LIFE_S && e.state !== 'down'){
+      e.state = 'gone'; e.moveT = 0; w.escaped++; ev.push({ k:'escape' });
+    }
+  } else w.onTarget = false;
+  if(e && w.fireT > 0 && onTarget) e.dmg += dt;
+  if(w.fireT > 0){ if(onTarget && w.fireT === K.BURST_S) w.clapsOn++; w.fireT = Math.max(0, w.fireT - dt); if(w.fireT === 0) w.reloadT = K.RELOAD_S;
+    // he breaks when the burst is over and it hurt him: a kill means following him
+    if(w.fireT === 0 && e && e.state === 'hold' && e.dmg >= K.BREAK_DMG){ e.dmg = 0; e.moveT = e.holdS; ev.push({ k:'break' }); } }
+}
+
+const SIM = { K, makeWorld, stepWorld, enemyAt, clamp, mulberry, smooth };
+/*====== endsim ======*/
+
+/*====== signal.js ======*/
+/* ---- the landmark reader, lifted from Sparks and Second Line unchanged ---- */
+const VIS_GET = 0.15, VIS_KEEP = 0.04;
+const J = { nose:0, earA:7, earB:8, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? VIS_KEEP : VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };       // mirrored, normalised to the frame
+  };
+}
+
+/* ---- the body becomes four signals: bank, squat, wings, look ----------
+   All scale-free. The ruler is SHOULDER WIDTH (doc 16: a bend about a
+   horizontal axis does not touch it) for the arms, and the TRACKED torso
+   for the squat (doc 02: standing height is tracked, not frozen). */
+/* BUILD 3. Wings used to be a horizontal wrist-to-wrist span over shoulder
+   width (on ≥ 2.35, off < 1.9). Hugo's recording: on his deeper dips — left
+   hand near the hip, right hand over the head — the horizontal span fell
+   to 1.9 and the wings switched off mid-dip. Now each arm's angle from
+   straight down is measured and the mean of the two must be past
+   WING_ABD_ON: hanging arms read ~5°, wings level 90°, a steep dip 20°
+   and 160° — mean 90°. A tilt cannot switch it off. Still scale-free. */
+/* BUILD 5, the clap: both wrists closer together than CLAP_ON shoulder
+   widths, both above the middle of the torso (so hands hanging at the hips
+   never count). While the hands are together the wings are HELD on and the
+   bank is frozen — a clap pulls both arms to the middle, which would
+   otherwise read as arms down and drop the lock it is trying to fire on. */
+const CLAP_ON = 0.85, CLAP_OFF = 1.4, CLAP_MIN_S = 0.10, CLAP_VIS = 0.5;
+const WING_ABD_ON  = 50;      // degrees, mean of both arms from straight down
+const WING_ABD_OFF = 36;
+const WING_OFF_S = 0.25;
+const BANK_FULL = 0.42;       // radians of wrist-line tilt for full bank: each arm about 30° off level. 0.62 needed 45° and the render's dip never passed the calibration
+const BANK_DEAD = 0.14;       // fraction of full — the research's 2-3° plus camera noise
+const BANK_CURVE = 1.3;
+const STEER_MINCUT = 0.7, STEER_BETA = 1.6, STEER_DCUT = 0.80;   // the racing game's filter
+const SQUAT_DEPTH = 0.26;     // hip drop, in torsos, that is a full squat (racing game)
+/* REF_DOWN is 12 s here, not the racing game's 3.5. There a low stance was
+   something to forgive; here a HELD squat is the pull and the commit, and
+   with 3.5 s the render read a squat held 1.4 s as 0.60 of itself and a
+   five-second pull would have decayed to standing. */
+const REF_UP = 0.5, REF_DOWN = 12, REF_SHRINK = 0.10;
+const LOOK_YAW = 0.42;        // nose offset over ear spacing, either way
+
+function makeSignals(){
+  let angSm = null, angPrev = 0, angSpd = 0, wingsOn = false;
+  let hipRef = null, shRef = null, refTorso = 0;
+  let bankSm = 0, baseAng = 0, impossibleS = 0, clapOn = false, clapS = 0, offS = 0;
+  function steerFilter(raw, dt){
+    if(angSm==null){ angSm = raw; angPrev = raw; }
+    const sp = Math.abs(raw - angPrev)/Math.max(dt, 1e-3); angPrev = raw;
+    angSpd += (sp - angSpd) * (1 - Math.pow(STEER_DCUT, dt*60));
+    const cut = STEER_MINCUT + STEER_BETA*angSpd;
+    angSm += (raw - angSm) * (1 - Math.exp(-2*Math.PI*cut*dt));
+    return angSm;
+  }
+  function bankFrom(ang){
+    let s = Math.max(-1, Math.min(1, ang/BANK_FULL));
+    if(Math.abs(s) < BANK_DEAD) return 0;
+    const n = (Math.abs(s)-BANK_DEAD)/(1-BANK_DEAD);
+    return (s<0?-1:1) * Math.pow(n, BANK_CURVE);
+  }
+  return {
+    reset(){ angSm=null; angSpd=0; wingsOn=false; hipRef=null; shRef=null; refTorso=0; bankSm=0; baseAng=0; clapOn=false; clapS=0; },
+    setBase(a){ baseAng = a; angSm = null; },
+    reseedSquat(){ hipRef = null; shRef = null; impossibleS = 0; },
+    base(){ return baseAng; },
+    read(L, dt){
+      const out = { bank:0, squat:0, wings:false, look:false, fire:false, span:0, abd:0, wa:0, valid:{wings:false, squat:false, look:false, fire:false} };
+      if(!(L.shA && L.shB && L.hipC)) { bankSm *= Math.pow(0.85, dt*60); out.bank = bankSm; return out; }
+      const sw = Math.max(1e-6, Math.abs(L.shB.x - L.shA.x));
+      const torso = Math.max(1e-6, Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y));
+      /* wings: both wrists seen, arms spread. */
+      if(L.wrA && L.wrB){
+        const span = Math.abs(L.wrB.x - L.wrA.x)/sw; out.span = span;
+        const gap = Math.hypot(L.wrB.x - L.wrA.x, L.wrB.y - L.wrA.y)/sw;
+        const midY = (L.shC.y + L.hipC.y)/2;
+        const high = L.wrA.y > midY && L.wrB.y > midY;      // y is up
+        /* and both wrists actually SEEN: the first recording's walk-up to the
+           phone, hips off the frame and wrists guessed at confidence 0.25,
+           read as a clap for two frames */
+        const seen = (L.wrA.v === undefined || L.wrA.v >= CLAP_VIS) && (L.wrB.v === undefined || L.wrB.v >= CLAP_VIS);
+        if(!clapOn && gap < CLAP_ON && high && seen) clapOn = true;
+        else if(clapOn && (gap > CLAP_OFF || !high || !seen)) clapOn = false;
+        clapS = clapOn ? clapS + dt : 0;
+        out.fire = clapS >= CLAP_MIN_S; out.valid.fire = true;
+        if(clapOn){ out.wings = wingsOn; out.bank = bankSm; }   // hold, do not read the arms
+        else {
+        const abd = (sh, wr) => Math.atan2(Math.abs(wr.x - sh.x), -(wr.y - sh.y))*180/Math.PI;  // 0 = hanging, 90 = out, 180 = up
+        const abdM = (abd(L.shA, L.wrA) + abd(L.shB, L.wrB))/2; out.abd = abdM;
+        /* off only after WING_OFF_S below the bar: on the way in to a clap
+           each wrist passes in front of its shoulder, where the 2D angle
+           reads near zero for a frame or two, and that would drop the lock
+           at the moment the player fires on it */
+        if(!wingsOn && abdM >= WING_ABD_ON){ wingsOn = true; offS = 0; }
+        else if(wingsOn && abdM < WING_ABD_OFF){ offS += dt; if(offS >= WING_OFF_S) wingsOn = false; }
+        else offS = 0;
+        out.valid.wings = true;
+        if(wingsOn){
+          /* BUILD 2. Build 1 read bank as wrist line MINUS shoulder line, so
+             a torso lean would not count as a bank (doc 22). Hugo's first
+             play: "dip your left wing" never registered. Reproduced on the
+             signal code: a body dips a wing BY leaning, the shoulders tilt
+             with the arms, and the subtraction cancelled the bank — 20°
+             of arm dip with 20° of shoulder lean read 0.00. Now the wrist
+             line is measured against a base angle captured while the
+             player holds their wings level in the calibration, which is
+             what the racing game does with its wheel. */
+          const wa = Math.atan2(L.wrB.y - L.wrA.y, L.wrB.x - L.wrA.x);
+          out.wa = wa;
+          const raw = wa - baseAng;               // right wrist up = left wing down = left turn = positive
+          bankSm = bankFrom(steerFilter(raw, dt));
+        } else { angSm = null; bankSm *= Math.pow(0.85, dt*60); }
+        }
+      } else { wingsOn = wingsOn && false; clapOn = false; clapS = 0; bankSm *= Math.pow(0.85, dt*60); }
+      out.wings = wingsOn; out.bank = bankSm;
+      /* squat: the racing game's tracked reference. Up fast, down slow,
+         and a body shrinking in the frame (walking back) is followed.
+         BUILD 3: seeded only from an UPRIGHT frame, and re-seeded if the
+         drop reads more than twice a full squat for 1.5 s, which no body
+         does — the recording showed a poisoned seed holding squat at 1.00
+         for twenty-five seconds of standing. */
+      const hy = L.hipC.y, sy = L.shC.y;        // y is UP here
+      const upright = (sy - hy) > 0.7*torso;
+      if(hipRef === null){ if(!upright) return out; hipRef = hy; shRef = sy; refTorso = torso; impossibleS = 0; }
+      refTorso += (torso - refTorso)*Math.min(1, dt/0.6);
+      if(refTorso > 0 && (refTorso - torso)/refTorso > REF_SHRINK){ hipRef = hy; shRef = sy; }
+      const follow = (ref, y) => ref + (y - ref) * Math.min(1, dt/(y > ref ? REF_UP : REF_DOWN));
+      hipRef = follow(hipRef, hy); shRef = follow(shRef, sy);
+      /* HIPS ONLY. The racing game takes the deeper of hip drop and shoulder
+         drop, which is safe with both hands on a wheel. Here the arms move
+         all the time and MediaPipe's shoulder points move with them: the
+         recording read 0.2-0.5 of a squat from a man standing still with his
+         wings out. */
+      const hipDrop = (hipRef - hy)/refTorso;
+      const dropT = hipDrop;
+      if(dropT > 2*SQUAT_DEPTH && upright){ impossibleS += dt; if(impossibleS > 1.5){ hipRef = hy; shRef = sy; refTorso = torso; impossibleS = 0; } }
+      else impossibleS = 0;
+      out.squat = clamp(Math.max(0, hipDrop)/SQUAT_DEPTH, 0, 1);
+      out.valid.squat = true;
+      /* look: nose off the ear midpoint, over ear spacing. Coarse on purpose. */
+      if(L.nose && L.earA && L.earB){
+        const ec = (L.earA.x + L.earB.x)/2, es = Math.max(1e-6, Math.abs(L.earB.x - L.earA.x));
+        out.look = Math.abs((L.nose.x - ec)/es) > LOOK_YAW; out.valid.look = true;
+      }
+      return out;
+    }
+  };
+}
+/*====== endsignal ======*/
+
+/* ================= camera, pose, recording ================= */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+
+const BUILD = 'tailgunner-2';
+const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. Used: the
+   hit test compares the circle (read from a late body) with where the
+   enemy WAS this long ago, so both sit in one clock (doc 01). */
+const REC_CAP = 40000; const rec = []; let recDropped = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'tailgunner', build:BUILD,
+    orientation:(innerHeight>innerWidth)?'portrait':'landscape',
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    poseLatencyMs:POSE_LATENCY_MS, K,
+    tune:{ CLAP_ON, CLAP_OFF, CLAP_MIN_S, WING_ABD_ON, WING_ABD_OFF, BANK_FULL, BANK_DEAD, BANK_CURVE, SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, LOOK_YAW },
+    coords:'MediaPipe normalised to the camera frame, mirrored; the signals read them aspect corrected and y-up' });
+}
+const NEEDS_REC = ['nose','earA','earB','shA','shB','elA','elB','wrA','wrB','hipA','hipB','knA','knB','ankA','ankB'];
+
+
+/* ================= canvas, orientation, fit ================= */
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){ DPR = Math.min(2, devicePixelRatio||1); W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); }
+function landscapeOK(){ return innerWidth > innerHeight; }
+function checkRotation(){ if(ui && ui.oRot) ui.oRot.hidden = landscapeOK(); }
+addEventListener('resize', ()=>{ resize(); checkRotation(); });
+addEventListener('orientationchange', ()=>{ resize(); checkRotation(); });
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw||!vh) return { dx:0,dy:0,dw:W,dh:H,vw:0,vh:0 };
+  const sc = Math.min(W/vw, H/vh);
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+function frameAR(){ const vw=video.videoWidth||4, vh=video.videoHeight||3; return vw/vh; }
+function pxRaw(p){ const f=videoFit(); return { x:f.dx+p.x*f.dw, y:f.dy+p.y*f.dh }; }
+function readPose(p){
+  const ar = frameAR(), L = {}, have = {};
+  for(const k in J){ const q = read(p, J[k]);
+    if(q){ L[k] = { x:q.x*ar, y:-q.y, v:q.v }; have[k] = true; } }
+  if(L.hipA && L.hipB) L.hipC = { x:(L.hipA.x+L.hipB.x)/2, y:(L.hipA.y+L.hipB.y)/2 };
+  if(L.shA && L.shB)  L.shC  = { x:(L.shA.x+L.shB.x)/2,  y:(L.shA.y+L.shB.y)/2 };
+  return { L, have };
+}
+/*====== gate.js ======*/
+/* BUILD 3. Second Line's guard measured shoulder width HORIZONTALLY over
+   torso height and rejected the frame under 0.52 as "turned side on". A
+   dancer stays upright; a pilot dips a wing by tilting the shoulders, and
+   the horizontal width shrinks with the tilt. Hugo's recording: level
+   stance 0.55-0.58, every dip 0.39-0.48 — the dip registered at bank
+   +1.00 for three frames and then the guard threw the frames away. Now the
+   width is the distance between the shoulders, which a tilt does not
+   change, over the torso length, and the bar is 0.38. */
+function sidesOk(L){
+  if(!(L.shA&&L.shB&&L.hipA&&L.hipB)) return false;
+  const sw = L.shB.x - L.shA.x, hw = L.hipB.x - L.hipA.x;
+  const span = Math.max(Math.abs(sw), 1e-6);
+  if(sw <= 0 || hw <= -span*0.2) return false;              // labels swapped
+  const shD = Math.hypot(L.shB.x - L.shA.x, L.shB.y - L.shA.y);
+  const torso = Math.hypot((L.shA.x+L.shB.x)/2 - (L.hipA.x+L.hipB.x)/2, (L.shA.y+L.shB.y)/2 - (L.hipA.y+L.hipB.y)/2);
+  if(!torso || shD/torso < 0.38) return false;              // turned side on
+  return true;
+}
+/* An upright body: shoulders above the hips by most of a torso. The
+   recording's first calibration frames had the hips ABOVE the shoulders —
+   MediaPipe's guess at a body half out of the picture — and that frame
+   seeded the standing height, so every honest frame after it read as a
+   full squat. */
+function uprightOk(L){
+  if(!(L.shC && L.hipC)) return false;
+  const torso = Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y);
+  return torso > 0.06 && (L.shC.y - L.hipC.y) > 0.7*torso;
+}
+
+/* ---- the fit gate: head to knees, and room for the wings ---- */
+let fitPrev = null;
+function fitState(raw, now){
+  if(!raw) return { ok:false, why:'nobody' };
+  const g={}; for(const k of ['nose','shA','shB','hipA','hipB','knA','knB']){
+    const q=read(raw,J[k]); if(q) g[k]=q; }
+  if(!(g.shA&&g.shB&&g.hipA&&g.hipB)) return { ok:false, why:'nobody' };
+  if(!(g.knA||g.knB)) return { ok:false, why:'knees' };
+  const shY=(g.shA.y+g.shB.y)/2, hipY=(g.hipA.y+g.hipB.y)/2;
+  const torso=Math.abs(hipY-shY);
+  // UPRIGHT AND STEADY, doc 00's build-39 rule, which build 1 skipped:
+  // shoulders above hips, and the hips not moving across the frame
+  if(!(shY < hipY - 0.04)) return { ok:false, why:'upright' };
+  const hipX=(g.hipA.x+g.hipB.x)/2;
+  let moving = false;
+  if(fitPrev && now !== undefined){ const dt = Math.max(1e-3, (now - fitPrev.t)/1000);
+    const v = Math.hypot(hipX - fitPrev.x, hipY - fitPrev.y)/dt;     // frame units per second
+    fitPrev.v = fitPrev.v*0.7 + v*0.3; moving = fitPrev.v > 0.12; fitPrev.x=hipX; fitPrev.y=hipY; fitPrev.t=now; }
+  else fitPrev = { x:hipX, y:hipY, t:now||0, v:0 };
+  if(moving) return { ok:false, why:'moving' };
+  const headY = g.nose ? g.nose.y : shY - torso*0.44;
+  if(headY < 0.03) return { ok:false, why:'high' };
+  const kneeY = Math.max(g.knA?g.knA.y:0, g.knB?g.knB.y:0);
+  if(kneeY > 0.985) return { ok:false, why:'low' };
+  // wings need room: a fingertip is 1.18 torsos from the shoulder, in frame-x
+  // units that is torso*1.18/ar, and the shoulders sit 0.4 torso either side
+  const ar = frameAR(), shC = (g.shA.x+g.shB.x)/2, reach = (0.40+1.18)*torso/ar;
+  if(shC - reach < 0.02 || shC + reach > 0.98) return { ok:false, why:'arms' };
+  return { ok:true, torso };
+}
+const FIT_SAY = {
+  nobody:['STEP INTO THE PICTURE','I cannot see you yet. Step in front of the phone.'],
+  knees :['STEP BACK','I cannot see your knees. Step back a little.'],
+  high  :['STEP BACK','Your head is at the top of the picture. Step back.'],
+  low   :['STEP BACK','Your knees are off the bottom. Step back a little.'],
+  arms  :['STEP BACK','No room for your wings. Step back, or move to the middle.'],
+  upright:['STAND UP','Stand up straight, facing the phone.'],
+  moving:['HOLD STILL','Hold still a moment.'],
+};
+/*====== endgate ======*/
+
+/* ================= voice ================= */
+let voiceOn = true, lastSaidAt = 0; const saidAt = {};
+function say(text, force, cooldownMs){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  const now = performance.now();
+  const cd = cooldownMs || 4000;
+  if(!force && ((saidAt[text] && now - saidAt[text] < cd) || now - lastSaidAt < 1500)) return;
+  saidAt[text] = now; lastSaidAt = now;
+  try { if(force) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; u.pitch = 1.0; u.volume = 1;
+    speechSynthesis.speak(u); } catch(e){}
+}
+
+/* ================= sound (BUILD 2) =================
+   Hugo, 11 Nov: "let's put some sound to it — a plane flying, and the
+   shooting". All synthesised with Web Audio, no files. The context is made
+   inside the tap (browsers refuse audio that was not started by a touch). */
+let AC = null, master = null, noiseBuf = null, eng = null;
+function audioInit(){
+  try {
+    if(!AC){ const A = window.AudioContext || window.webkitAudioContext; if(!A) return;
+      AC = new A(); master = AC.createGain(); master.gain.value = 0.9;
+      const lim = AC.createDynamicsCompressor(); lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.2;
+      master.connect(lim); lim.connect(AC.destination);   // a phone speaker distorts past full scale: the explosion is held under it
+      noiseBuf = AC.createBuffer(1, AC.sampleRate*1.5, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1; }
+    if(AC.state === 'suspended') AC.resume();
+  } catch(e){ AC = null; }
+}
+function engineStart(){
+  if(!AC || eng) return;
+  const t = AC.currentTime, g = AC.createGain(), lp = AC.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.7;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.035, t + 1.2);
+  const o1 = AC.createOscillator(), o2 = AC.createOscillator(), o3 = AC.createOscillator();
+  o1.type = 'sawtooth'; o2.type = 'sawtooth'; o3.type = 'square';
+  o1.frequency.value = 62; o2.frequency.value = 62.9; o3.frequency.value = 31;
+  const g3 = AC.createGain(); g3.gain.value = 0.35;
+  // the propeller throb: a slow wobble on the volume
+  const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = 9; lg.gain.value = 0.009; lfo.connect(lg); lg.connect(g.gain);
+  o1.connect(lp); o2.connect(lp); o3.connect(g3); g3.connect(lp); lp.connect(g); g.connect(master);
+  for(const o of [o1,o2,o3,lfo]) o.start(t);
+  eng = { g, lp, o1, o2, o3, lfo };
+}
+function engineUpdate(w){
+  if(!eng || !AC) return;
+  // aiming low is diving: the engine climbs as you squat, and opens up in a turn
+  const low = clamp(w.sight.y / K.Y_MAX, 0, 1), turn = clamp(Math.abs(w.sight.x) / K.X_MAX, 0, 1);
+  const f = 62 * (1 + 0.45*low + 0.08*turn), t = AC.currentTime;
+  eng.o1.frequency.setTargetAtTime(f, t, 0.15); eng.o2.frequency.setTargetAtTime(f*1.015, t, 0.15); eng.o3.frequency.setTargetAtTime(f/2, t, 0.15);
+  eng.lfo.frequency.setTargetAtTime(9 + 6*low, t, 0.2);
+  eng.lp.frequency.setTargetAtTime(520 + 600*low + 200*turn, t, 0.15);
+}
+function engineStop(){
+  if(!eng || !AC) return; const t = AC.currentTime, e = eng; eng = null;
+  e.g.gain.cancelScheduledValues(t); e.g.gain.setValueAtTime(e.g.gain.value, t); e.g.gain.linearRampToValueAtTime(0, t + 0.6);
+  for(const o of [e.o1,e.o2,e.o3,e.lfo]) o.stop(t + 0.7);
+}
+function noiseHit(t, dur, type, freq, q, vol){
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const f = AC.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+  const g = AC.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(f); f.connect(g); g.connect(master); src.start(t, Math.random()*0.5); src.stop(t + dur + 0.02);
+  return f;
+}
+function sfxGuns(){
+  if(!AC) return; const t0 = AC.currentTime;
+  // one burst = BURST_S of machine-gun fire, ~13 rounds a second
+  const n = Math.round(K.BURST_S * 13);
+  for(let i=0;i<n;i++){ const t = t0 + i/13 + Math.random()*0.006;
+    noiseHit(t, 0.06, 'bandpass', 1300 + Math.random()*400, 1.2, 1.1);
+    noiseHit(t, 0.09, 'lowpass', 260, 0.8, 0.9); }
+}
+function sfxBoom(){
+  if(!AC) return; const t = AC.currentTime;
+  const f = noiseHit(t, 1.6, 'lowpass', 2200, 0.8, 1.8);
+  f.frequency.setValueAtTime(2200, t); f.frequency.exponentialRampToValueAtTime(160, t + 1.4);
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = 'sine';
+  o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(28, t + 0.8);
+  g.gain.setValueAtTime(1.0, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 1.0);
+}
+document.addEventListener('visibilitychange', ()=>{ try { if(!AC) return;
+  if(document.visibilityState === 'hidden') AC.suspend(); else if(state==='play') AC.resume(); } catch(e){} });
+
+/* ================= state ================= */
+let state='idle', phase='', lastFrameAt=0, clockT0=0, fitSince=0;
+let world=null, sig=makeSignals(), inp={bank:0,squat:0,wings:false,fire:false,span:0,valid:{}};
+let roundStart=0, calT=0, calStep=0, calSpan=0, calSquat=0, lastStep=0, baseSum=0, baseN=0;
+let bandA='', bandB='', bandUntil=0, onNoFireS=0, downS=0, firstSpawnSaid=false;
+let fx=[], wreck=null;
+const ui={};
+for(const id of ['oStart','oFit','oEnd','oRot','band','bandA','bandB','loadMsg','errMsg','fitMsg','fitBig','score','endRows','endTag','endNote','tools'])
+  ui[id]=document.getElementById(id);
+function setBand(a,b,ms){ bandA=a; bandB=b||''; ui.bandA.textContent=a; ui.bandB.textContent=bandB;
+  ui.band.hidden = !a; bandUntil = ms ? performance.now()+ms : 0; }
+
+/* ---- teaching: one movement, one meaning, each said once ---- */
+const CAL = [
+  { say:'Arms out, like wings. Hold them there.', band:['WINGS OUT','hold them level'], need:'wings', hold:2.5 },
+  { say:'Dip your left wing. That steers left.', band:['DIP LEFT','left hand down'], need:'left', hold:1.0 },
+  { say:'Dip your right wing. That steers right.', band:['DIP RIGHT','right hand down'], need:'right', hold:1.0 },
+  { say:'Now squat. That aims lower.', band:['SQUAT','aims lower'], need:'squat', hold:1.0 },
+  { say:'Stand up and clap. That fires.', band:['CLAP','fires your guns'], need:'fire', hold:0.25 },
+  { say:'Wings out. Put the enemy in your circle and clap.', band:['GO','enemy in the circle, then clap'], need:'wings', hold:0.8 },
+];
+function startCal(){ ui.band.classList.remove('side'); state='play'; phase='cal'; calStep=0; calT=0; baseSum=0; baseN=0; sig.reset(); ui.tools.hidden=false; setBand(CAL[0].band[0], CAL[0].band[1]); say(CAL[0].say, true); lastStep=performance.now(); }
+function calTick(now, dt){
+  const c = CAL[calStep]; let met = false;
+  if(c.need==='wings') met = inp.wings;
+  else if(c.need==='left') met = inp.wings && inp.bank > 0.5;
+  else if(c.need==='right') met = inp.wings && inp.bank < -0.5;
+  else if(c.need==='squat') met = inp.squat > 0.6;
+  else if(c.need==='fire') met = inp.fire && inp.squat < 0.4;
+  if(met){ calT += dt; if(c.need==='wings' && calStep===0){ calSpan = Math.max(calSpan, inp.span); baseSum += inp.wa; baseN++; } if(c.need==='squat') calSquat = Math.max(calSquat, inp.squat); }
+  else calT = Math.max(0, calT - dt*0.5);
+  if(now - lastStep > 9000 && !met){ say(c.say, true); lastStep = now; }
+  if(calT >= c.hold){
+    if(c.need==='wings' && calStep===0 && baseN > 0){ sig.setBase(baseSum/baseN); recPush({ k:'base', t:+(now-clockT0).toFixed(1), ang:+(baseSum/baseN).toFixed(3), n:baseN }); }
+    calStep++; calT = 0; lastStep = now;
+    if(calStep >= CAL.length){ startRound(now); return; }
+    const n = CAL[calStep]; setBand(n.band[0], n.band[1]); say(n.say, true); }
+}
+function startRound(now){
+  phase='fly'; roundStart = now; world = makeWorld((Date.now() % 100000) + 1); world.seed = world.seed || 0;
+  ui.tools.hidden=false; ui.band.classList.add('side'); sig.reseedSquat(); engineStart();
+  setBand('', ''); fx = []; wreck = null; onNoFireS = 0; downS = 0; firstSpawnSaid = false;
+  recPush({ k:'round', t:+(now-clockT0).toFixed(1), calSpan:+calSpan.toFixed(2), calSquat:+calSquat.toFixed(2) });
+}
+
+/* ---- the voice in flight: only what he can do in the next two seconds ---- */
+function handleEvents(now, dt){
+  for(const e of world.events){
+    if(e.k==='spawn'){ if(!firstSpawnSaid){ firstSpawnSaid = true; say('Enemy ahead. Put him in your circle, then clap.', true); setBand('ENEMY AHEAD', 'circle on him, then clap', 3000); } }
+    else if(e.k==='dive'){ say('He is going low. Squat.', false, 5000); setBand('SQUAT', 'he is going low', 1800); }
+    else if(e.k==='kill'){ sfxBoom(); say(e.fast ? 'Got him. Fast.' : 'Got him.', true); setBand('GOT HIM', e.fast ? 'fast kill +50' : '+100', 1800);
+      const p = world.enemy ? enemyAt(world, world.enemy, 0) : {x:0,y:0}; wreck = { x:p.x, y:p.y, t:now }; fx.push({ k:'boom', x:p.x, y:p.y, t:now }); }
+    else if(e.k==='escape'){ say('He got away.', true); setBand('HE GOT AWAY', 'next one', 1800); }
+    else if(e.k==='clap'){ sfxGuns(); }
+    else if(e.k==='break'){ setBand('HE BROKE', 'follow him', 1200); }
+  }
+  world.events.length = 0;
+  // on him and not firing: that is the one cue worth a voice
+  if(world.onTarget && world.fireT === 0 && !inp.lost) onNoFireS += dt; else onNoFireS = 0;
+  if(onNoFireS > 1.2){ say('Clap!', false, 3500); onNoFireS = 0; }
+  if(!inp.wings && !inp.lost) downS += dt; else downS = 0;
+  if(downS > 3){ say('Arms out to steer.', false, 8000); if(!bandA) setBand('ARMS OUT', 'to steer', 2000); }
+}
+
+function endRound(now){
+  phase='end'; state='end'; setBand('', ''); ui.band.classList.remove('side'); ui.tools.hidden=true; letSleep(); engineStop();
+  const w = world; const k = w.work;
+  ui.score.textContent = w.score;
+  ui.endTag.textContent = w.kills === 0 ? 'NO KILLS' : (w.kills + (w.kills===1?' KILL':' KILLS'));
+  const rows = [
+    ['kills', w.kills], ['got away', w.escaped],
+    ['bursts on target', w.claps ? Math.round(100*w.clapsOn/w.claps)+'% of '+w.claps : '—'],
+    ['deep squats counted', k.squats], ['seconds aiming low', k.lowS.toFixed(0)],
+    ['arms out', Math.round(100*k.wingS/Math.max(1, k.wingS + k.downS))+'%'],
+  ];
+  ui.endRows.innerHTML = rows.map(r=>`<tr><td class="k">${r[0]}</td><td class="v">${r[1]}</td></tr>`).join('');
+  ui.endNote.textContent = 'Score and work are counted separately. Only a full squat counts as one.';
+  ui.oEnd.hidden = false;
+  say(w.kills ? ('Round over. ' + w.kills + (w.kills===1?' kill.':' kills.')) : 'Round over. No kills.', true);
+  recPush({ k:'end', t:+(now-clockT0).toFixed(1), score:w.score, kills:w.kills, escaped:w.escaped, claps:w.claps, clapsOn:w.clapsOn, work:k });
+}
+
+/* ================= drawing ================= */
+const CSSVAR = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function drawMirror(alpha){
+  const f = videoFit(); if(!f.vw) return;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(f.dx+f.dw, f.dy); ctx.scale(-1,1);
+  ctx.drawImage(video, 0, 0, f.dw, f.dh); ctx.restore();
+}
+const BONES=[['shA','elA'],['elA','wrA'],['shB','elB'],['elB','wrB'],['shA','shB'],
+             ['shA','hipA'],['shB','hipB'],['hipA','hipB'],['hipA','knA'],['hipB','knB'],['knA','ankA'],['knB','ankB']];
+function drawPlayerFigure(raw, x0, y0, w, h, alpha){
+  if(!raw) return;
+  const P = {}; for(const k in J){ const q = read(raw, J[k]); if(q) P[k] = { x:x0 + q.x*w, y:y0 + q.y*h }; }
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap='round'; ctx.lineWidth = Math.max(2, w*0.012);
+  ctx.strokeStyle = 'rgba(244,239,228,.75)';
+  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  if(P.wrA && P.wrB){ ctx.strokeStyle = inp.wings ? CSSVAR('--cyan') : CSSVAR('--dim'); ctx.lineWidth = Math.max(2, w*0.009); ctx.globalAlpha = alpha*0.85;
+    ctx.beginPath(); ctx.moveTo(P.wrA.x,P.wrA.y); ctx.lineTo(P.wrB.x,P.wrB.y); ctx.stroke(); }
+  ctx.restore();
+}
+
+/* aim space -> screen. One mapping for everything: the circle, the enemy,
+   the tracers. Standing aims high, a deep squat aims near the horizon. */
+function scr(x, y){ return { x: W/2 + x*(W*0.40/K.X_MAX), y: H*0.28 + y*(H*0.40/K.Y_MAX) }; }
+function rx(){ return K.HIT_R*(W*0.40/K.X_MAX); }
+function ry(){ return K.HIT_R*(H*0.40/K.Y_MAX); }
+
+let clouds = null;
+function drawSky(now){
+  const t = now/1000, w = world;
+  const bank = w ? clamp(-w.sight.x / K.X_MAX, -1, 1) : 0;
+  const lowY = w ? w.sight.y / K.Y_MAX : 0;
+  // sunset, fixed to the screen; the horizon line is what tilts
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#22163f'); g.addColorStop(0.38, '#7a2f5e'); g.addColorStop(0.66, '#e3683f'); g.addColorStop(0.84, '#ffc27a'); g.addColorStop(1, '#ffd9a0');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // the sun, low, behind everything
+  const sx = W*0.5 + bank*W*0.06, sy = H*0.80 + lowY*H*0.02;
+  const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, H*0.55);
+  sg.addColorStop(0, 'rgba(255,240,200,.95)'); sg.addColorStop(0.12, 'rgba(255,210,140,.75)'); sg.addColorStop(1, 'rgba(255,160,90,0)');
+  ctx.fillStyle = sg; ctx.fillRect(0, 0, W, H);
+  // the sea below a horizon that tilts with the bank
+  ctx.save(); ctx.translate(W/2, H*0.86 - lowY*H*0.05); ctx.rotate(bank*0.10);
+  const sea = ctx.createLinearGradient(0, 0, 0, H*0.6);
+  sea.addColorStop(0, '#5a2f4a'); sea.addColorStop(1, '#170f26');
+  ctx.fillStyle = sea; ctx.fillRect(-W*1.5, 0, W*3, H);
+  ctx.fillStyle = 'rgba(255,214,150,.55)'; ctx.fillRect(-W*0.25, 0, W*0.5, Math.max(1.5, H*0.006));
+  ctx.restore();
+  // clouds streaming past: the sense of speed
+  if(!clouds){ const r = mulberry(7); clouds = Array.from({length:14}, ()=>({ x:r()*2-1, y:r()*0.75, z:r(), s:0.5+r()*0.8 })); }
+  const v = state==='end' ? 0.05 : 0.22;
+  for(const c of clouds){
+    c.z += v*(1/60); if(c.z > 1){ c.z -= 1; c.x = Math.random()*2-1; c.y = Math.random()*0.75; }
+    const k = 0.25 + c.z*c.z*2.2;
+    const x = W/2 + (c.x*W*0.6 + bank*W*0.15)*k, y = H*0.55 + (c.y-0.45)*H*0.7*k;
+    const r = H*0.05*c.s*k, a = Math.min(0.35, c.z*0.5)*(1-c.z);
+    if(r < 1 || x < -r*3 || x > W + r*3) continue;
+    ctx.fillStyle = `rgba(255,220,200,${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.ellipse(x, y, r*2.2, r*0.7, 0, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+/* the enemy seen from behind: fuselage, wings, tail fin, two engine glows */
+function drawEnemy(p, size, tilt, hitFlash, alpha){
+  ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(tilt); ctx.globalAlpha = alpha;
+  const s = size;
+  ctx.fillStyle = hitFlash > 0 ? '#ffe7b0' : '#1b1230';
+  ctx.strokeStyle = 'rgba(255,190,120,.85)'; ctx.lineWidth = Math.max(1.2, s*0.03);
+  ctx.beginPath(); ctx.moveTo(-s, s*0.02); ctx.lineTo(-s*0.18, -s*0.06); ctx.lineTo(s*0.18, -s*0.06); ctx.lineTo(s, s*0.02);
+  ctx.lineTo(s*0.98, s*0.10); ctx.lineTo(s*0.18, s*0.10); ctx.lineTo(-s*0.18, s*0.10); ctx.lineTo(-s*0.98, s*0.10); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-s*0.38, -s*0.30); ctx.lineTo(s*0.38, -s*0.30); ctx.lineTo(s*0.38, -s*0.24); ctx.lineTo(-s*0.38, -s*0.24); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-s*0.04, -s*0.55); ctx.lineTo(s*0.04, -s*0.55); ctx.lineTo(s*0.07, -s*0.05); ctx.lineTo(-s*0.07, -s*0.05); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, s*0.03, s*0.17, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#ff9a3d'; ctx.beginPath(); ctx.arc(0, s*0.03, s*0.08, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+/* your own plane from behind, at the bottom, under the circle */
+function drawMe(x, y, s, tilt){
+  ctx.save(); ctx.translate(x, y); ctx.rotate(tilt);
+  ctx.fillStyle = '#2a3b55'; ctx.strokeStyle = 'rgba(255,214,150,.9)'; ctx.lineWidth = Math.max(1.5, s*0.025);
+  ctx.beginPath(); ctx.moveTo(-s, 0); ctx.lineTo(-s*0.2, -s*0.10); ctx.lineTo(s*0.2, -s*0.10); ctx.lineTo(s, 0); ctx.lineTo(s*0.95, s*0.10); ctx.lineTo(-s*0.95, s*0.10); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-s*0.05, -s*0.6); ctx.lineTo(s*0.05, -s*0.6); ctx.lineTo(s*0.09, -s*0.05); ctx.lineTo(-s*0.09, -s*0.05); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, s*0.2, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#ffb35a'; ctx.beginPath(); ctx.arc(0, 0, s*0.09, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawWorld(now){
+  const w = world, t = now/1000;
+  const bank = clamp(-w.sight.x / K.X_MAX, -1, 1);
+  const aim = scr(w.sight.x, w.sight.y);
+  const E = Math.min(W*0.115, H*0.27);   // enemy half-span
+  // the enemy
+  const e = w.enemy;
+  if(e){
+    const p = enemyAt(w, e, 0), q = scr(p.x, p.y);
+    const ahead = enemyAt(w, e, -0.15);
+    const tilt = clamp((ahead.x - p.x)*3.0, -0.6, 0.6);
+    let size = E, alpha = 1;
+    if(e.state==='arrive'){ const u = clamp(e.arrive/1.0, 0, 1); size = E*(0.15 + 0.85*u); alpha = u; }
+    if(e.state==='gone'){ const u = clamp(e.moveT/1.2, 0, 1); size = E*(1 - 0.85*u); alpha = 1 - u; q.y -= u*H*0.1; }
+    if(e.state==='down'){
+      const u = clamp(e.moveT/1.2, 0, 1);
+      // smoke trail and a falling spiral
+      for(let i=0;i<10;i++){ const v = u - i*0.04; if(v < 0) break;
+        ctx.fillStyle = `rgba(40,30,40,${(0.35*(1-i/10)).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(q.x + Math.sin(v*9)*E*0.5, q.y + v*H*0.45 - i*2, E*0.18*(1+i*0.15), 0, Math.PI*2); ctx.fill(); }
+      drawEnemy({x:q.x + Math.sin(u*9)*E*0.5, y:q.y + u*H*0.45}, E*(1-0.5*u), u*7, 0, 1-u*0.6);
+    } else {
+      // damage smoke
+      const dmg = 1 - e.hp/K.HP_S;
+      if(dmg > 0.3) for(let i=0;i<5;i++){ ctx.fillStyle = `rgba(30,20,30,${(0.25*dmg*(1-i/5)).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(q.x + Math.sin(t*3+i)*3, q.y + E*0.15 + i*E*0.12, E*0.12*(1+i*0.3), 0, Math.PI*2); ctx.fill(); }
+      drawEnemy(q, size, tilt, e.hitFlash, alpha);
+      // health bar over him
+      if(e.state!=='arrive' && e.state!=='gone'){
+        const bw = E*1.2, bh = Math.max(3, H*0.014), bx = q.x - bw/2, by = Math.max(H*0.015, q.y - E*0.72);
+        ctx.fillStyle = 'rgba(20,12,30,.7)'; ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = CSSVAR('--hot'); ctx.fillRect(bx, by, bw*clamp(e.hp/K.HP_S,0,1), bh);
+      }
+    }
+  }
+  // tracers from your plane up to the circle while the burst lasts
+  const meX = aim.x, meY = H*0.955, meS = Math.min(W*0.085, H*0.18);
+  if(w.fireT > 0){
+    ctx.save(); ctx.strokeStyle = 'rgba(255,236,160,.95)'; ctx.lineWidth = Math.max(2, H*0.008); ctx.lineCap = 'round';
+    for(const side of [-1, 1]){ for(let i=0;i<4;i++){ const u = ((t*6 + i/4) % 1);
+      const x0 = meX + side*meS*0.55, y0 = meY - meS*0.05;
+      const x1 = x0 + (aim.x - x0)*u, y1 = y0 + (aim.y - y0)*u, x2 = x0 + (aim.x - x0)*Math.min(1,u+0.08), y2 = y0 + (aim.y - y0)*Math.min(1,u+0.08);
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); } }
+    ctx.restore();
+    if(w.onTarget && e){ const q = scr(enemyAt(w, e, 0).x, enemyAt(w, e, 0).y);
+      for(let i=0;i<6;i++){ ctx.fillStyle = 'rgba(255,240,180,.9)'; ctx.beginPath(); ctx.arc(q.x + (Math.random()-0.5)*E*0.8, q.y + (Math.random()-0.5)*E*0.3, Math.max(1.5, E*0.035), 0, Math.PI*2); ctx.fill(); } }
+  }
+  // the circle: white when empty, orange when he is in it
+  const on = w.onTarget;
+  ctx.save(); ctx.lineWidth = Math.max(2.5, H*0.011);
+  ctx.strokeStyle = on ? CSSVAR('--hot') : 'rgba(255,255,255,.85)';
+  ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.ellipse(aim.x, aim.y, rx(), ry(), 0, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(aim.x, aim.y, Math.max(2, H*0.01), 0, Math.PI*2); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+  // reload: a short arc that fills back
+  if(w.fireT === 0 && (w.reloadT||0) > 0){ ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.beginPath();
+    ctx.ellipse(aim.x, aim.y, rx()*1.18, ry()*1.18, 0, -Math.PI/2, -Math.PI/2 + Math.PI*2*(1 - w.reloadT/K.RELOAD_S)); ctx.stroke(); }
+  ctx.restore();
+  // a thin line from your nose to the circle: this plane is what moves it
+  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1; ctx.setLineDash([4,6]);
+  ctx.beginPath(); ctx.moveTo(meX, meY - meS*0.6); ctx.lineTo(aim.x, aim.y + ry()); ctx.stroke(); ctx.setLineDash([]);
+  drawMe(meX, meY, meS, -bank*0.45);
+  // kill flash
+  fx = fx.filter(f => now - f.t < 600);
+  for(const f of fx){ const u = (now - f.t)/600, q = scr(f.x, f.y);
+    ctx.fillStyle = `rgba(255,220,140,${(0.8*(1-u)).toFixed(2)})`; ctx.beginPath(); ctx.arc(q.x, q.y, E*(0.4 + 1.2*u), 0, Math.PI*2); ctx.fill(); }
+}
+
+function drawHud(now){
+  const w = world; const left = Math.max(0, (K.ROUND_MS - (now - roundStart))/1000);
+  const fs = Math.round(Math.min(W, H)*0.085);
+  ctx.save(); ctx.font = `${fs}px Georgia`; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 6;
+  ctx.fillStyle = CSSVAR('--warm'); ctx.fillText(Math.ceil(left) + 's', W*0.02, H*0.03);
+  ctx.fillStyle = CSSVAR('--gold'); ctx.fillText('✕ ' + w.kills, W*0.02, H*0.03 + fs*1.1);
+  ctx.restore();
+  if(pose){ const fh = H*0.30, fw = fh*frameAR(); drawPlayerFigure(pose, W - fw - W*0.01, H - fh - H*0.02, fw, fh, 0.55); }
+}
+
+/* ================= the frame ================= */
+let halted = false, lastNow = 0;
+function frame(){
+  requestAnimationFrame(frame);
+  if(halted) return;
+  const now = performance.now();
+  const dt = Math.min(0.1, lastNow ? (now - lastNow)/1000 : 1/30); lastNow = now;
+
+  let raw = null;
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    try { const res = landmarker.detectForVideo(video, now);
+          raw = (res && res.landmarks && res.landmarks[0]) || null; } catch(e){}
+    if(raw){ pose = raw; lastFrameAt = now; }
+    else if(now - lastFrameAt > 600) pose = null;
+  }
+  const r = pose ? readPose(pose) : null;
+  if(r && sidesOk(r.L)) inp = sig.read(r.L, dt);
+  else inp = { bank: inp.bank, squat: inp.squat, wings: inp.wings, fire:false, span:0, valid:{}, lost:true };
+  // A LOST BODY IS NOT A PLAYER DOING NOTHING: the sight holds, his escape clock stops.
+
+  if(state==='play' || state==='fit'){
+    const q = {}; if(pose) for(const k of NEEDS_REC){ const v = read(pose, J[k]); if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.v||0).toFixed(2) ]; }
+    recPush({ k:'f', t:+(now-clockT0).toFixed(1), ph:phase, bank:+inp.bank.toFixed(2), wa:+(inp.wa||0).toFixed(3), span:+(inp.span||0).toFixed(2), abd:+(inp.abd||0).toFixed(0), fi:inp.fire?1:0, sq:+inp.squat.toFixed(2), w:inp.wings?1:0, lost:inp.lost?1:0, p:q });
+  }
+
+  if(state==='fit'){
+    const f = fitState(pose, now);
+    const msg = f.ok ? ['HOLD IT THERE','Hold it there.'] : (FIT_SAY[f.why] || FIT_SAY.nobody);
+    ui.fitBig.innerHTML = f.ok ? 'READY' : 'FIND YOUR<br><span class="g">SPOT</span>';
+    ui.fitMsg.textContent = msg[0]; say(msg[1]);
+    if(f.ok){ if(!fitSince) fitSince = now; if(now - fitSince > 1400){ ui.oFit.hidden=true; startCal(); } }
+    else fitSince = 0;
+    drawMirror(0.6); return;
+  }
+  if(state==='play' && phase==='cal'){
+    drawMirror(0.7); calTick(now, dt);
+    if(pose){ const f = videoFit(); drawPlayerFigure(pose, f.dx, f.dy, f.dw, f.dh, 0.9); }
+    return;
+  }
+  if(state==='play' && phase==='fly'){
+    const steps = Math.max(1, Math.round(dt/(1/60)));
+    for(let i=0;i<steps;i++) stepWorld(world, inp, dt/steps, POSE_LATENCY_MS/1000);
+    handleEvents(now, dt); engineUpdate(world);
+    if(bandUntil && now > bandUntil) setBand('', '');
+    drawSky(now); drawWorld(now); drawHud(now);
+    if(inp.lost){ ctx.fillStyle='rgba(255,92,92,.95)'; ctx.font=`${Math.round(Math.min(W,H)*0.07)}px Georgia`; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText('I CANNOT SEE YOU', W/2, H*0.12); say('I cannot see you. Step back into the picture.'); }
+    const e = world.enemy, ep = e ? enemyAt(world, e, 0) : null;
+    recPush({ k:'s', t:+(now-clockT0).toFixed(1), sx:+world.sight.x.toFixed(2), sy:+world.sight.y.toFixed(2), ex:ep?+ep.x.toFixed(2):null, ey:ep?+ep.y.toFixed(2):null, es:e?e.state:null, hp:e?+e.hp.toFixed(2):null, on:world.onTarget?1:0, fire:world.fireT>0?1:0 });
+    if(now - roundStart >= K.ROUND_MS) endRound(now);
+    return;
+  }
+  if(state==='end'){ drawSky(now); }
+}
+
+/* ================= startup ================= */
+const bStart=document.getElementById('bStart'), bSkip=document.getElementById('bSkip'),
+      bAgain=document.getElementById('bAgain'), bSave=document.getElementById('bSave');
+/* ---- keep the screen awake while flying — the racing game's code, which
+   build 1-3 did not carry over, so the phone dimmed on Hugo at two metres ---- */
+let wakeLock = null;
+async function keepAwake(){
+  try { if('wakeLock' in navigator && !wakeLock){ wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', ()=>{ wakeLock = null; }); } } catch(e){ wakeLock = null; }
+}
+function letSleep(){ try { if(wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){ wakeLock = null; } }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && (state==='fit'||state==='play')) keepAwake(); });
+
+async function begin(){
+  /* FULLSCREEN, so the browser bar goes away — Sparks' code. It may only be
+     asked inside the user gesture, so it runs first, before any await, and
+     a refusal is ignored. */
+  try { const el = document.documentElement; const go = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(go && !document.fullscreenElement){ const pr = go.call(el, { navigationUI:'hide' }); if(pr && pr.catch) pr.catch(()=>{}); } } catch(e){}
+  audioInit();   // inside the tap, before any await
+  bStart.disabled = true; ui.loadMsg.hidden = false; ui.errMsg.hidden = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'user', width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30} }, audio:false });
+    video.srcObject = stream; await video.play();
+    ui.loadMsg.textContent = 'Loading the tracker…';
+    await loadTracker();
+  } catch(e){
+    ui.errMsg.hidden=false; bStart.disabled=false; ui.loadMsg.hidden=true;
+    ui.errMsg.textContent = 'Could not start: ' + (e && e.message ? e.message : e) + '. The camera needs a https page and permission.';
+    return;
+  }
+  clockT0 = performance.now(); recHeader(); keepAwake();
+  ui.oStart.hidden = true; ui.oFit.hidden = false; state='fit'; fitSince=0;
+  say('Stand back until I can see you from head to knees, with room for your arms.', true);
+}
+bStart.addEventListener('click', begin);
+bSkip.addEventListener('click', ()=>{ ui.oFit.hidden=true; startCal(); });
+bAgain.addEventListener('click', ()=>{ audioInit(); ui.oEnd.hidden=true; world=null; state='fit'; fitSince=0; ui.oFit.hidden=false; keepAwake(); });
+function saveRec(){
+  const blob = new Blob([rec.map(o=>JSON.stringify(o)).join('\n')], {type:'application/x-ndjson'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'tailgunner-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+bSave.addEventListener('click', saveRec);
+document.getElementById('bSaveNow').addEventListener('click', saveRec);
+document.getElementById('bSkipStep').addEventListener('click', ()=>{
+  if(phase!=='cal') return;
+  recPush({ k:'skip', t:+(performance.now()-clockT0).toFixed(1), step:calStep });
+  calT = CAL[calStep].hold;     // the next tick advances it
+});
+resize(); checkRotation();
+requestAnimationFrame(frame);
+
+/* ---- harness hook: the renderer and the boot test drive the real page ---- */
+window.__tg = {
+  audio:()=>({ ctx: AC && AC.state, engine: !!eng, freq: eng ? eng.o1.frequency.value : 0 }),
+  meter:()=>{ if(!AC) return null; if(!window.__an){ window.__an = AC.createAnalyser(); window.__an.fftSize = 2048; master.connect(window.__an); }
+    const d = new Float32Array(2048); window.__an.getFloatTimeDomainData(d); let pk = 0, ss = 0; for(const v of d){ pk = Math.max(pk, Math.abs(v)); ss += v*v; } return { peak:+pk.toFixed(3), rms:+Math.sqrt(ss/d.length).toFixed(3) }; },
+  SIM, K, makeSignals, fitState:raw=>fitState(raw), sidesOk, readPose,
+  halt:()=>{halted=true}, resume:()=>{halted=false},
+  peek:()=>({ state, phase, calStep, inp, world: world && { t:world.t, kills:world.kills, score:world.score, escaped:world.escaped, sight:world.sight, onTarget:world.onTarget, enemy:world.enemy && { state:world.enemy.state, hp:world.enemy.hp, at:enemyAt(world, world.enemy, 0) } } }),
+  setPose:(raw)=>{ pose = raw; lastFrameAt = performance.now(); },
+  setLandmarker:(lm)=>{ landmarker = lm; },
+  jump:(s)=>{ if(s==='cal'){ ui.oStart.hidden=true; ui.oFit.hidden=true; clockT0=performance.now(); startCal(); }
+             else if(s==='fly'){ ui.oStart.hidden=true; ui.oFit.hidden=true; state='play'; clockT0=performance.now(); startRound(performance.now()); }
+             else if(s==='end'){ endRound(performance.now()); } },
+  world:()=>world, say:(t)=>say(t,true),
+};
+</script>
+</body>
+</html>
