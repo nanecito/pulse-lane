@@ -1305,17 +1305,31 @@ const TIERS = {
    appears in the end screen as a bloom; it is only PAINTED differently,
    which is where a "tell them apart" change belongs.
 
-   Not cyan, which is what was asked for in passing: cyan IS bloom, so foot
-   sparks were already cyan and so were floor-C, side, low and step. That is
-   the whole reason they were indistinguishable - every leg spark on the
-   board was the same colour, and in THE MIX five of them are on screen in
-   one run. The shape and the word were trying to carry a difference that
-   colour had already thrown away.
+   It was violet, chosen as the hue furthest from amber, coral and cyan. He
+   played it and still could not tell a foot spark from a hand one from his
+   mark. That is the second colour that has failed, and it says the problem
+   is not WHICH hue - it is that hue is the wrong channel. On a phone two
+   metres away, across a dark room, a small saturated patch is a small
+   saturated patch.
 
-   Violet, because it is the furthest from what is taken. Minimum hue
-   separation from the three existing tiers: violet 85 degrees, green 58.
-   Amber 35, coral 15, cyan 185, violet 290. */
-const FOOT_RGB = [214, 112, 255];
+   So a foot spark stops competing on hue and differs on everything else at
+   once: cool grey instead of a colour, and NO GLOW while every hand spark
+   has one. Glow is a large, soft, bright area - the one cue that survives
+   distance - so the foot sparks become the only things on screen that are
+   not giving off light. Matte among lamps.
+
+   Grey, but not the figure's grey. His body is cream, 246/241/230, drawn
+   at low alpha; this is darker and cooler, so a foot spark never dissolves
+   into him. */
+const FOOT_RGB = [152, 164, 180];
+/* The LINES of a foot spark, much brighter than its fill. Rendering a whole
+   feet-only level showed the cost of "grey and dull": six matte discs low
+   on the legs, no light anywhere, and the level read as switched off. The
+   signal that separates a foot from a hand is NO HALO, not DIM. So the fill
+   stays dark and unlit and the edges go almost white - a hard, graphic
+   shape that is easy to see and still the only thing on screen giving off
+   no light. */
+const FOOT_EDGE = [226, 232, 240];
 
 const tierOf = def => def.legs ? TIERS.bloom
                     : (def.across ? TIERS.flare : TIERS.ember);
@@ -1634,22 +1648,43 @@ const FIELDS = [
       { id:'low-R',   name:'LOW RIGHT',   bx: 1.35, by:-0.90, legs:true },
       { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
     ] },
-  { id:3, name:'FOOTWORK', blurb:'The low ones want a foot, not a hand.',
+  /* FEET ONLY. Not one hand spark in it.
+
+     He played it, looked at the violet, and still could not tell a foot
+     spark from a hand one from his mark. Colour was being asked to carry
+     the whole message on a phone two metres away, and it could not. So the
+     level carries it instead: in FOOTWORK everything is a foot, and there
+     is nothing to tell apart. A player who does three minutes of nothing
+     but kicks arrives at THE MIX already knowing what the grey ones are.
+
+     Six positions, three a side, and that is what the geometry allows. A
+     foot target has to clear CHORD_IN from the RESTING foot, stay inside
+     the leg, and not drive the stance deeper than FEET_BELOW. Sweeping
+     angle against leg extension leaves 22 legal points, but they sit in a
+     band about 0.4 torsos across - most of them are the same target twice.
+     These three are the widest spread that band allows: 0.42, 0.54 and
+     0.70 apart.
+
+     kick is at 50 degrees of hip abduction, past the 45 the tables give.
+     It was already, and nothing has measured HIM, so validate.js prints it
+     as UNVERIFIED rather than failing it. This is the level that will
+     settle it.
+
+     knee is close enough to the body that a HAND could reach it, and the
+     validator says so. Kept anyway, and ONLY here: a hand cannot score it
+     either way, because limbsFor gives a foot spark the ankles and nothing
+     else, so the cost is swatting at it once and getting nothing. In a
+     level where every single spark is a foot that mistake lasts about
+     twenty seconds. It would be a real fault in THE MIX, which is why knee
+     is not in THE MIX. */
+  { id:3, name:'FOOTWORK', blurb:'Feet only. Every one of these wants a foot.',
     targets: [
-      { id:'over-C',  name:'OVERHEAD',    bx: 0.00, by: 1.57, legs:false, across:true },
-      { id:'high-L',  name:'HIGH LEFT',   bx:-1.20, by: 1.50, legs:false, across:true },
-      { id:'high-R',  name:'HIGH RIGHT',  bx: 1.20, by: 1.50, legs:false, across:true },
-      { id:'cross-L', name:'ACROSS LEFT', bx:-1.55, by: 1.15, legs:false, across:true },
-      { id:'cross-R', name:'ACROSS RIGHT',bx: 1.55, by: 1.15, legs:false, across:true },
-      { id:'wide-L',  name:'WIDE LEFT',   bx:-1.55, by: 0.70, legs:false },
-      { id:'wide-R',  name:'WIDE RIGHT',  bx: 1.55, by: 0.70, legs:false },
-      { id:'mid-L',   name:'MID LEFT',    bx:-1.30, by: 0.20, legs:false },
-      { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
-      { id:'kick-L',  name:'KICK LEFT',   bx:-1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
-      { id:'kick-R',  name:'KICK RIGHT',  bx: 1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
-      { id:'toe-L',   name:'TOE LEFT',    bx:-1.15, by:-1.20, legs:true, foot:true, cue:'FOOT' },
-      { id:'toe-R',   name:'TOE RIGHT',   bx: 1.15, by:-1.20, legs:true, foot:true, cue:'FOOT' },
-      { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
+      { id:'kick-L',  name:'KICK LEFT',   bx:-1.50, by:-1.04, legs:true, foot:true },
+      { id:'kick-R',  name:'KICK RIGHT',  bx: 1.50, by:-1.04, legs:true, foot:true },
+      { id:'toe-L',   name:'TOE LEFT',    bx:-1.11, by:-1.21, legs:true, foot:true },
+      { id:'toe-R',   name:'TOE RIGHT',   bx: 1.11, by:-1.21, legs:true, foot:true },
+      { id:'knee-L',  name:'KNEE LEFT',   bx:-0.87, by:-0.73, legs:true, foot:true },
+      { id:'knee-R',  name:'KNEE RIGHT',  bx: 0.87, by:-0.73, legs:true, foot:true },
     ] },
   { id:4, name:'RAIN', blurb:'They fall. Catch them on the way down.',
     targets: [
@@ -1689,8 +1724,8 @@ const FIELDS = [
       { id:'mid-R',   name:'MID RIGHT',   bx: 1.30, by: 0.20, legs:false },
       { id:'side-L',  name:'SIDE LEFT',   bx:-1.65, by:-0.55, legs:true },
       { id:'side-R',  name:'SIDE RIGHT',  bx: 1.65, by:-0.55, legs:true },
-      { id:'kick-L',  name:'KICK LEFT',   bx:-1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
-      { id:'kick-R',  name:'KICK RIGHT',  bx: 1.40, by:-0.95, legs:true, foot:true, cue:'FOOT' },
+      { id:'kick-L',  name:'KICK LEFT',   bx:-1.50, by:-1.04, legs:true, foot:true },
+      { id:'kick-R',  name:'KICK RIGHT',  bx: 1.50, by:-1.04, legs:true, foot:true },
       { id:'floor-C', name:'FLOOR',       bx: 0.00, by:-1.15, legs:true },
     ] },
 ];
@@ -1902,7 +1937,7 @@ let clockOffset = null;          // performance-ms minus capture-ms
    new build by reading drift velocities out of it and matching them against
    the committed driftFor. A build string that never changes is not a build
    string. */
-const BUILD = 'sparks-close-9-sky';
+const BUILD = 'sparks-close-10-feet';
 const c = document.getElementById('c'), ctx = c.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 
@@ -2076,7 +2111,18 @@ const RUN_SECONDS = TOTAL_BARS * BAR;
    stops being a choice and becomes a wall. */
 const MAX_ALIVE = 4;
 
+/* The finale spark, by preference. A level is not required to contain it:
+   FOOTWORK is feet only and has no floor-C, and scheduling a def that is
+   not in the field pushed an entry with def undefined into the run, which
+   took the whole page down on the first spark. A level without it gets its
+   deepest leg spark instead, and a level with no leg sparks at all gets no
+   finale rather than a crash. */
 const FINALE_ID = 'floor-C';     // the one no amount of folding can reach
+function finaleDef(){
+  return TARGETS.find(t => t.id === FINALE_ID)
+      || TARGETS.filter(t => t.legs).sort((a, b) => a.by - b.by)[0]
+      || null;
+}
 const FINALE_LIFETIME = 2200;
 const FINALE_MULT = 3;
 
@@ -2098,7 +2144,15 @@ const armPool = () => TARGETS.filter(t => !t.legs);
    same side twice running when there is a choice, because two sparks on one
    side is a reach and then another reach, while alternating is travel. */
 function pickSpark(legShare){
-  const pool = (Math.random() < legShare ? legPool() : armPool());
+  /* A level may legitimately hold only one kind. FOOTWORK is feet only, so
+     armPool() is empty, and every filter below then returned an empty list
+     and handed back undefined - which went into the schedule as a spark
+     with no def and took the page down on the first beat. Whichever pool
+     the section asked for, fall back to the other rather than to nothing. */
+  const legs = legPool(), arms = armPool();
+  const want = Math.random() < legShare ? legs : arms;
+  const pool = want.length ? want : (legs.length ? legs : arms);
+  if(!pool.length) return null;
   const side = lastPick ? Math.sign(lastPick.bx) : 0;
   let choice = pool.filter(t => t.id !== (lastPick && lastPick.id) && Math.sign(t.bx) !== side);
   if(!choice.length) choice = pool.filter(t => t.id !== (lastPick && lastPick.id));
@@ -2134,7 +2188,8 @@ function buildSchedule(){
     const s = sectionAtBeat(beat);
     if(!s) break;
     if(s.cadence > 0){
-      out.push({ at: beat * BEAT, def: pickSpark(s.legs), finale:false });
+      const d = pickSpark(s.legs);
+      if(d) out.push({ at: beat * BEAT, def: d, finale:false });
       beat += s.cadence;
     } else beat += 1;
   }
@@ -2142,8 +2197,8 @@ function buildSchedule(){
   let bar = 0;
   for(const s of SECTIONS){
     if(s.name === 'FINALE'){
-      out.push({ at: (bar * 4 + 1) * BEAT,
-                 def: TARGETS.find(t => t.id === FINALE_ID), finale:true });
+      const fd = finaleDef();
+      if(fd) out.push({ at: (bar * 4 + 1) * BEAT, def: fd, finale:true });
       break;
     }
     bar += s.bars;
@@ -2608,12 +2663,22 @@ function drawSpark(t, now){
   /* The glow. Its reach and its opacity both scale with the tier, so a
      bloom is visibly the brightest thing on screen and an ember is
      background. */
-  const gr = R * (1.35 + g0 * 0.95) * pulse;
-  const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, gr);
-  g.addColorStop(0, 'rgba('+col+','+((t.caught ? .72 : .34) + g0*0.30).toFixed(3)+')');
-  g.addColorStop(0.55, 'rgba('+col+','+(g0*0.14).toFixed(3)+')');
-  g.addColorStop(1, 'rgba('+col+',0)');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, gr, 0, 7); ctx.fill();
+  const isFootSpark = !!t.def.foot;
+  if(!isFootSpark){
+    const gr = R * (1.35 + g0 * 0.95) * pulse;
+    const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, gr);
+    g.addColorStop(0, 'rgba('+col+','+((t.caught ? .72 : .34) + g0*0.30).toFixed(3)+')');
+    g.addColorStop(0.55, 'rgba('+col+','+(g0*0.14).toFixed(3)+')');
+    g.addColorStop(1, 'rgba('+col+',0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, q.y, gr, 0, 7); ctx.fill();
+  } else {
+    /* No halo at all. Instead a flat disc and a hard edge, so it is
+       perfectly legible without giving off any light - that absence is the
+       whole signal. Without this it would just be a dim spark, which is a
+       worse spark rather than a different kind of one. */
+    ctx.fillStyle = 'rgba('+col+','+(t.caught ? 0.34 : 0.22).toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(q.x, q.y, R*1.10, 0, 7); ctx.fill();
+  }
 
   /* Orbiting rings: none on an ember, one on a flare, two on a bloom. They
      turn slowly, which reads as "alive" without asking the player to react
@@ -2626,7 +2691,7 @@ function drawSpark(t, now){
      not. The orbit rings are the right place for it: they are decoration,
      so turning them into diamonds says "foot" without misdrawing the hit
      radius, which has to stay a true circle because it is what is scored. */
-  const isFoot = !!t.def.foot;
+  const isFoot = isFootSpark;
   if(isFoot){
     /* ONE diamond, and it does not turn. Rendering the first version caught
        this: two rings at the bloom tier, each rotating the other way, sat
@@ -2634,7 +2699,7 @@ function drawSpark(t, now){
        than a diamond. A silhouette only works if it is one shape, held
        still, with a point at the top. */
     const rd = R * 1.45;
-    ctx.strokeStyle = 'rgba('+col+','+(0.42 + g0*0.22).toFixed(3)+')';
+    ctx.strokeStyle = 'rgba('+FOOT_EDGE.join(',')+',0.72)';
     ctx.lineWidth = Math.max(2.5, R * 0.10);
     ctx.lineJoin = 'miter';
     ctx.beginPath();
@@ -2666,8 +2731,9 @@ function drawSpark(t, now){
      seeing. Everything else - glow, orbit rings, the life countdown -
      still scales off HIT_R, so the spark does not shrink on screen; only
      the line he aims at moved. */
-  ctx.strokeStyle = 'rgba('+col+','+(0.34 + g0*0.18).toFixed(3)+')';
-  ctx.lineWidth = Math.max(2, R*0.055);
+  const edge = isFootSpark ? FOOT_EDGE.join(',') : col;
+  ctx.strokeStyle = 'rgba('+edge+','+(isFootSpark ? 0.88 : (0.34 + g0*0.18)).toFixed(3)+')';
+  ctx.lineWidth = Math.max(2, R*(isFootSpark ? 0.070 : 0.055));
   ctx.beginPath(); ctx.arc(q.x, q.y, R*(SCORE_R/TUNE.HIT_R), 0, 7); ctx.stroke();
   // the inner zone that earns full credit
   ctx.strokeStyle = 'rgba('+col+','+bright+')';
