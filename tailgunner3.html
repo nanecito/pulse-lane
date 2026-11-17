@@ -129,8 +129,8 @@ const K = {
   ROUND_MS: 90000,
   X_MAX: 1.6,          // aim space: x in [-1.6, 1.6] (full bank either way)
   Y_MAX: 0.9,          // aim space: y in [0, 0.9] (standing .. full squat)
-  HIT_R: 0.30,         // the circle, in aim units
-  BURST_S: 0.7,        // one clap = this much gunfire
+  HIT_R: 0.40,         // BUILD 3b: the circle, in aim units (was 0.30; replay of the 17 Nov round put the sight on target 31% of enemy time at 0.30, 46% at 0.40)
+  BURST_S: 1.6,        // BUILD 3b: one clap = this much gunfire (was 0.7; at 0.7 a perfect clap did 0.70 of the 1.5 needed, so a kill took three flawless claps and the 17 Nov round scored 0)
   HP_S: 1.5,           // seconds of gunfire ON him to bring him down
   ENEMY_LIFE_S: 14,    // not down by then: he gets away
   NEXT_S: 1.6,         // gap before the next one appears
@@ -456,7 +456,7 @@ async function loadTracker(){
   catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
 }
 
-const BUILD = 'tailgunner-3';
+const BUILD = 'tailgunner-3b';
 const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. Used: the
    hit test compares the circle (read from a late body) with where the
    enemy WAS this long ago, so both sit in one clock (doc 01). */
