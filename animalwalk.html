@@ -47,7 +47,7 @@
 <div class="screen on" id="sTitle">
   <h1>Animal Walk</h1>
   <p>Move across the room like an animal, and back. Four animals, then a mix. About six minutes.</p>
-  <div class="row"><button id="bGo">Start</button><span class="sub">Stand the phone up sideways first, at about hip height, facing the room.</span></div>
+  <div class="row"><button id="bGo">Start</button><span class="sub">Put the phone on its side first, on the floor or anywhere low, facing the room.</span></div>
   <p class="sub" id="err"></p>
   <div class="animals">
     <div class="animal"><b>Bear</b><span>Face down on hands and feet. Crawl.</span></div>
@@ -56,7 +56,7 @@
     <div class="animal"><b>Frog</b><span>Squat, hop forward, land soft.</span></div>
   </div>
   <h2>Before you tap</h2>
-  <p>Stand the phone up <b>sideways</b> at about <b>hip height</b> — on a table, a stool, or a chair with a box on it — straight up, not tilted, with the screen facing into the room. Not on the floor: from down there it cannot see you standing. You need clear floor in front of it, about three steps deep and as wide as you can manage.</p>
+  <p>Put the phone on its <b>side</b> (landscape), on the floor or anywhere low, leaning on something so it stays upright, with the screen facing into the room. You need clear floor in front of it, about two steps deep and as wide as you can manage. It never needs to see you standing.</p>
   <p>You only touch the phone once. After that it talks you into place and starts by itself. <b>You never need to look at the screen:</b> clear music means you're doing it right, muffled music means fix your shape, and a knock means turn around.</p>
 </div>
 
@@ -71,6 +71,7 @@
   <p class="sub">If something felt wrong — it didn't see you, counted wrong, or muffled the music when you were doing it right — save the recording and send it. It holds exactly what the camera saw.</p>
 </div>
 
+<button id="bSaveNow" class="ghost" style="position:fixed;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:6;display:none;font-size:14px;padding:8px 12px;margin:0;background:rgba(14,19,16,.75)">Save recording</button>
 <div id="rotate">Turn the phone sideways.<br>This game is played in landscape.</div>
 
 <script type="module">
@@ -117,6 +118,7 @@ const TUNE = {
   FROG_HIGH:0.85,                  // and as up (legs nearly straight, or in the air)
   FROG_DEEP:0.35,                  // a landing this deep is a full-quality hop
   FROG_TRAVEL:0.30,                // torsos forward between landings for it to be a frog hop
+  FROG_EXIT:0.30,                  // hips last seen in the top 30% of the picture AND rising, then gone = went up out of the top
 
   FORM_WIN:600, FORM_ON:0.60, FORM_OFF:0.35,   // form smoothing, ms and hysteresis
 
@@ -130,9 +132,12 @@ const TUNE = {
   MOVE_WIN:1000, MOVE_MIN:0.25,    // "moving": this many torsos per second over this window
   LEN_FORM_MIN:0.5,                // share of a length in shape for it to count as a rep
   LEN_SCORED_MIN:0.3,              // share of a length the camera must actually judge
-  TORSO_LO:0.7, TORSO_HI:1.4,      // live torso kept within this band of the calibrated one
 };
 
+// Thigh length over torso length. Used where a squat is judged as a share of a
+// straight leg. It used to come from a standing calibration; a phone on the floor
+// cannot see you standing, so it is the body-proportion constant instead.
+const THIGH = 0.88;
 const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
             hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
 const DEG = 180/Math.PI;
@@ -149,6 +154,9 @@ function makeReader(aspect){
     if(!pose || !pose[i]){ latch[i] = false; return null; }
     const p = pose[i];
     const v = (p.visibility === undefined) ? 1 : p.visibility;
+    // A point outside the picture is a guess, however confident: real MediaPipe
+    // returned off-picture ankles at ~0.57 visibility (doc 00, racing build 34).
+    if(p.x < -0.01 || p.x > 1.01 || p.y < -0.01 || p.y > 1.01){ latch[i] = false; return null; }
     if(v < (latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET)){ latch[i] = false; return null; }
     latch[i] = true;
     return { x:(1-p.x)*asp, y:p.y, v };
@@ -212,7 +220,7 @@ const ANIMALS = {
     name:'Bear',
     judge(b, T){
       const { S, H, K, W } = b;
-      if(!S || !H || !K || !W) return null;
+      if(!S || !H || !K || !W || !T) return null;
       const f = { arms:up(S,W,T), tilt:tiltDeg(S,H), knees:up(H,K,T) };
       if(f.arms < TUNE.BEAR_ARMS || f.tilt > TUNE.BEAR_TILT) return { ok:false, why:'down', f };
       if(f.knees < TUNE.BEAR_KNEES) return { ok:false, why:'facedown', f };
@@ -223,7 +231,7 @@ const ANIMALS = {
     name:'Crab',
     judge(b, T){
       const { S, H, K, W, A } = b;
-      if(!S || !H || !K || !W || !A) return null;
+      if(!S || !H || !K || !W || !A || !T) return null;
       const f = { arms:up(S,W,T), knees:up(K,H,T), hips:up(H,A,T) };
       if(f.arms < TUNE.CRAB_ARMS) return { ok:false, why:'hands', f };
       if(f.knees < TUNE.CRAB_KNEES) return { ok:false, why:'faceup', f };
@@ -233,14 +241,18 @@ const ANIMALS = {
   },
   chimp: {
     name:'Chimp',
+    // From a phone on the floor the raised hands, and often the shoulders, are
+    // above the picture. The squat (hips and knees) defines the chimp; the hands
+    // and the upright torso are checked only when they can be seen, and a part
+    // that cannot be seen never fails.
     judge(b, T, cal){
       const { S, H, K, W } = b;
-      if(!S || !H || !K || !W) return null;
-      const thigh = (cal && cal.thigh) || 0.85;
-      const f = { low:up(H,K,T)/thigh, arms:up(W,H,T), tilt:tiltDeg(S,H) };
-      if(f.tilt < TUNE.CHIMP_UPRIGHT) return { ok:false, why:'feet', f };
+      if(!H || !K || !T) return null;
+      const thigh = (cal && cal.thigh) || THIGH;
+      const f = { low:up(H,K,T)/thigh, arms: W ? up(W,H,T) : null, tilt: S ? tiltDeg(S,H) : null };
+      if(f.tilt !== null && f.tilt < TUNE.CHIMP_UPRIGHT) return { ok:false, why:'feet', f };
       if(f.low > TUNE.CHIMP_LOW) return { ok:false, why:'lower', f };
-      if(f.arms < TUNE.CHIMP_ARMS) return { ok:false, why:'arms', f };
+      if(f.arms !== null && f.arms < TUNE.CHIMP_ARMS) return { ok:false, why:'arms', f };
       return { ok:true, why:null, f };
     },
   },
@@ -250,8 +262,8 @@ const ANIMALS = {
     // the player is down in the squat, for the picture and the recording.
     judge(b, T, cal){
       const { H, K } = b;
-      if(!H || !K) return null;
-      const thigh = (cal && cal.thigh) || 0.85;
+      if(!H || !K || !T) return null;
+      const thigh = (cal && cal.thigh) || THIGH;
       const f = { low:up(H,K,T)/thigh };
       return { ok: f.low <= TUNE.FROG_LOW, why: f.low <= TUNE.FROG_LOW ? null : 'squat', f };
     },
@@ -263,17 +275,26 @@ const ANIMALS = {
    median, bounded by the calibrated torso so one bad frame cannot rescale
    everything. */
 class TorsoTracker {
-  constructor(calT){ this.cal = calT; this.buf = []; this.T = calT; }
+  // The ruler is the median shoulder-to-hip length over the last 2 s - nothing
+  // more. There is deliberately no seed and no band around a seed: Six O'Clock
+  // showed that a reference taken at the wrong moment (leaning over the phone
+  // after tapping Start) poisons everything after it. While the shoulders are
+  // out of view (a chimp under a floor phone) the ruler holds its last value.
+  // Until it has 5 samples, T is null and every judgment is UNSCORED.
+  constructor(){ this.buf = []; this.T = null; }
   push(t, b){
     if(b.S && b.H){
       this.buf.push({ t, v:dist(b.S, b.H) });
       while(this.buf.length && this.buf[0].t < t - 2000) this.buf.shift();
-      const m = median(this.buf.map(o => o.v));
-      if(m) this.T = Math.min(this.cal*TUNE.TORSO_HI, Math.max(this.cal*TUNE.TORSO_LO, m));
+      if(this.buf.length >= 5) this.T = median(this.buf.map(o => o.v));
     }
     return this.T;
   }
 }
+
+/* How many torsos of travel the picture allows. Not a gate: the game says once
+   that the room is tight, and plays anyway. */
+function roomOf(T, aspect){ return T ? (1 - 2*TUNE.EDGE)*(aspect||1)/T - TUNE.BODY_LEN : null; }
 
 /* ---- form over time --------------------------------------------------
    One frame is never a verdict. The share of judged frames in shape over the
@@ -379,10 +400,20 @@ function wantKnock(travel, edge){
    reorders it. A hop in place is a hop, not a frog hop: it is counted
    separately and earns nothing. */
 class HopCounter {
-  constructor(){ this.state = 'idle'; this.lowMin = 9; this.xLand = null; this.hops = []; }
+  constructor(){ this.state = 'idle'; this.lowMin = 9; this.xLand = null; this.hops = []; this.lastHy = null; this.prevHy = null; this.depth = 9; }
   push(t, b, T, cal){
-    if(!b.H || !b.K || !T) return null;
-    const thigh = (cal && cal.thigh) || 0.85;
+    if(!T) return null;
+    // From a phone on the floor the hips go ABOVE the picture at the top of a
+    // hop. Hips last seen near the top edge and then gone is the up half of the
+    // hop; it is not a guess about the body, only about where it went.
+    if(!b.H){
+      const rising = this.prevHy !== null && this.lastHy < this.prevHy - 0.005;
+      if(this.state === 'low' && this.lastHy !== null && this.lastHy < TUNE.FROG_EXIT && rising){ this.state = 'up'; this.depth = this.lowMin; }
+      return null;
+    }
+    this.prevHy = this.lastHy; this.lastHy = b.H.y;
+    if(!b.K) return null;
+    const thigh = (cal && cal.thigh) || THIGH;
     const h = up(b.H, b.K, T)/thigh;
     let event = null;
     if(this.state === 'idle'){
@@ -439,20 +470,21 @@ function calibrate(frames, read){
 
 /* Standing-guidance: what is wrong with where the player is, in the order to
    fix it. Uses raw picture fractions because this is about the picture. */
-function standCheck(pose, read){
+/* Setup: is the body in the picture at all? Any posture. The game never needs
+   the player standing - every animal is low - and from a phone on the floor a
+   standing body does not fit at a room's distance. The first build demanded a
+   standing view and could not be started from two metres. */
+function seeCheck(pose, read){
   const g = i => read(pose, i);
-  const sA = g(J.shA), sB = g(J.shB), hA = g(J.hipA), hB = g(J.hipB), kA = g(J.knA), kB = g(J.knB);
-  const S = pairMid(sA, sB), Hh = pairMid(hA, hB), K = pairMid(kA, kB);
-  if(!S && !Hh) return { ok:false, why:'none' };
-  if(!S) return { ok:false, why:'shoulders' };
-  if(!Hh || !K) return { ok:false, why:'knees' };
+  const hA = g(J.hipA), hB = g(J.hipB), sA = g(J.shA), sB = g(J.shB), kA = g(J.knA), kB = g(J.knB);
+  const Hh = pairMid(hA, hB), S = pairMid(sA, sB), K = pairMid(kA, kB);
+  if(!Hh || (!S && !K)) return { ok:false, why:'none' };
   const asp = read.aspect || 1;
-  const T = dist(S, Hh);                               // torso, in picture heights
-  if(S.y < 0.04 || K.y > 0.97 || T > 0.30) return { ok:false, why:'back', T };
-  if(T < 0.08) return { ok:false, why:'closer', T };
+  const T = S ? dist(S, Hh) : null;
+  if(T !== null && T < 0.06) return { ok:false, why:'closer', T };
   const cx = Hh.x/asp;
-  if(cx < 0.25) return { ok:false, why:'right' };
-  if(cx > 0.75) return { ok:false, why:'left' };
+  if(cx < 0.12) return { ok:false, why:'right' };
+  if(cx > 0.88) return { ok:false, why:'left' };
   return { ok:true, T, cx };
 }
 /*==JUDGE_END==*/
@@ -735,9 +767,10 @@ const TIP = {
   frog:  { squat:'Squat down before you hop.' },
 };
 const SHOWN = { bear:'Bear', crab:'Crab', chimp:'Chimp', frog:'Frog' };
+let torso = new TorsoTracker();
 
 let state = 'idle', stateAt = 0, cal = null;
-let torso = null, form = null, travel = null, hops = null;
+let form = null, travel = null, hops = null;
 let roundIdx = -1, animal = null, mixAt = 0, graceUntil = 0;
 let roundMs = 0, lastTick = 0, lostSince = null, okSince = null, moodSince = 0, moodNow = null;
 let calFrames = [], calBlockUntil = 0, knocksSaid = 0, count = 0, lastFrogHopAt = -1e9, lastJudge = null, guideWhy = null;
@@ -752,56 +785,58 @@ function setState(s, now){
   checkOrientation();
 }
 
-/* ---- setup: talk the player into the picture ---- */
+/* ---- setup: wait until the camera can see the body, in ANY posture ----
+   The first build demanded a standing view, shoulders to knees. From a phone on
+   the floor - the setup Four Points proved works - a standing body does not fit
+   at a room's distance, and the game never needs one: every animal is low. So
+   all setup asks is that the hips are in the picture, steady for a second. */
 const GUIDE_LINE = {
-  none:'Walk back until I can see you, from your shoulders to your knees.',
-  shoulders:'I can\'t see your shoulders. Step back.',
-  knees:'I can\'t see your knees. Step back.',
-  back:'Step back a little.',
+  none:'Walk back until the phone can see you. You can crouch or get down on the floor.',
   closer:'Come a bit closer.',
   right:'Move to your right.',
   left:'Move to your left.',
 };
 function stepGuide(now){
-  const c = pose ? standCheck(pose, read) : { ok:false, why:'none' };
+  const c = pose ? seeCheck(pose, read) : { ok:false, why:'none' };
   guideWhy = c.ok ? null : c.why;
-  if(now - stateAt < 1200) return;                 // let the opening line land
-  if(!c.ok){ okSince = null; say(GUIDE_LINE[c.why], 1, 6000); return; }
-  if(now < calBlockUntil) return;
-  if(okSince === null){ okSince = now; say('Good. Stand still.', 1, 8000); }
-  if(now - okSince >= 1500){ calFrames = []; setState('calib', now); }
-}
-function stepCalib(now){
-  const c = pose ? standCheck(pose, read) : { ok:false };
-  if(!c.ok){ setState('guide', now); return; }
-  calFrames.push(pose);
-  if(now - stateAt < 1200) return;
-  const r = calibrate(calFrames, read);
-  recPush({ k:'calib', t:nowClock(), r });
-  if(r.ok){
-    cal = r; torso = new TorsoTracker(cal.T);
+  if(now - stateAt < 1500) return;                 // let the opening line land
+  if(!c.ok){ okSince = null; say(GUIDE_LINE[c.why], 1, 8000); return; }
+  if(okSince === null) okSince = now;
+  if(now - okSince >= 1000){
+    cal = { thigh:THIGH, roll:0 };
+    recPush({ k:'seen', t:nowClock(), c });
     say('Got you.', 2);
     setState('intro', now);
-    return;
   }
-  const line = { roll:'The phone is tilted. Stand it up straight.',
-    room:'There is not room to crawl across here. Move the phone further away, or point it along a longer stretch of floor.',
-    stand:'Stand up straight for a moment.', see:'Hold still where I can see you.' }[r.why];
-  say(line, 2);
-  calBlockUntil = now + 5000;
-  setState('guide', now);
+}
+function stepCalib(now){ setState('guide', now); }   // no longer used; kept so a stale state cannot stick
+
+/* The room is never a gate. If the picture is too narrow to crawl across, say
+   so once, and play anyway. */
+let roomWarned = false;
+function checkRoom(now){
+  if(roomWarned || !torso.T) return;
+  const r = roomOf(torso.T, read.aspect);
+  if(r !== null && r < TUNE.ROOM_MIN){
+    roomWarned = true;
+    recPush({ k:'room', t:nowClock(), room:r, T:torso.T });
+    say('This is a tight space. If you can, move the phone further away.', 1, 0);
+  }
 }
 
 /* ---- the intro, said once, while the player is standing ---- */
 const INTRO = 'Here is how it works. I call an animal. You move across the room like that animal, and back. ' +
   'When you hear a knock, turn around. Clear music means you are doing it right. Muffled music means fix your shape. ' +
   'Quiet music means keep moving. You never need to look at the phone.';
-let introDone = false;                             // said once per session; Play again skips it
+// Said once per session; Play again skips it. introHeard is set only when the
+// intro has FINISHED - the first build set it the moment it started, so the very
+// next frame skipped straight to Bear and cut the intro off mid-word.
+let introHeard = false;
 function stepIntro(now){
   if(now - stateAt < 1800) return;                 // after "Got you."
-  if(introDone) return beginBrief(0, now);
-  if(!stepIntro.said){ stepIntro.said = say(INTRO, 2); if(stepIntro.said) introDone = true; return; }
-  if(voiceIdleFor() > 900 || now - stateAt > 30000) beginBrief(0, now);
+  if(introHeard) return beginBrief(0, now);
+  if(!stepIntro.said){ stepIntro.said = say(INTRO, 2); return; }
+  if(voiceIdleFor() > 900 || now - stateAt > 30000){ introHeard = true; beginBrief(0, now); }
 }
 
 /* ---- rounds ---- */
@@ -823,7 +858,7 @@ function stepBrief(now){
   }
 }
 function judgeFrame(tc){
-  const b = bodyOf(pose, read, cal.roll);
+  const b = bodyOf(pose, read, 0);       // phone roll is not corrected: no standing view to measure it from
   const T = torso.push(tc, b);
   const r = ANIMALS[animal].judge(b, T, cal);
   form.push(tc, r);
@@ -833,6 +868,11 @@ function stepReady(now, tc, fresh){
   if(fresh && pose){
     const { r } = judgeFrame(tc);
     lastJudge = r;
+  }
+  if(now - stateAt > 4000) checkRoom(now);
+  // nobody in the picture while waiting: say so, gently
+  if(!pose || !(read(pose, J.hipA) || read(pose, J.hipB))){
+    if(now - stateAt > 6000) say('I can\'t see you. Come where the phone can see you.', 1, 12000);
   }
   if(form.ok && form.fresh){ if(okSince === null) okSince = now; } else okSince = null;
   if(okSince !== null && now - okSince >= 800) return startPlay(now);
@@ -907,7 +947,8 @@ function stepPlay(now, tc, fresh){
 
   // what the music says
   let mood;
-  if(now < graceUntil) mood = 'waiting';
+  if(lostSince !== null && now - lostSince > 1500) mood = 'quiet';   // out of view: not judged, and not praised either
+  else if(now < graceUntil) mood = 'waiting';
   else if(animal === 'frog') mood = (now - lastFrogHopAt < 2500) ? 'clear' : (form.ok ? 'quiet' : 'muffled');
   else if(!form.fresh) mood = moodNow || 'quiet';          // can't see: hold, never punish
   else if(!form.ok) mood = 'muffled';
@@ -981,10 +1022,12 @@ function drawSkeleton(color){
   const n = pose[0];
   if(n && (n.visibility||1) >= 0.35){ const N = px(n); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(N.x, N.y, Math.max(6, H*0.02), 0, 7); ctx.fill(); }
 }
-const GUIDE_SHORT = { none:'Walk back', shoulders:'Step back', knees:'Step back', back:'Step back', closer:'Come closer', right:'Move right', left:'Move left' };
+const GUIDE_SHORT = { none:'Walk back', closer:'Come closer', right:'Move right', left:'Move left' };
 
 function paint(now){
   ctx.fillStyle = '#0e1310'; ctx.fillRect(0, 0, W, H);
+  const sb = document.getElementById('bSaveNow');
+  if(sb) sb.style.display = (state === 'idle' || state === 'end') ? 'none' : 'block';
   if(state === 'idle' || state === 'end') return;
   if(video.readyState >= 2){
     const f = videoFit();
@@ -1001,10 +1044,8 @@ function paint(now){
   drawSkeleton(skel);
 
   if(state === 'guide'){
-    bigText(guideWhy ? GUIDE_SHORT[guideWhy] : 'Stand still', H*0.22, big);
-    bigText('so I can see you, shoulders to knees', H*0.36, small, '#cfc8b6');
-  } else if(state === 'calib'){
-    bigText('Hold still', H*0.22, big, '#8fd694');
+    bigText(guideWhy ? GUIDE_SHORT[guideWhy] : 'Hold still', H*0.22, big);
+    bigText('until the phone can see you', H*0.36, small, '#cfc8b6');
   } else if(state === 'intro'){
     bigText('Listen', H*0.22, big);
     bigText('clear music: good   muffled: fix it   knock: turn', H*0.36, small, '#cfc8b6');
@@ -1016,7 +1057,7 @@ function paint(now){
     bigText(SHOWN[animal], H*0.16, big, MOODC[moodNow] || '#ece6d6');
     const left = Math.max(0, Math.ceil(R.dur - roundMs/1000));
     cornerText(String(left), W*0.03, H*0.04, mid, 'left', '#cfc8b6');
-    cornerText(String(count), W*0.97, H*0.04, big*0.9, 'right', '#ece6d6');
+    cornerText(String(count), W*0.97, H*0.20, big*0.9, 'right', '#ece6d6');
     // a progress bar along the bottom
     ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(W*0.03, H*0.94, W*0.94, H*0.018);
     ctx.fillStyle = '#e58f4f'; ctx.fillRect(W*0.03, H*0.94, W*0.94*Math.min(1, roundMs/1000/R.dur), H*0.018);
@@ -1084,7 +1125,7 @@ async function begin(){
   show(null);
   resize();
   setState('guide', performance.now());
-  say('Stand the phone up sideways, at about hip height, facing the room. Then walk back until I can see you, from your shoulders to your knees.', 2);
+  say('Put the phone on its side, on the floor or anywhere low, facing the room. Then walk back about two steps.', 2);
   try {
     await startCamera();
     await loadTracker();
@@ -1098,13 +1139,14 @@ async function begin(){
   keepAwake();
 }
 function again(){
-  freshStats(); cal = null; roundIdx = -1; animal = null; knocksSaid = 0; stepIntro.said = false; moodNow = null;
+  freshStats(); cal = null; roomWarned = false; roundIdx = -1; animal = null; knocksSaid = 0; stepIntro.said = false; moodNow = null;
   calBlockUntil = 0; show(null); setState('guide', performance.now());
-  say('Walk back until I can see you, from your shoulders to your knees.', 2);
+  say('Walk back until the phone can see you.', 2);
 }
 document.getElementById('bGo').addEventListener('click', begin);
 document.getElementById('bAgain').addEventListener('click', again);
 document.getElementById('bSave').addEventListener('click', saveRecording);
+document.getElementById('bSaveNow').addEventListener('click', saveRecording);
 resize();
 requestAnimationFrame(loop);
 
