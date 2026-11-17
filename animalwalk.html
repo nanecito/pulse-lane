@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1310">
+<title>Animal Walk</title>
+<style>
+  :root{ --ink:#ece6d6; --dim:#8f8a7b; --bg:#0e1310; --line:#27302a;
+         --good:#8fd694; --warn:#e6b85c; --off:#6c7a70; --accent:#e58f4f; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden; overscroll-behavior:none; }
+  canvas{ position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .screen{ position:fixed; inset:0; display:none; flex-direction:column; overflow-y:auto; z-index:5;
+    padding:max(16px,env(safe-area-inset-top)) max(22px,env(safe-area-inset-right))
+            max(16px,env(safe-area-inset-bottom)) max(22px,env(safe-area-inset-left));
+    background:var(--bg); }
+  .screen.on{ display:flex; }
+  h1{ font-size:clamp(28px,5.2vw,44px); margin:2px 0 4px; font-weight:700; letter-spacing:.01em; }
+  h2{ font-size:clamp(13px,2vw,15px); margin:14px 0 4px; color:var(--dim); font-weight:600;
+      text-transform:uppercase; letter-spacing:.1em; }
+  p{ margin:6px 0; line-height:1.5; font-size:clamp(15px,2.4vw,18px); color:#d3cdbd; max-width:46em; }
+  .sub{ color:var(--dim); font-size:clamp(13px,2vw,15px); }
+  .animals{ display:flex; gap:10px; flex-wrap:wrap; margin:8px 0; }
+  .animal{ border:1px solid var(--line); border-radius:12px; padding:10px 14px; min-width:150px; flex:1 1 150px; }
+  .animal b{ display:block; font-size:clamp(17px,2.6vw,20px); margin-bottom:2px; }
+  .animal span{ color:var(--dim); font-size:clamp(13px,2vw,15px); }
+  button{ font:inherit; font-size:clamp(18px,3vw,22px); font-weight:650; color:#10140f; background:var(--ink);
+    border:0; border-radius:12px; padding:15px 26px; margin:8px 10px 6px 0; cursor:pointer; }
+  button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
+  .row{ display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+  table{ border-collapse:collapse; margin:8px 0; font-size:clamp(14px,2.1vw,16px); }
+  th,td{ border:1px solid var(--line); padding:8px 12px; text-align:center; }
+  th{ color:var(--dim); font-weight:600; } td.l{ text-align:left; font-weight:600; }
+  #big{ font-size:clamp(22px,4.2vw,36px); font-weight:750; margin:2px 0 4px; }
+  #rotate{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; text-align:center;
+    background:var(--bg); z-index:40; padding:30px; font-size:clamp(20px,5vw,30px); line-height:1.4; }
+  #rotate.on{ display:flex; }
+  #err{ color:var(--warn); }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="screen on" id="sTitle">
+  <h1>Animal Walk</h1>
+  <p>Move across the room like an animal, and back. Four animals, then a mix. About six minutes.</p>
+  <div class="row"><button id="bGo">Start</button><span class="sub">Stand the phone up sideways first, at about hip height, facing the room.</span></div>
+  <p class="sub" id="err"></p>
+  <div class="animals">
+    <div class="animal"><b>Bear</b><span>Face down on hands and feet. Crawl.</span></div>
+    <div class="animal"><b>Crab</b><span>Face up, hands behind you, hips up. Walk.</span></div>
+    <div class="animal"><b>Chimp</b><span>Squat low, hands up. Shuffle sideways.</span></div>
+    <div class="animal"><b>Frog</b><span>Squat, hop forward, land soft.</span></div>
+  </div>
+  <h2>Before you tap</h2>
+  <p>Stand the phone up <b>sideways</b> at about <b>hip height</b> — on a table, a stool, or a chair with a box on it — straight up, not tilted, with the screen facing into the room. Not on the floor: from down there it cannot see you standing. You need clear floor in front of it, about three steps deep and as wide as you can manage.</p>
+  <p>You only touch the phone once. After that it talks you into place and starts by itself. <b>You never need to look at the screen:</b> clear music means you're doing it right, muffled music means fix your shape, and a knock means turn around.</p>
+</div>
+
+<div class="screen" id="sEnd">
+  <h1>Done</h1>
+  <div id="big"></div>
+  <div class="row">
+    <button id="bAgain">Play again</button>
+    <button class="ghost" id="bSave">Save recording</button>
+  </div>
+  <div id="results"></div>
+  <p class="sub">If something felt wrong — it didn't see you, counted wrong, or muffled the music when you were doing it right — save the recording and send it. It holds exactly what the camera saw.</p>
+</div>
+
+<div id="rotate">Turn the phone sideways.<br>This game is played in landscape.</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/*==JUDGE_START==*/
+/* ================= the judge =================
+   Everything that decides what the camera saw. Pure functions and small state
+   machines, no DOM, no audio, so the Node harness runs THIS block, cut out of the
+   shipped HTML, on every test run.
+
+   The game calls an animal and asks one question of the body: is it doing THAT
+   animal's shape, and is it travelling? It never has to tell six postures apart,
+   which is what killed Four Points. A bear is judged only against "bear".
+
+   Units. The reader turns MediaPipe's normalised coordinates into a space where x
+   and y have the same scale (x is multiplied by the picture's aspect), mirrored
+   so it matches the screen. Every distance is then divided by the player's own
+   torso (shoulder-mid to hip-mid), so nothing depends on how far away they are
+   or how big they are. "Up" is image-up, corrected for however much the phone is
+   rolled, which is measured from the standing body at calibration. */
+
+const TUNE = {
+  VIS_GET:0.55, VIS_KEEP:0.35,     // landmark confidence to start / keep trusting a point
+  ROLL_MAX:20,                     // phone roll we correct for; beyond this, ask to straighten it
+
+  // BEAR: face down on hands and feet, crawling
+  BEAR_ARMS:0.45,                  // shoulders at least this far above the hands (arms holding you up)
+  BEAR_TILT:45,                    // torso within this many degrees of flat
+  BEAR_KNEES:0.25,                 // hips at least this far above the knees (knees under you, face down)
+
+  // CRAB: face up, hands behind, hips off the floor
+  CRAB_ARMS:0.30,
+  CRAB_KNEES:0.12,                 // knees at least this far ABOVE the hips: the face-up tell
+  CRAB_HIPS:0.30,                  // hips at least this far above the ankles: off the floor
+
+  // CHIMP: squat low, hands up, shuffle sideways
+  CHIMP_LOW:0.60,                  // hip-over-knee no more than this share of the standing value
+  CHIMP_ARMS:0.30,                 // wrists at least this far above the HIPS: hands up, off the knees and floor
+  CHIMP_UPRIGHT:50,                // torso at least this steep (on your feet, not on the floor)
+
+  // FROG: squat, hop forward, land in a squat
+  FROG_LOW:0.55,                   // share of standing hip-over-knee that counts as down
+  FROG_HIGH:0.85,                  // and as up (legs nearly straight, or in the air)
+  FROG_DEEP:0.35,                  // a landing this deep is a full-quality hop
+  FROG_TRAVEL:0.30,                // torsos forward between landings for it to be a frog hop
+
+  FORM_WIN:600, FORM_ON:0.60, FORM_OFF:0.35,   // form smoothing, ms and hysteresis
+
+  START_MOVE:0.5,                  // torsos from the turn point before a direction is set
+  TURN_BACK:0.6,                   // torsos back from the far point that make it a turn
+  MIN_LEN:1.5,                     // shortest trip that counts as a length
+  MAX_LEN:5.0,                     // in a big room, knock before the length gets longer than this
+  EDGE:0.06,                       // knock when the body's leading edge is this close to the frame edge
+  BODY_LEN:2.4,                    // how much picture a crawling body takes, in torsos
+  ROOM_MIN:2.0,                    // torsos of travel the room must allow
+  MOVE_WIN:1000, MOVE_MIN:0.25,    // "moving": this many torsos per second over this window
+  LEN_FORM_MIN:0.5,                // share of a length in shape for it to count as a rep
+  LEN_SCORED_MIN:0.3,              // share of a length the camera must actually judge
+  TORSO_LO:0.7, TORSO_HI:1.4,      // live torso kept within this band of the calibrated one
+};
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+const DEG = 180/Math.PI;
+function dist(a,b){ return Math.hypot(b.x-a.x, b.y-a.y); }
+function median(a){ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y);
+  const m=s.length>>1; return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+
+/* A point is either confidently seen or it is nothing. Hysteresis stops a point
+   flickering in and out at the threshold. */
+function makeReader(aspect){
+  const latch = {};
+  const asp = aspect || 1;
+  const fn = function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    if(v < (latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET)){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x:(1-p.x)*asp, y:p.y, v };
+  };
+  fn.aspect = asp;
+  return fn;
+}
+
+function rot(p, roll, cx){
+  if(!p || !roll) return p;
+  const r = -roll/DEG, c = Math.cos(r), s = Math.sin(r);
+  const dx = p.x-cx, dy = p.y-0.5;
+  return { x:cx + dx*c - dy*s, y:0.5 + dx*s + dy*c, v:p.v };
+}
+function pairMid(a, b){
+  if(a && b) return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
+  return a || b || null;
+}
+
+/* The six points every judgment uses. A missing point stays missing. */
+function bodyOf(pose, read, roll){
+  const cx = (read.aspect||1)/2;
+  const g = i => rot(read(pose, i), roll||0, cx);
+  const hA = g(J.hipA), hB = g(J.hipB), sA = g(J.shA), sB = g(J.shB);
+  // Where the body IS, for travel. Both hips if we have them. With only one:
+  // side-on (bear, crab, frog) the two hips sit on top of each other, so one is
+  // as good as both; face-on (chimp) they are half a torso apart, and using one
+  // would make the body lurch sideways whenever the other blinks out - which made
+  // phantom turns in the simulation. Shoulder spread over torso tells them apart.
+  let Hc = null;
+  if(hA && hB) Hc = { x:(hA.x+hB.x)/2, y:(hA.y+hB.y)/2 };
+  else if(hA || hB){
+    const h = hA || hB;
+    const Sm = pairMid(sA, sB);
+    const T = Sm ? dist(Sm, h) : 0;
+    // only when side-on is CONFIRMED; if a shoulder is missing too, we cannot
+    // tell, and a guess must never be able to make a length
+    const sideOn = sA && sB && T > 0 && Math.abs(sA.x - sB.x)/T < 0.35;
+    if(sideOn) Hc = { x:h.x, y:h.y };
+  }
+  return {
+    Hc,
+    N: g(J.nose),
+    S: pairMid(g(J.shA), g(J.shB)),
+    H: pairMid(hA, hB),
+    K: pairMid(g(J.knA), g(J.knB)),
+    W: pairMid(g(J.wrA), g(J.wrB)),
+    A: pairMid(g(J.ankA), g(J.ankB)),
+  };
+}
+// how far a is ABOVE b, in torsos
+function up(a, b, T){ return (a && b && T) ? (b.y - a.y)/T : null; }
+function tiltDeg(S, H){ return (S && H) ? Math.atan2(Math.abs(S.y-H.y), Math.abs(S.x-H.x))*DEG : null; }
+
+/* ---- the four animals ----------------------------------------------
+   Each returns { ok, why, f } or null. null is UNSCORED: the points that define
+   the shape are not visible, which is never the player's failure. `why` names
+   the ONE thing to fix first, in the order a person would fix it. */
+const ANIMALS = {
+  bear: {
+    name:'Bear',
+    judge(b, T){
+      const { S, H, K, W } = b;
+      if(!S || !H || !K || !W) return null;
+      const f = { arms:up(S,W,T), tilt:tiltDeg(S,H), knees:up(H,K,T) };
+      if(f.arms < TUNE.BEAR_ARMS || f.tilt > TUNE.BEAR_TILT) return { ok:false, why:'down', f };
+      if(f.knees < TUNE.BEAR_KNEES) return { ok:false, why:'facedown', f };
+      return { ok:true, why:null, f };
+    },
+  },
+  crab: {
+    name:'Crab',
+    judge(b, T){
+      const { S, H, K, W, A } = b;
+      if(!S || !H || !K || !W || !A) return null;
+      const f = { arms:up(S,W,T), knees:up(K,H,T), hips:up(H,A,T) };
+      if(f.arms < TUNE.CRAB_ARMS) return { ok:false, why:'hands', f };
+      if(f.knees < TUNE.CRAB_KNEES) return { ok:false, why:'faceup', f };
+      if(f.hips < TUNE.CRAB_HIPS) return { ok:false, why:'hips', f };
+      return { ok:true, why:null, f };
+    },
+  },
+  chimp: {
+    name:'Chimp',
+    judge(b, T, cal){
+      const { S, H, K, W } = b;
+      if(!S || !H || !K || !W) return null;
+      const thigh = (cal && cal.thigh) || 0.85;
+      const f = { low:up(H,K,T)/thigh, arms:up(W,H,T), tilt:tiltDeg(S,H) };
+      if(f.tilt < TUNE.CHIMP_UPRIGHT) return { ok:false, why:'feet', f };
+      if(f.low > TUNE.CHIMP_LOW) return { ok:false, why:'lower', f };
+      if(f.arms < TUNE.CHIMP_ARMS) return { ok:false, why:'arms', f };
+      return { ok:true, why:null, f };
+    },
+  },
+  frog: {
+    name:'Frog',
+    // A frog is judged per hop by HopCounter. Per frame we only say whether
+    // the player is down in the squat, for the picture and the recording.
+    judge(b, T, cal){
+      const { H, K } = b;
+      if(!H || !K) return null;
+      const thigh = (cal && cal.thigh) || 0.85;
+      const f = { low:up(H,K,T)/thigh };
+      return { ok: f.low <= TUNE.FROG_LOW, why: f.low <= TUNE.FROG_LOW ? null : 'squat', f };
+    },
+  },
+};
+
+/* ---- the player's own ruler ----------------------------------------
+   The torso drifts as the player moves nearer or further. Keep a short running
+   median, bounded by the calibrated torso so one bad frame cannot rescale
+   everything. */
+class TorsoTracker {
+  constructor(calT){ this.cal = calT; this.buf = []; this.T = calT; }
+  push(t, b){
+    if(b.S && b.H){
+      this.buf.push({ t, v:dist(b.S, b.H) });
+      while(this.buf.length && this.buf[0].t < t - 2000) this.buf.shift();
+      const m = median(this.buf.map(o => o.v));
+      if(m) this.T = Math.min(this.cal*TUNE.TORSO_HI, Math.max(this.cal*TUNE.TORSO_LO, m));
+    }
+    return this.T;
+  }
+}
+
+/* ---- form over time --------------------------------------------------
+   One frame is never a verdict. The share of judged frames in shape over the
+   last FORM_WIN ms decides, with hysteresis. Unscored frames are left out: they
+   neither help nor hurt. */
+class FormSmoother {
+  constructor(){ this.buf = []; this.ok = false; this.why = null; this.fresh = false; }
+  push(t, r){
+    if(r){ this.buf.push({ t, ok:r.ok, why:r.why }); }
+    while(this.buf.length && this.buf[0].t < t - TUNE.FORM_WIN) this.buf.shift();
+    this.fresh = this.buf.length >= 3;
+    if(!this.fresh) return this.ok;                       // nothing judged: hold, never fail
+    const share = this.buf.filter(o => o.ok).length / this.buf.length;
+    if(!this.ok && share >= TUNE.FORM_ON) this.ok = true;
+    else if(this.ok && share <= TUNE.FORM_OFF) this.ok = false;
+    // the most common complaint in the window
+    const c = {}; let best = null;
+    for(const o of this.buf) if(o.why){ c[o.why] = (c[o.why]||0)+1; if(!best || c[o.why] > c[best]) best = o.why; }
+    this.why = this.ok ? null : best;
+    return this.ok;
+  }
+}
+
+/* ---- travelling across the room --------------------------------------
+   A length is a trip from one turn to the next. The room decides how long a
+   trip is - the game knocks when you near the edge of the picture - so the
+   count is fair in a big room and a small one. Rocking in place never makes a
+   length, so it never scores. */
+class Travel {
+  // scores:false for the frog, whose score is its hops; its lengths still count
+  constructor(opts){ this.scores = !(opts && opts.scores === false); this.reset(null); this.lengths = []; this.history = []; }
+  reset(x){ this.x0 = x; this.dir = 0; this.far = x; this.n = 0; this.good = 0; this.scored = 0; this.knocked = false; }
+  // x is the hip in reader units, T the live torso, r this frame's judgment (or null)
+  push(t, x, T, r){
+    const out = { turned:null };
+    if(x === null || x === undefined || !T) return out;
+    this.history.push({ t, x, T });
+    while(this.history.length && this.history[0].t < t - TUNE.MOVE_WIN - 200) this.history.shift();
+    if(this.x0 === null){ this.reset(x); }
+    this.n++;
+    if(r){ this.scored++; if(r.ok) this.good++; }
+    if(this.dir === 0){
+      if(Math.abs(x - this.x0)/T >= TUNE.START_MOVE){ this.dir = Math.sign(x - this.x0); this.far = x; }
+      return out;
+    }
+    if((x - this.far)*this.dir > 0){ this.far = x; return out; }
+    if((this.far - x)*this.dir/T >= TUNE.TURN_BACK){
+      const len = Math.abs(this.far - this.x0)/T;
+      const scoredShare = this.n ? this.scored/this.n : 0;
+      const formShare = this.scored ? this.good/this.scored : null;
+      const L = { t, len, dir:this.dir, formShare, scoredShare,
+        counted:false, unscored:false, points:0 };
+      if(len >= TUNE.MIN_LEN){
+        if(scoredShare < TUNE.LEN_SCORED_MIN){ L.unscored = true; L.counted = true; }
+        else if(!this.scores){ L.counted = true; }
+        else if(formShare >= TUNE.LEN_FORM_MIN){ L.counted = true; L.points = Math.round(len*10*formShare); }
+      }
+      this.lengths.push(L);
+      out.turned = L;
+      const newDir = -this.dir, far = this.far;
+      this.reset(far); this.dir = newDir; this.far = x;
+    }
+    return out;
+  }
+  // torsos per second over the last MOVE_WIN
+  speed(t){
+    const h = this.history;
+    if(h.length < 2) return 0;
+    let i = 0; while(i < h.length-1 && h[i].t < t - TUNE.MOVE_WIN) i++;
+    const a = h[i], b = h[h.length-1];
+    const dt = (b.t - a.t)/1000;
+    return dt > 0.3 ? Math.abs(b.x - a.x)/b.T/dt : 0;
+  }
+  moving(t){ return this.speed(t) >= TUNE.MOVE_MIN; }
+  // how far along the current length, in torsos
+  sofar(){ return (this.x0 === null || this.dir === 0) ? 0 : Math.abs(this.far - this.x0)/(this.history.length ? this.history[this.history.length-1].T : 1); }
+}
+
+/* Should the game knock now? The leading edge of the body is near the side of
+   the picture it is heading for, or the trip has got long enough. One knock per
+   approach. */
+function edgeOf(pose, read){
+  let lo = Infinity, hi = -Infinity, n = 0;
+  for(const i of [J.nose,J.shA,J.shB,J.wrA,J.wrB,J.hipA,J.hipB,J.knA,J.knB,J.ankA,J.ankB]){
+    const p = read(pose, i);
+    if(!p) continue;
+    const x = p.x/(read.aspect||1);
+    if(x < lo) lo = x; if(x > hi) hi = x; n++;
+  }
+  return n >= 4 ? { lo, hi } : null;
+}
+function wantKnock(travel, edge){
+  if(!travel.dir || travel.knocked) return false;
+  const nearEdge = edge && ((travel.dir > 0 && edge.hi >= 1-TUNE.EDGE) || (travel.dir < 0 && edge.lo <= TUNE.EDGE));
+  const long = travel.sofar() >= TUNE.MAX_LEN;
+  if(nearEdge || long){ travel.knocked = true; return true; }
+  return false;
+}
+
+/* ---- frog hops --------------------------------------------------------
+   down -> up -> down, with the hips travelling forward between the two
+   landings. Ordered by capture time, so lag delays the count but never
+   reorders it. A hop in place is a hop, not a frog hop: it is counted
+   separately and earns nothing. */
+class HopCounter {
+  constructor(){ this.state = 'idle'; this.lowMin = 9; this.xLand = null; this.hops = []; }
+  push(t, b, T, cal){
+    if(!b.H || !b.K || !T) return null;
+    const thigh = (cal && cal.thigh) || 0.85;
+    const h = up(b.H, b.K, T)/thigh;
+    let event = null;
+    if(this.state === 'idle'){
+      if(h <= TUNE.FROG_LOW){ this.state = 'low'; this.lowMin = h; this.xLand = b.H.x; }
+    } else if(this.state === 'low'){
+      this.lowMin = Math.min(this.lowMin, h);
+      if(h >= TUNE.FROG_HIGH){ this.state = 'up'; this.depth = this.lowMin; }
+    } else if(this.state === 'up'){
+      if(h <= TUNE.FROG_LOW){
+        const travel = Math.abs(b.H.x - this.xLand)/T;
+        const q = this.depth <= TUNE.FROG_DEEP ? 1 :
+          Math.max(0.5, 1 - 0.5*(this.depth - TUNE.FROG_DEEP)/(TUNE.FROG_LOW - TUNE.FROG_DEEP));
+        const frog = travel >= TUNE.FROG_TRAVEL;
+        event = { t, travel, depth:this.depth, q, frog, points: frog ? Math.round(10*q) : 0 };
+        this.hops.push(event);
+        this.state = 'low'; this.lowMin = h; this.xLand = b.H.x;
+      }
+    }
+    return event;
+  }
+}
+
+/* ---- standing calibration ------------------------------------------------
+   From a second or so of the player standing still: how rolled the phone is,
+   their torso, their standing hip-over-knee (the reference every squat is a
+   share of), and whether the room is wide enough to crawl across. */
+function calibrate(frames, read){
+  const rolls = [];
+  // the standing torso is close to vertical, so its line gives the phone's roll.
+  // Shoulders and hips only: from a phone at hip height the head and feet are
+  // often outside the picture, and they are not needed.
+  for(const pose of frames){
+    const b = bodyOf(pose, read, 0);
+    if(b.S && b.H) rolls.push(Math.atan2(b.S.x - b.H.x, b.H.y - b.S.y)*DEG);
+  }
+  const roll = median(rolls);
+  if(roll === null) return { ok:false, why:'see' };
+  if(Math.abs(roll) > TUNE.ROLL_MAX) return { ok:false, why:'roll', roll };
+  const Ts = [], th = [], st = [];
+  for(const pose of frames){
+    const b = bodyOf(pose, read, roll);
+    if(!b.S || !b.H || !b.K) continue;
+    const T = dist(b.S, b.H);
+    Ts.push(T); th.push(up(b.H, b.K, T)); st.push(tiltDeg(b.S, b.H));
+  }
+  if(Ts.length < Math.max(5, frames.length*0.5)) return { ok:false, why:'see' };
+  const T = median(Ts), thigh = median(th), upright = median(st);
+  if(upright < 70 || thigh < 0.5) return { ok:false, why:'stand', T, thigh, upright };
+  const widthT = (read.aspect||1)/T;
+  const room = (1 - 2*TUNE.EDGE)*widthT - TUNE.BODY_LEN;
+  if(room < TUNE.ROOM_MIN) return { ok:false, why:'room', T, thigh, roll, room };
+  return { ok:true, T, thigh, roll, room, widthT };
+}
+
+/* Standing-guidance: what is wrong with where the player is, in the order to
+   fix it. Uses raw picture fractions because this is about the picture. */
+function standCheck(pose, read){
+  const g = i => read(pose, i);
+  const sA = g(J.shA), sB = g(J.shB), hA = g(J.hipA), hB = g(J.hipB), kA = g(J.knA), kB = g(J.knB);
+  const S = pairMid(sA, sB), Hh = pairMid(hA, hB), K = pairMid(kA, kB);
+  if(!S && !Hh) return { ok:false, why:'none' };
+  if(!S) return { ok:false, why:'shoulders' };
+  if(!Hh || !K) return { ok:false, why:'knees' };
+  const asp = read.aspect || 1;
+  const T = dist(S, Hh);                               // torso, in picture heights
+  if(S.y < 0.04 || K.y > 0.97 || T > 0.30) return { ok:false, why:'back', T };
+  if(T < 0.08) return { ok:false, why:'closer', T };
+  const cx = Hh.x/asp;
+  if(cx < 0.25) return { ok:false, why:'right' };
+  if(cx > 0.75) return { ok:false, why:'left' };
+  return { ok:true, T, cx };
+}
+/*==JUDGE_END==*/
+
+/* ================= camera, tracker, the clock, the recording =================
+   The same pipeline as the other games (gap.html is the tested original), with a
+   wide picture: this game needs room to travel across, so it asks for 16:9. */
+const BUILD = 'animalwalk-1';
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null, read = null;
+
+async function loadTracker(){
+  const fsr = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fsr, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fsr, opts("CPU")); }
+}
+
+async function startCamera(){
+  const tries = [
+    { video:{ facingMode:'user', width:{ ideal:1280 }, height:{ ideal:720 } }, audio:false },
+    { video:{ facingMode:'user' }, audio:false },
+    { video:true, audio:false },
+  ];
+  let err = null;
+  for(const t of tries){
+    try { video.srcObject = await navigator.mediaDevices.getUserMedia(t); await video.play(); return true; }
+    catch(e){ err = e; }
+  }
+  throw err || new Error('no camera');
+}
+function aspectNow(){ return (video.videoWidth && video.videoHeight) ? video.videoWidth/video.videoHeight : 16/9; }
+
+/* The one clock: the camera's capture time. Everything in this game is judged
+   over windows of half a second or more, so the 150-250 ms pose lag delays the
+   music and the count a little but never changes a verdict. Nothing is judged
+   against a moment on screen. */
+let clockOffset = null;
+function nowClock(){ return performance.now(); }
+function captureToClock(vt, ready){
+  const capMs = vt*1000, off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset*0.9 + off*0.1;
+  return capMs + clockOffset;
+}
+
+/* ---- the recording ----------------------------------------------------
+   Every frame the tracker returned, with the camera's capture time, every
+   landmark and its confidence, plus every spoken line and every judgment. Nobody
+   has pointed this tracker at a person crawling yet; this file is how we find
+   out what it really sees. */
+const REC_CAP = 60000;
+const rec = []; let recDropped = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'animalwalk', build:BUILD,
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight }, ua:navigator.userAgent,
+    coords:'MediaPipe normalised, unmirrored, origin top-left. The judge mirrors x and scales it by the picture aspect.',
+    tune:TUNE });
+}
+function recFrame(tc, lm){
+  const L = [];
+  for(const p of lm) L.push(+p.x.toFixed(4), +p.y.toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(2));
+  recPush({ k:'f', t:Math.round(tc), lm:L });
+}
+
+/* ---- canvas ---- */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W = 0, H = 0;
+function resize(){
+  const DPR = Math.min(2, devicePixelRatio||1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', () => { resize(); checkOrientation(); });
+function videoFit(){
+  const vw = video.videoWidth||16, vh = video.videoHeight||9;
+  const sc = Math.min(W/vw, H/vh), dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh };
+}
+// a raw MediaPipe landmark to canvas pixels, mirrored like the picture
+function px(p){ const f = videoFit(); return { x:f.dx + (1-p.x)*f.dw, y:f.dy + p.y*f.dh }; }
+function checkOrientation(){
+  const portrait = innerHeight > innerWidth;
+  document.getElementById('rotate').classList.toggle('on', portrait && state !== 'idle' && state !== 'end');
+}
+
+let wake = null;
+async function keepAwake(){ try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){} }
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && state !== 'idle') keepAwake(); });
+
+/* ================= sound =================
+   The player is on the floor, often facing away. Sound carries the game:
+   - each animal has its own music, so you know which animal it is without words
+   - CLEAR music = right shape; MUFFLED music (a low-pass filter) = fix your shape
+   - QUIET music = you have stopped moving
+   - a double KNOCK = turn around; a CHIME = a length counted
+   The voice is used sparingly and never talks over itself. */
+let AC = null, master = null, bedGain = null, bedFilter = null, duck = null;
+function initAudio(){
+  if(AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = 0.9; master.connect(AC.destination);
+  duck = AC.createGain(); duck.gain.value = 1; duck.connect(master);
+  bedFilter = AC.createBiquadFilter(); bedFilter.type = 'lowpass'; bedFilter.frequency.value = 9000; bedFilter.Q.value = 0.7;
+  bedGain = AC.createGain(); bedGain.gain.value = 0;
+  bedGain.connect(bedFilter); bedFilter.connect(duck);
+}
+function noiseBuf(){
+  if(noiseBuf.b) return noiseBuf.b;
+  const b = AC.createBuffer(1, AC.sampleRate*0.5, AC.sampleRate), d = b.getChannelData(0);
+  for(let i = 0; i < d.length; i++) d[i] = Math.random()*2-1;
+  return (noiseBuf.b = b);
+}
+// one note: type, freq (or [from,to] glide), start, length, peak, destination
+function tone(type, f, t0, len, peak, dest, attack){
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type;
+  if(Array.isArray(f)){ o.frequency.setValueAtTime(f[0], t0); o.frequency.exponentialRampToValueAtTime(f[1], t0+len); }
+  else o.frequency.setValueAtTime(f, t0);
+  const a = attack || 0.005;
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0+a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+len);
+  o.connect(g); g.connect(dest || bedGain); o.start(t0); o.stop(t0+len+0.05);
+}
+function noise(t0, len, peak, freq, q, dest){
+  const s = AC.createBufferSource(); s.buffer = noiseBuf();
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q||1;
+  const g = AC.createGain(); g.gain.setValueAtTime(peak, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0+len);
+  s.connect(f); f.connect(g); g.connect(dest || bedGain); s.start(t0); s.stop(t0+len+0.02);
+}
+function kick(t, peak, dest){ tone('sine', [140, 45], t, 0.28, peak||0.9, dest); }
+const NOTE = n => 440*Math.pow(2, (n-69)/12);
+
+/* ---- the four beds. Different tempo, register and texture each, so even a
+   phone speaker keeps them apart. step is a 16th note, s its index in the bar. */
+const BEDS = {
+  bear: { bpm:84, step(t, s){       // heavy, slow, low: a lumbering drum and a growl
+    if(s % 8 === 0) kick(t, 1.0);
+    if(s === 4 || s === 12) noise(t, 0.18, 0.35, 160, 0.8);
+    const bass = { 0:33, 6:33, 8:36, 14:31 }[s];
+    if(bass) tone('sawtooth', NOTE(bass), t, 0.42, 0.22);
+  }},
+  crab: { bpm:108, step(t, s){      // dry, plucky, sideways: a scuttling pentatonic run
+    const run = [64,67,69,71,74,71,69,67];
+    if(s % 2 === 0) tone('triangle', NOTE(run[(s/2)|0]), t, 0.12, 0.30);
+    if(s % 2 === 1) noise(t, 0.04, 0.12, 6000, 2);
+    if(s === 0 || s === 8) kick(t, 0.6);
+  }},
+  chimp: { bpm:116, step(t, s){     // bright, bouncy: marimba and a whoop
+    const m = { 0:72, 3:76, 6:79, 8:76, 11:72, 14:74 }[s];
+    if(m) tone('sine', NOTE(m), t, 0.22, 0.32);
+    if(m) tone('sine', NOTE(m)*4, t, 0.05, 0.05);
+    if(s === 4 || s === 12) noise(t, 0.09, 0.28, 1800, 1.2);
+    if(s === 12) tone('sine', [420, 880], t, 0.28, 0.12);
+    if(s === 0) kick(t, 0.5);
+  }},
+  frog: { bpm:96, step(t, s){       // round, wet: a ribbit and wooden clicks
+    if(s === 0 || s === 8) kick(t, 0.7);
+    if(s === 2 || s === 10){ tone('square', 190, t, 0.05, 0.10); tone('square', 175, t+0.07, 0.06, 0.10); }
+    if(s === 6 || s === 14) noise(t, 0.03, 0.25, 2600, 4);
+    const b = { 0:40, 8:43 }[s];
+    if(b) tone('triangle', NOTE(b), t, 0.35, 0.25);
+  }},
+};
+let bed = null, bedStep = 0, bedNext = 0, bedTimer = null;
+function playBed(name){
+  if(!AC) return;
+  if(bed === name) return;
+  bed = name; bedStep = 0; bedNext = AC.currentTime + 0.08;
+  if(!bedTimer) bedTimer = setInterval(bedTick, 25);
+}
+function stopBed(){ bed = null; if(bedGain) bedGain.gain.setTargetAtTime(0, AC.currentTime, 0.2); }
+function bedTick(){
+  if(!AC || !bed) return;
+  const B = BEDS[bed], dt = 60/B.bpm/4;
+  while(bedNext < AC.currentTime + 0.12){ try { B.step(bedNext, bedStep % 16); } catch(e){} bedNext += dt; bedStep++; }
+}
+// what the music says: 'clear' | 'muffled' | 'quiet' | 'waiting'
+let bedMood = null;
+function setMood(m){
+  if(!AC || m === bedMood) return;
+  bedMood = m;
+  const t = AC.currentTime;
+  const freq = (m === 'clear' || m === 'quiet') ? 9000 : 420;
+  const vol = m === 'clear' ? 0.85 : m === 'muffled' ? 0.75 : m === 'quiet' ? 0.30 : 0.45;
+  bedFilter.frequency.setTargetAtTime(freq, t, 0.12);
+  bedGain.gain.setTargetAtTime(vol, t, 0.15);
+}
+
+/* ---- signals ---- */
+const SFX = {
+  knock(){ const t = AC.currentTime; for(const d of [0, 0.16]){ noise(t+d, 0.07, 0.9, 1100, 3, master); tone('sine', 620, t+d, 0.08, 0.5, master); } },
+  chime(){ const t = AC.currentTime; tone('sine', 1047, t, 0.5, 0.35, master); tone('sine', 1568, t+0.09, 0.6, 0.25, master); },
+  go(){ const t = AC.currentTime; [60,64,67,72].forEach((n,i) => tone('triangle', NOTE(n+12), t+i*0.09, 0.25, 0.4, master)); },
+  done(){ const t = AC.currentTime; [72,67,64,60].forEach((n,i) => tone('triangle', NOTE(n+12), t+i*0.12, 0.35, 0.35, master)); },
+  boing(){ const t = AC.currentTime; tone('sine', [180, 620], t, 0.22, 0.45, master); },
+  thud(){ const t = AC.currentTime; tone('sine', [110, 60], t, 0.15, 0.5, master); },
+  switch(){ const t = AC.currentTime; tone('square', [300, 900], t, 0.18, 0.18, master); },
+};
+function sfx(n){ if(AC) try { SFX[n](); recPush({ k:'sfx', t:nowClock(), n }); } catch(e){} }
+
+/* ================= the voice =================
+   Four Points talked over itself and was called frenetic, rightly. Rules here:
+   - ONE line at a time. A line that is not urgent is DROPPED if anything is
+     being said, never queued.
+   - at least 2.5 s of quiet between ordinary lines
+   - the same line is not repeated within its own gap
+   - the music ducks while the voice speaks */
+let voiceOn = true, voicePick = null, speaking = false, quietSince = -1e9, lastLine = {}, speakEnd = null;
+function initVoice(){
+  if(!('speechSynthesis' in window)) { voiceOn = false; return; }
+  const pick = () => {
+    const vs = speechSynthesis.getVoices() || [];
+    voicePick = vs.find(v => /en[-_](GB|US)/i.test(v.lang) && v.localService) || vs.find(v => /^en/i.test(v.lang)) || vs[0] || null;
+  };
+  pick(); speechSynthesis.onvoiceschanged = pick;
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch(e){}
+}
+// pri 2: must be heard, cuts anything. pri 1: normal. Returns true if it will be said.
+function say(text, pri, gap){
+  if(!voiceOn || !text) return false;
+  pri = pri || 1;
+  const now = performance.now();
+  if(lastLine[text] && now - lastLine[text] < (gap === undefined ? 8000 : gap)) return false;
+  // Our own flag only. The browser's speechSynthesis.speaking is known to stick
+  // at true on some Android builds, which would silently drop every line.
+  const busy = speaking;
+  if(pri < 2 && (busy || now - quietSince < 2500)) return false;
+  lastLine[text] = now;
+  try {
+    if(busy) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if(voicePick) u.voice = voicePick;
+    u.rate = 0.92; u.pitch = 1; u.volume = 1;
+    speaking = true; speakEnd = null;
+    if(duck) duck.gain.setTargetAtTime(0.45, AC.currentTime, 0.08);
+    const fin = () => { speaking = false; quietSince = performance.now(); speakEnd = quietSince;
+      if(duck) duck.gain.setTargetAtTime(1, AC.currentTime, 0.25); };
+    u.onend = fin; u.onerror = fin;
+    // a safety net: some phones never fire onend. Assume ~14 characters a second.
+    setTimeout(() => { if(speaking && u === lastU) fin(); }, 1500 + text.length*75);
+    lastU = u;
+    speechSynthesis.speak(u);
+    recPush({ k:'say', t:nowClock(), text, pri });
+    return true;
+  } catch(e){ speaking = false; return false; }
+}
+let lastU = null;
+function hush(){ try { speechSynthesis.cancel(); } catch(e){} speaking = false; quietSince = performance.now(); }
+function voiceIdleFor(){ return speaking ? 0 : performance.now() - quietSince; }
+
+/* ================= the game =================
+   idle -> guide -> calib -> intro -> [ brief -> ready -> play -> rest ] x5 -> end
+   Nothing after the Start tap needs a hand on the phone. */
+const ROUNDS = [
+  { animal:'bear',  dur:40 },
+  { animal:'crab',  dur:40 },
+  { animal:'chimp', dur:35 },
+  { animal:'frog',  dur:30 },
+  { mix:['bear','crab','chimp','frog'], dur:60, each:15 },
+];
+const REST_MS = 12000, READY_MAX_MS = 20000, GRACE_MS = 3000;
+
+const BRIEF = {
+  bear:  'Bear. Get down on your hands and feet, face the floor, knees off the floor. Crawl across, and back. Start when you are ready.',
+  crab:  'Crab. Sit down, put your hands on the floor behind you, and lift your hips. Walk across like that, and back.',
+  chimp: 'Chimp. Face the phone. Squat low, hold your hands up, and shuffle sideways across the room, and back.',
+  frog:  'Frog. Squat down with your hands near the floor, then hop forward and land soft. Small hops are fine.',
+};
+const TIP = {
+  bear:  { down:'Get down on your hands and feet.', facedown:'Face the floor. Knees under you.' },
+  crab:  { hands:'Hands on the floor behind you.', faceup:'Face up, knees up.', hips:'Lift your hips.' },
+  chimp: { feet:'Stay on your feet and squat.', lower:'Sit lower.', arms:'Hands up.' },
+  frog:  { squat:'Squat down before you hop.' },
+};
+const SHOWN = { bear:'Bear', crab:'Crab', chimp:'Chimp', frog:'Frog' };
+
+let state = 'idle', stateAt = 0, cal = null;
+let torso = null, form = null, travel = null, hops = null;
+let roundIdx = -1, animal = null, mixAt = 0, graceUntil = 0;
+let roundMs = 0, lastTick = 0, lostSince = null, okSince = null, moodSince = 0, moodNow = null;
+let calFrames = [], calBlockUntil = 0, knocksSaid = 0, count = 0, lastFrogHopAt = -1e9, lastJudge = null, guideWhy = null;
+const stats = {};
+function freshStats(){ for(const a of ['bear','crab','chimp','frog'])
+  stats[a] = { lengths:0, unscoredLengths:0, points:0, ok:0, scored:0, unscoredFrames:0, hops:0, frogHops:0, ms:0 }; }
+freshStats();
+
+function setState(s, now){
+  state = s; stateAt = now; okSince = null;
+  recPush({ k:'state', t:nowClock(), s, round:roundIdx, animal });
+  checkOrientation();
+}
+
+/* ---- setup: talk the player into the picture ---- */
+const GUIDE_LINE = {
+  none:'Walk back until I can see you, from your shoulders to your knees.',
+  shoulders:'I can\'t see your shoulders. Step back.',
+  knees:'I can\'t see your knees. Step back.',
+  back:'Step back a little.',
+  closer:'Come a bit closer.',
+  right:'Move to your right.',
+  left:'Move to your left.',
+};
+function stepGuide(now){
+  const c = pose ? standCheck(pose, read) : { ok:false, why:'none' };
+  guideWhy = c.ok ? null : c.why;
+  if(now - stateAt < 1200) return;                 // let the opening line land
+  if(!c.ok){ okSince = null; say(GUIDE_LINE[c.why], 1, 6000); return; }
+  if(now < calBlockUntil) return;
+  if(okSince === null){ okSince = now; say('Good. Stand still.', 1, 8000); }
+  if(now - okSince >= 1500){ calFrames = []; setState('calib', now); }
+}
+function stepCalib(now){
+  const c = pose ? standCheck(pose, read) : { ok:false };
+  if(!c.ok){ setState('guide', now); return; }
+  calFrames.push(pose);
+  if(now - stateAt < 1200) return;
+  const r = calibrate(calFrames, read);
+  recPush({ k:'calib', t:nowClock(), r });
+  if(r.ok){
+    cal = r; torso = new TorsoTracker(cal.T);
+    say('Got you.', 2);
+    setState('intro', now);
+    return;
+  }
+  const line = { roll:'The phone is tilted. Stand it up straight.',
+    room:'There is not room to crawl across here. Move the phone further away, or point it along a longer stretch of floor.',
+    stand:'Stand up straight for a moment.', see:'Hold still where I can see you.' }[r.why];
+  say(line, 2);
+  calBlockUntil = now + 5000;
+  setState('guide', now);
+}
+
+/* ---- the intro, said once, while the player is standing ---- */
+const INTRO = 'Here is how it works. I call an animal. You move across the room like that animal, and back. ' +
+  'When you hear a knock, turn around. Clear music means you are doing it right. Muffled music means fix your shape. ' +
+  'Quiet music means keep moving. You never need to look at the phone.';
+let introDone = false;                             // said once per session; Play again skips it
+function stepIntro(now){
+  if(now - stateAt < 1800) return;                 // after "Got you."
+  if(introDone) return beginBrief(0, now);
+  if(!stepIntro.said){ stepIntro.said = say(INTRO, 2); if(stepIntro.said) introDone = true; return; }
+  if(voiceIdleFor() > 900 || now - stateAt > 30000) beginBrief(0, now);
+}
+
+/* ---- rounds ---- */
+function beginBrief(i, now){
+  roundIdx = i;
+  const R = ROUNDS[i];
+  animal = R.mix ? R.mix[0] : R.animal;
+  setState('brief', now);
+  hush();
+  if(R.mix) say('Last round. A mix. I call the animal, you switch. First, ' + SHOWN[animal] + '. ' + BRIEF[animal].split('. ').slice(1,2).join('') + '.', 2);
+  else say(BRIEF[animal], 2);
+}
+function stepBrief(now){
+  if(now - stateAt < 1500) return;
+  if(voiceIdleFor() > 600 || now - stateAt > 25000){
+    form = new FormSmoother(); travel = new Travel({ scores: animal !== 'frog' }); hops = new HopCounter();
+    initAudio(); playBed(animal); setMood('waiting');
+    setState('ready', now);
+  }
+}
+function judgeFrame(tc){
+  const b = bodyOf(pose, read, cal.roll);
+  const T = torso.push(tc, b);
+  const r = ANIMALS[animal].judge(b, T, cal);
+  form.push(tc, r);
+  return { b, T, r };
+}
+function stepReady(now, tc, fresh){
+  if(fresh && pose){
+    const { r } = judgeFrame(tc);
+    lastJudge = r;
+  }
+  if(form.ok && form.fresh){ if(okSince === null) okSince = now; } else okSince = null;
+  if(okSince !== null && now - okSince >= 800) return startPlay(now);
+  if(now - stateAt > 9000 && form.why) say(TIP[animal][form.why], 1, 12000);
+  if(now - stateAt > READY_MAX_MS){ say('Let\'s go.', 2); return startPlay(now); }
+}
+function startPlay(now){
+  sfx('go');
+  if(!speaking) say('Go.', 1, 0);
+  travel = new Travel({ scores: animal !== 'frog' }); hops = new HopCounter();
+  roundMs = 0; lastTick = now; lostSince = null; mixAt = 0; graceUntil = 0; count = 0;
+  setState('play', now);
+}
+
+function stepPlay(now, tc, fresh){
+  const R = ROUNDS[roundIdx];
+  // the clock only runs while the camera can see the player: time it could not
+  // see you is never taken from your round
+  const seen = pose && (read(pose, J.hipA) || read(pose, J.hipB));
+  const dtFrame = Math.min(100, now - lastTick);
+  if(seen){ roundMs += dtFrame; lostSince = null; }
+  else {
+    if(lostSince === null) lostSince = now;
+    if(now - lostSince > 3000) say('I have lost you. Come back where I can see you.', 1, 12000);
+  }
+  lastTick = now;
+
+  // the mix: switch animal every R.each seconds
+  if(R.mix){
+    const k = Math.min(R.mix.length-1, Math.floor(roundMs/1000/R.each));
+    if(k !== mixAt){
+      mixAt = k; animal = R.mix[k];
+      sfx('switch'); hush(); say(SHOWN[animal] + '.', 2);
+      playBed(animal); form = new FormSmoother();
+      travel = new Travel({ scores: animal !== 'frog' }); hops = new HopCounter();
+      graceUntil = now + GRACE_MS;
+    }
+  }
+
+  if(fresh && pose){
+    const { b, T, r } = judgeFrame(tc);
+    lastJudge = r;
+    // While switching animal the player is mid-change. That time is not judged
+    // at all - not as unscored, not as travel. The next length starts after it.
+    const inGrace = now < graceUntil;
+    if(!inGrace){ if(r){ stats[animal].scored++; if(r.ok) stats[animal].ok++; } else stats[animal].unscoredFrames++; }
+    const out = inGrace ? { turned:null } : travel.push(tc, b.Hc ? b.Hc.x : null, T, r);
+    if(out.turned){
+      const L = out.turned;
+      recPush({ k:'length', t:tc, animal, L });
+      if(L.counted){
+        stats[animal].lengths++; if(L.unscored) stats[animal].unscoredLengths++;
+        stats[animal].points += L.points;
+        // the frog's number is its hops; a frog length is counted quietly
+        if(animal !== 'frog'){ count++; sfx('chime'); say(String(count), 1, 0); }
+      }
+    }
+    if(!inGrace && wantKnock(travel, edgeOf(pose, read))){
+      sfx('knock'); recPush({ k:'knock', t:tc });
+      if(knocksSaid < 2){ knocksSaid++; say('Turn around.', 1, 0); }
+    }
+    if(animal === 'frog' && !inGrace){
+      const h = hops.push(tc, b, T, cal);
+      if(h){
+        stats.frog.hops++;
+        recPush({ k:'hop', t:tc, h });
+        if(h.frog){ stats.frog.frogHops++; stats.frog.points += h.points; lastFrogHopAt = now; sfx('boing'); count++; }
+        else { sfx('thud'); say('Hop forward, not just up.', 1, 10000); }
+      }
+    }
+  }
+
+  // what the music says
+  let mood;
+  if(now < graceUntil) mood = 'waiting';
+  else if(animal === 'frog') mood = (now - lastFrogHopAt < 2500) ? 'clear' : (form.ok ? 'quiet' : 'muffled');
+  else if(!form.fresh) mood = moodNow || 'quiet';          // can't see: hold, never punish
+  else if(!form.ok) mood = 'muffled';
+  else mood = travel.moving(tc) ? 'clear' : 'quiet';
+  if(mood !== moodNow){ moodNow = mood; moodSince = now; }
+  setMood(mood);
+  if(mood === 'clear') stats[animal].ms += dtFrame;
+  if(mood === 'muffled' && now - moodSince > 2500 && form.why) say(TIP[animal][form.why], 1, 9000);
+  if(mood === 'quiet' && now - moodSince > 4000) say(animal === 'frog' ? 'Hop forward.' : 'Keep moving.', 1, 10000);
+
+  if(roundMs >= R.dur*1000) endRound(now);
+}
+function endRound(now){
+  sfx('done'); stopBed(); moodNow = null;
+  recPush({ k:'roundEnd', t:nowClock(), round:roundIdx, stats:JSON.parse(JSON.stringify(stats)) });
+  if(roundIdx >= ROUNDS.length-1) return finish(now);
+  hush(); say('Good. Stand up and breathe.', 2);
+  setState('rest', now);
+}
+function stepRest(now){ if(now - stateAt >= REST_MS) beginBrief(roundIdx+1, now); }
+
+function finish(now){
+  setState('end', now);
+  const L = Object.values(stats).reduce((a,s) => a + s.lengths, 0);
+  const F = stats.frog.frogHops;
+  let best = null, bestShare = -1;
+  for(const a of ['bear','crab','chimp']){ const s = stats[a]; if(s.scored > 60){ const sh = s.ok/s.scored; if(sh > bestShare){ bestShare = sh; best = a; } } }
+  hush();
+  say('That is it. ' + L + (L === 1 ? ' length' : ' lengths') + ' and ' + F + ' frog hops.' + (best ? ' Your best shape was ' + SHOWN[best] + '.' : '') + ' Well done.', 2);
+  renderEnd();
+}
+
+function step(now, tc, fresh){
+  switch(state){
+    case 'guide': return stepGuide(now);
+    case 'calib': if(fresh) stepCalib(now); return;
+    case 'intro': return stepIntro(now);
+    case 'brief': return stepBrief(now);
+    case 'ready': return stepReady(now, tc, fresh);
+    case 'play':  return stepPlay(now, tc, fresh);
+    case 'rest':  return stepRest(now);
+  }
+}
+
+/* ================= drawing =================
+   The screen is a bonus, not the channel. Big type, few words, readable from
+   the floor three steps away. */
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+const MOODC = { clear:'#8fd694', muffled:'#e6b85c', quiet:'#9fb0a4', waiting:'#9fb0a4' };
+function bigText(s, y, size, color){
+  ctx.font = `750 ${Math.round(size)}px ui-sans-serif,system-ui,sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = Math.max(4, size*0.12); ctx.strokeStyle = 'rgba(8,10,9,.85)'; ctx.lineJoin = 'round';
+  ctx.strokeText(s, W/2, y); ctx.fillStyle = color || '#ece6d6'; ctx.fillText(s, W/2, y);
+}
+function cornerText(s, x, y, size, align, color){
+  ctx.font = `700 ${Math.round(size)}px ui-sans-serif,system-ui,sans-serif`;
+  ctx.textAlign = align; ctx.textBaseline = 'top';
+  ctx.lineWidth = Math.max(3, size*0.1); ctx.strokeStyle = 'rgba(8,10,9,.85)';
+  ctx.strokeText(s, x, y); ctx.fillStyle = color || '#ece6d6'; ctx.fillText(s, x, y);
+}
+function drawSkeleton(color){
+  if(!pose) return;
+  ctx.lineCap = 'round'; ctx.lineWidth = Math.max(4, H*0.012); ctx.strokeStyle = color;
+  for(const [a,b] of BONES){
+    const p = pose[a], q = pose[b];
+    if(!p || !q || (p.visibility||1) < 0.35 || (q.visibility||1) < 0.35) continue;
+    const P = px(p), Q = px(q);
+    ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(Q.x, Q.y); ctx.stroke();
+  }
+  const n = pose[0];
+  if(n && (n.visibility||1) >= 0.35){ const N = px(n); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(N.x, N.y, Math.max(6, H*0.02), 0, 7); ctx.fill(); }
+}
+const GUIDE_SHORT = { none:'Walk back', shoulders:'Step back', knees:'Step back', back:'Step back', closer:'Come closer', right:'Move right', left:'Move left' };
+
+function paint(now){
+  ctx.fillStyle = '#0e1310'; ctx.fillRect(0, 0, W, H);
+  if(state === 'idle' || state === 'end') return;
+  if(video.readyState >= 2){
+    const f = videoFit();
+    ctx.save(); ctx.globalAlpha = 0.35; ctx.translate(f.dx + f.dw, f.dy); ctx.scale(-1, 1);
+    try { ctx.drawImage(video, 0, 0, f.dw, f.dh); } catch(e){}
+    ctx.restore();
+  }
+  const big = Math.min(H*0.20, W*0.11), mid = Math.min(H*0.10, W*0.06), small = Math.min(H*0.07, W*0.04);
+  let skel = '#9fb0a4';
+  if(state === 'play' || state === 'ready'){
+    skel = state === 'ready' ? (form && form.ok ? '#8fd694' : '#9fb0a4') : (MOODC[moodNow] || '#9fb0a4');
+    if(lastJudge === null && state === 'play') skel = '#6c7a70';
+  }
+  drawSkeleton(skel);
+
+  if(state === 'guide'){
+    bigText(guideWhy ? GUIDE_SHORT[guideWhy] : 'Stand still', H*0.22, big);
+    bigText('so I can see you, shoulders to knees', H*0.36, small, '#cfc8b6');
+  } else if(state === 'calib'){
+    bigText('Hold still', H*0.22, big, '#8fd694');
+  } else if(state === 'intro'){
+    bigText('Listen', H*0.22, big);
+    bigText('clear music: good   muffled: fix it   knock: turn', H*0.36, small, '#cfc8b6');
+  } else if(state === 'brief' || state === 'ready'){
+    bigText(SHOWN[animal], H*0.20, big, '#e58f4f');
+    bigText(state === 'ready' ? 'Get into shape. It starts by itself.' : 'Round ' + (roundIdx+1) + ' of ' + ROUNDS.length, H*0.34, small, '#cfc8b6');
+  } else if(state === 'play'){
+    const R = ROUNDS[roundIdx];
+    bigText(SHOWN[animal], H*0.16, big, MOODC[moodNow] || '#ece6d6');
+    const left = Math.max(0, Math.ceil(R.dur - roundMs/1000));
+    cornerText(String(left), W*0.03, H*0.04, mid, 'left', '#cfc8b6');
+    cornerText(String(count), W*0.97, H*0.04, big*0.9, 'right', '#ece6d6');
+    // a progress bar along the bottom
+    ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(W*0.03, H*0.94, W*0.94, H*0.018);
+    ctx.fillStyle = '#e58f4f'; ctx.fillRect(W*0.03, H*0.94, W*0.94*Math.min(1, roundMs/1000/R.dur), H*0.018);
+    if(moodNow === 'muffled' && form && form.why) bigText(TIP[animal][form.why] || '', H*0.32, small, '#e6b85c');
+    if(lostSince !== null && now - lostSince > 1500) bigText('I can\'t see you', H*0.5, mid, '#e6b85c');
+  } else if(state === 'rest'){
+    bigText('Rest', H*0.20, big, '#8fd694');
+    const nx = ROUNDS[roundIdx+1];
+    if(nx) bigText('Next: ' + (nx.mix ? 'the mix' : SHOWN[nx.animal]), H*0.34, mid, '#cfc8b6');
+    bigText(String(Math.max(0, Math.ceil((REST_MS - (now - stateAt))/1000))), H*0.55, big);
+  }
+}
+
+/* ================= end screen ================= */
+function renderEnd(){
+  show('sEnd');
+  const rows = ['bear','crab','chimp','frog'].map(a => {
+    const s = stats[a];
+    const shape = s.scored ? Math.round(100*s.ok/s.scored) + '%' : 'not seen';
+    const lens = s.lengths + (s.unscoredLengths ? ` (${s.unscoredLengths} not judged)` : '');
+    return `<tr><td class="l">${SHOWN[a]}</td><td>${lens}</td><td>${a === 'frog' ? s.frogHops + (s.hops > s.frogHops ? ` <span class="sub">+${s.hops - s.frogHops} in place</span>` : '') : '—'}</td><td>${shape}</td><td>${Math.round(s.ms/1000)} s</td><td>${s.points}</td></tr>`;
+  }).join('');
+  const L = Object.values(stats).reduce((a,s) => a + s.lengths, 0);
+  const P = Object.values(stats).reduce((a,s) => a + s.points, 0);
+  document.getElementById('big').textContent = `${L} lengths · ${stats.frog.frogHops} hops · ${P} points`;
+  document.getElementById('results').innerHTML =
+    `<table><tr><th></th><th>Lengths</th><th>Frog hops</th><th>In shape</th><th>Clear music</th><th>Points</th></tr>${rows}</table>
+     <p class="sub">“In shape” is the share of the time the camera could judge you that you were in the animal's shape. Time it could not see you is left out, never counted against you. Crawling on your knees counts as a bear: the camera cannot see knees hovering just off the floor.</p>`;
+}
+function show(id){ for(const s of ['sTitle','sEnd']){ const el = document.getElementById(s); if(el) el.classList.toggle('on', s === id); } }
+function saveRecording(){
+  recPush({ k:'end', t:nowClock(), stats, cal, dropped:recDropped });
+  const blob = new Blob([rec.map(o => JSON.stringify(o)).join('\n')], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'animalwalk-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ================= boot and the loop ================= */
+function loop(){
+  requestAnimationFrame(loop);
+  const now = performance.now();
+  let fresh = false, tc = now;
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    let res = null;
+    try { res = landmarker.detectForVideo(video, now); } catch(e){}
+    tc = captureToClock(video.currentTime, performance.now());
+    const lm = res && res.landmarks && res.landmarks[0];
+    pose = (lm && lm.length >= 29) ? lm : null;
+    if(pose) recFrame(tc, pose); else recPush({ k:'nf', t:Math.round(tc) });
+    fresh = true;
+  }
+  try { step(now, tc, fresh); } catch(e){ recPush({ k:'err', t:now, e:String(e && e.stack || e) }); if(window.__AW_STRICT__) throw e; }
+  paint(now);
+}
+
+async function begin(){
+  const err = document.getElementById('err');
+  err.textContent = '';
+  // sound and speech must be unlocked inside the tap
+  initAudio(); try { await AC.resume(); } catch(e){}
+  initVoice();
+  show(null);
+  resize();
+  setState('guide', performance.now());
+  say('Stand the phone up sideways, at about hip height, facing the room. Then walk back until I can see you, from your shoulders to your knees.', 2);
+  try {
+    await startCamera();
+    await loadTracker();
+  } catch(e){
+    setState('idle', performance.now()); show('sTitle');
+    err.textContent = 'Could not start the camera or the tracker: ' + (e && e.message || e) + '. Check camera permission and try again.';
+    return;
+  }
+  read = makeReader(aspectNow());
+  recHeader();
+  keepAwake();
+}
+function again(){
+  freshStats(); cal = null; roundIdx = -1; animal = null; knocksSaid = 0; stepIntro.said = false; moodNow = null;
+  calBlockUntil = 0; show(null); setState('guide', performance.now());
+  say('Walk back until I can see you, from your shoulders to your knees.', 2);
+}
+document.getElementById('bGo').addEventListener('click', begin);
+document.getElementById('bAgain').addEventListener('click', again);
+document.getElementById('bSave').addEventListener('click', saveRecording);
+resize();
+requestAnimationFrame(loop);
+
+// test hooks: read-only peeks plus a fast-forward for the harness
+window.__aw = {
+  peekState: () => state, peekRound: () => roundIdx, peekAnimal: () => animal, peekCal: () => cal,
+  peekStats: () => JSON.parse(JSON.stringify(stats)), peekMood: () => moodNow, peekCount: () => count,
+  endRoundNow: () => { if(state === 'play') roundMs = ROUNDS[roundIdx].dur*1000; },
+  skipRest: () => { if(state === 'rest') stateAt = -1e9; },
+  TUNE, J,
+};
+</script>
+</body>
+</html>
