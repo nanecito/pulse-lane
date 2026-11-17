@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1310">
+<title>Balance</title>
+<style>
+  :root{ --ink:#ece6d6; --dim:#8f8a7b; --bg:#0e1310; --line:#27302a;
+         --good:#8fd694; --warn:#e6b85c; --off:#6c7a70; --accent:#e58f4f; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden; overscroll-behavior:none; }
+  canvas{ position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .screen{ position:fixed; inset:0; display:none; flex-direction:column; overflow-y:auto; z-index:5;
+    padding:max(14px,env(safe-area-inset-top)) max(22px,env(safe-area-inset-right))
+            max(14px,env(safe-area-inset-bottom)) max(22px,env(safe-area-inset-left));
+    background:var(--bg); }
+  .screen.on{ display:flex; }
+  h1{ font-size:clamp(26px,5vw,42px); margin:0 0 2px; font-weight:700; letter-spacing:.01em; }
+  h2{ font-size:clamp(13px,2vw,15px); margin:12px 0 4px; color:var(--dim); font-weight:600;
+      text-transform:uppercase; letter-spacing:.1em; }
+  p{ margin:5px 0; line-height:1.45; font-size:clamp(15px,2.3vw,18px); color:#d3cdbd; max-width:46em; }
+  .sub{ color:var(--dim); font-size:clamp(13px,2vw,15px); }
+  .cards{ display:flex; gap:10px; flex-wrap:wrap; margin:8px 0; }
+  .card{ border:1px solid var(--line); border-radius:12px; padding:10px 14px; min-width:150px; flex:1 1 150px; }
+  .card b{ display:block; font-size:clamp(17px,2.6vw,20px); margin-bottom:2px; }
+  .card span{ color:var(--dim); font-size:clamp(13px,2vw,15px); }
+  button{ font:inherit; font-size:clamp(18px,3vw,22px); font-weight:650; color:#10140f; background:var(--ink);
+    border:0; border-radius:12px; padding:14px 26px; margin:6px 10px 6px 0; cursor:pointer; }
+  button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
+  .row{ display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+  table{ border-collapse:collapse; margin:8px 0; font-size:clamp(14px,2.1vw,16px); }
+  th,td{ border:1px solid var(--line); padding:7px 12px; text-align:center; }
+  th{ color:var(--dim); font-weight:600; } td.l{ text-align:left; font-weight:600; }
+  #big{ font-size:clamp(20px,4vw,34px); font-weight:750; margin:2px 0 4px; }
+  #rotate{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; text-align:center;
+    background:var(--bg); z-index:40; padding:30px; font-size:clamp(20px,5vw,30px); line-height:1.4; }
+  #rotate.on{ display:flex; }
+  #err{ color:var(--warn); }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="screen on" id="sTitle">
+  <h1>Balance</h1>
+  <p>Hold a position on the floor and keep a ball on you. The longer it stays, the more it is worth. About five minutes.</p>
+  <div class="row"><button id="bGo">Start</button><span class="sub">Put the phone on its side first, on the floor, facing the room.</span></div>
+  <p class="sub" id="err"></p>
+  <div class="cards">
+    <div class="card"><b>Bridge</b><span>On your back, knees bent. Lift your hips.</span></div>
+    <div class="card"><b>Crab</b><span>Face up on hands and feet. Stomach flat like a table.</span></div>
+    <div class="card"><b>Plank</b><span>Face down on hands and toes. One straight line.</span></div>
+    <div class="card"><b>Last ball</b><span>Crab again. One ball, no second chance.</span></div>
+  </div>
+  <h2>Before you tap</h2>
+  <p>Put the phone on its <b>side</b> (landscape), on the floor, leaning on something so it stays upright, with the screen facing into the room. Get down about two steps back, <b>side-on</b> to it, so it sees you from head to feet.</p>
+  <p>You only touch the phone once. After that it talks you into place and starts by itself. <b>You never need to look at the screen:</b> a soft tick means the ball is on. A rolling sound going <b>lower</b> means your hips are dropping. Going <b>higher</b> means they are too high. A thud means it fell.</p>
+</div>
+
+<div class="screen" id="sEnd">
+  <h1>Done</h1>
+  <div id="big"></div>
+  <div class="row">
+    <button id="bAgain">Play again</button>
+    <button class="ghost" id="bSave">Save recording</button>
+  </div>
+  <div id="results"></div>
+  <p class="sub">If something felt wrong — it would not give you the ball, dropped it when you were level, or could not see you — save the recording and send it. It holds exactly what the camera saw.</p>
+</div>
+
+<button id="bSaveNow" class="ghost" style="position:fixed;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:6;display:none;font-size:14px;padding:8px 12px;margin:0;background:rgba(14,19,16,.75)">Save recording</button>
+<div id="rotate">Turn the phone sideways.<br>This game is played in landscape.</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+/*==JUDGE_START==*/
+/* ================= the judge =================
+   Everything that decides what the camera saw. Pure functions and small state
+   machines, no DOM, no audio, so the Node harness runs THIS block, cut out of the
+   shipped HTML, on every test run.
+
+   The game calls one position and asks two questions of the body: is it roughly
+   in THAT position, and is it STRAIGHT? It never tells positions apart.
+
+   What "tilt" is. Not an angle to the floor and not an angle to the picture. It
+   is the angle, at the shoulder, between the torso (shoulder to hip) and the
+   position's own body line (shoulder to knee for bridge and crab, shoulder to
+   ankle for plank). A straight body gives zero. A straight line in the room is
+   a straight line in the picture however the phone leans and however squarely
+   the body faces it, so zero stays zero at any camera placement. Sagging hips
+   read positive ("low"), piked hips negative ("high").
+
+   The coarse shape checks are distances from the player's own lines too,
+   except two that only need to know up from down (knees above shoulders in the
+   bridge, torso nearer flat than upright), which survive a phone leaning 12 degrees.
+
+   Units. The reader turns MediaPipe's normalised coordinates into a space where x
+   and y have the same scale (x is multiplied by the picture's aspect), mirrored
+   so it matches the screen. Coarse shape checks divide by the player's own
+   torso, tracked as a rolling median. */
+const TUNE = {
+  VIS_GET:0.55, VIS_KEEP:0.35,     // landmark confidence to start / keep trusting a point
+
+  FLAT:60,                         // every position: torso within this many degrees of flat in the picture (not standing)
+  BRIDGE_KNEES:0.25,               // BRIDGE: knees at least this far above the shoulders (on your back, knees up)
+  CRAB_ARMS:0.60,                  // CRAB: hands at least this far off the torso line (propped on straight arms)
+  CRAB_KNEES:0.40,                 // CRAB: knees at least this far off the hands-to-feet line (knees up, not on the floor)
+  PLANK_ARMS:0.45,                 // PLANK: hands at least this far off the torso line
+  PLANK_LEGS:0.18,                 // PLANK: knee within this of the hip-ankle line (legs straight, knees off the floor)
+
+  LEVEL:8,                         // degrees of tilt the ball forgives: the dish it sits in
+  ROLL_K:1/15,                     // ball travel per second per degree beyond LEVEL (edge is at 1)
+  RETURN:0.6,                      // travel per second back to the middle while level
+  TILT_WIN:500, TILT_MIN_N:3,      // tilt is the median over this window; fewer readings = not judged
+  TILT_SPREAD:6,                   // a window jumping about more than this is the tracker, not the body: not judged
+  FORM_WIN:600, FORM_ON:0.60, FORM_OFF:0.35,
+  PLACE_MS:1000,                   // level this long and the ball goes on
+  REPLACE_MS:1500,                 // after a drop it takes this long
+  STREAK_STEP:10000, MULT_MAX:3,   // every 10 s unbroken, a second is worth one more, up to 3
+  TORSO_WIN:2000, TORSO_MIN_N:5,
+  SIDE_WARN:0.70,                  // shoulder spread over torso that earns a spoken "turn side-on" (advice, never a gate)
+};
+
+const J = { nose:0, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+const DEG = 180/Math.PI;
+function dist(a,b){ return Math.hypot(b.x-a.x, b.y-a.y); }
+function median(a){ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y);
+  const m=s.length>>1; return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+
+/* A point is either confidently seen or it is nothing. Hysteresis stops a point
+   flickering in and out at the threshold. */
+function makeReader(aspect){
+  const latch = {};
+  const asp = aspect || 1;
+  const fn = function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    // A point outside the picture is a guess, however confident.
+    if(p.x < -0.01 || p.x > 1.01 || p.y < -0.01 || p.y > 1.01){ latch[i] = false; return null; }
+    if(v < (latch[i] ? TUNE.VIS_KEEP : TUNE.VIS_GET)){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x:(1-p.x)*asp, y:p.y, v };
+  };
+  fn.aspect = asp;
+  return fn;
+}
+function pairMid(a, b){
+  if(a && b) return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
+  return a || b || null;
+}
+/* The points every judgment uses. A missing point stays missing. The player is
+   side-on, so a left and a right joint sit on top of each other and one is as
+   good as both. */
+function bodyOf(pose, read){
+  const g = i => read(pose, i);
+  const sA = g(J.shA), sB = g(J.shB);
+  const S = pairMid(sA, sB), H = pairMid(g(J.hipA), g(J.hipB));
+  return {
+    S, H,
+    K: pairMid(g(J.knA), g(J.knB)),
+    W: pairMid(g(J.wrA), g(J.wrB)),
+    A: pairMid(g(J.ankA), g(J.ankB)),
+    spread: (sA && sB && S && H && dist(S,H) > 0) ? dist(sA, sB)/dist(S, H) : null,
+  };
+}
+// how far a is ABOVE b, in torsos
+function up(a, b, T){ return (a && b && T) ? (b.y - a.y)/T : null; }
+function flatDeg(S, H){ return (S && H) ? Math.atan2(Math.abs(S.y-H.y), Math.abs(S.x-H.x))*DEG : null; }
+
+/* The one measurement. Angle at S between S->H and S->Q, in degrees, positive
+   when the hip is on the floor side of the line (lower in the picture). null
+   when the hip is not between the ends, which is not a body. */
+function lineTilt(S, H, Q){
+  if(!S || !H || !Q) return null;
+  const ux = Q.x-S.x, uy = Q.y-S.y, L = Math.hypot(ux, uy);
+  if(L < 1e-6) return null;
+  const hx = H.x-S.x, hy = H.y-S.y;
+  const t = (hx*ux + hy*uy)/L;
+  if(t <= 0 || t >= L) return null;
+  const wx = hx - ux/L*t, wy = hy - uy/L*t;
+  return Math.atan2(Math.hypot(wx, wy), t)*DEG*(wy > 0 ? 1 : -1);
+}
+// how far point P sits from the line A->B, in torsos
+function offLine(P, A, B, T){
+  if(!P || !A || !B || !T) return null;
+  const ux = B.x-A.x, uy = B.y-A.y, L = Math.hypot(ux, uy);
+  if(L < 1e-6) return null;
+  return Math.abs((P.x-A.x)*uy - (P.y-A.y)*ux)/L/T;
+}
+
+/* ---- the three positions -------------------------------------------
+   Each returns { ok, why, tilt } or null. null is UNSCORED: the points that
+   define the position are not visible, which is never the player's failure.
+   `why` names the first thing to fix, in the order a person would fix it.
+   `tilt` is only given when the shape is right. */
+const POSITIONS = {
+  bridge: {
+    judge(b, T){
+      if(!b.S || !b.H || !b.K || !T) return null;
+      if(up(b.K, b.S, T) < TUNE.BRIDGE_KNEES || flatDeg(b.S, b.H) > TUNE.FLAT) return { ok:false, why:'lie', tilt:null };
+      const tilt = lineTilt(b.S, b.H, b.K);
+      if(tilt === null) return null;
+      return { ok:true, why:null, tilt };
+    }
+  },
+  crab: {
+    judge(b, T){
+      if(!b.S || !b.H || !b.K || !b.W || !T) return null;
+      if(offLine(b.W, b.S, b.H, T) < TUNE.CRAB_ARMS) return { ok:false, why:'hands', tilt:null };
+      if(flatDeg(b.S, b.H) > TUNE.FLAT) return { ok:false, why:'hips', tilt:null };
+      // With the ankles unseen this check is skipped, never guessed.
+      if(b.A && offLine(b.K, b.W, b.A, T) < TUNE.CRAB_KNEES) return { ok:false, why:'feet', tilt:null };
+      const tilt = lineTilt(b.S, b.H, b.K);
+      if(tilt === null) return null;
+      return { ok:true, why:null, tilt };
+    }
+  },
+  plank: {
+    judge(b, T){
+      if(!b.S || !b.H || !b.A || !b.W || !T) return null;
+      if(offLine(b.W, b.S, b.H, T) < TUNE.PLANK_ARMS) return { ok:false, why:'arms', tilt:null };
+      if(flatDeg(b.S, b.H) > TUNE.FLAT) return { ok:false, why:'down', tilt:null };
+      if(b.K && offLine(b.K, b.H, b.A, T) > TUNE.PLANK_LEGS) return { ok:false, why:'legs', tilt:null };
+      const tilt = lineTilt(b.S, b.H, b.A);
+      if(tilt === null) return null;
+      return { ok:true, why:null, tilt };
+    }
+  },
+};
+
+/* The body ruler: rolling median of shoulder-to-hip over the last 2 s. No seed,
+   so a bad first moment cannot poison it. Holds its last value while the
+   shoulders are out of view. */
+class TorsoTracker {
+  constructor(){ this.buf = []; this.T = null; }
+  push(t, b){
+    if(b.S && b.H){ const d = dist(b.S, b.H); if(d > 0.02) this.buf.push({ t, d }); }
+    while(this.buf.length && this.buf[0].t < t - TUNE.TORSO_WIN) this.buf.shift();
+    if(this.buf.length >= TUNE.TORSO_MIN_N) this.T = median(this.buf.map(o => o.d));
+    return this.T;
+  }
+}
+
+/* One frame is never a verdict. Share of judged frames in shape over FORM_WIN,
+   with hysteresis. Unscored frames are left out: they neither help nor hurt. */
+class FormSmoother {
+  constructor(){ this.buf = []; this.ok = false; this.why = null; this.fresh = false; }
+  push(t, r){
+    if(r){ this.buf.push({ t, ok:r.ok, why:r.why }); }
+    while(this.buf.length && this.buf[0].t < t - TUNE.FORM_WIN) this.buf.shift();
+    this.fresh = this.buf.length >= 3;
+    if(!this.fresh) return this.ok;
+    const share = this.buf.filter(o => o.ok).length / this.buf.length;
+    if(!this.ok && share >= TUNE.FORM_ON) this.ok = true;
+    else if(this.ok && share <= TUNE.FORM_OFF) this.ok = false;
+    const c = {}; let best = null;
+    for(const o of this.buf) if(o.why){ c[o.why] = (c[o.why]||0)+1; if(!best || c[o.why] > c[best]) best = o.why; }
+    this.why = this.ok ? null : best;
+    return this.ok;
+  }
+}
+
+/* Tilt over time: the median of the last TILT_WIN ms, on capture time. With too
+   few readings, or readings jumping about more than a body can, it is null:
+   not judged. */
+class TiltSmoother {
+  constructor(){ this.buf = []; this.value = null; this.spread = null; }
+  push(t, tilt){
+    if(tilt !== null && tilt !== undefined) this.buf.push({ t, v:tilt });
+    while(this.buf.length && this.buf[0].t < t - TUNE.TILT_WIN) this.buf.shift();
+    if(this.buf.length < TUNE.TILT_MIN_N){ this.value = null; this.spread = null; return null; }
+    const vs = this.buf.map(o => o.v), m = median(vs);
+    this.spread = 1.4826*median(vs.map(v => Math.abs(v-m)));
+    this.value = this.spread > TUNE.TILT_SPREAD ? null : m;
+    return this.value;
+  }
+}
+
+/* ---- the ball ---------------------------------------------------------
+   It sits in a shallow dish: inside LEVEL degrees it stays, and drifts back to
+   the middle. Beyond that it rolls toward the low end at a speed set by how far
+   beyond, and falls off at the edge. So a wobble costs nothing, a slow sag is
+   heard for seconds before it costs anything, and a collapse loses it in about
+   a second. Nothing here reacts faster than the tracker's lag.
+
+   push(t, shape, tilt): shape is true (in position), false (not), or null (not
+   judged). tilt is degrees or null (not judged). Not judged FREEZES the ball:
+   it never drops it and never earns anything.
+   Returns an event or null: {e:'on'} {e:'drop',side} {e:'mark',n} {e:'tick',n} */
+class Ball {
+  constructor(){ this.on = false; this.x = 0; this.levelMs = 0; this.streak = 0; this.held = 0; this.points = 0;
+    this.best = 0; this.drops = 0; this.placed = 0; this.lastT = null; this.tilt = null; }
+  mult(){ return Math.min(TUNE.MULT_MAX, 1 + Math.floor(this.streak/TUNE.STREAK_STEP)); }
+  push(t, shape, tilt){
+    const dt = this.lastT === null ? 0 : Math.max(0, Math.min(250, t - this.lastT));
+    this.lastT = t;
+    if(shape === null || (shape === true && tilt === null)){ this.tilt = null; return null; }   // not judged: freeze
+    this.tilt = shape ? tilt : null;
+    if(!shape){
+      this.levelMs = 0;
+      if(this.on) return this._drop('shape');
+      return null;
+    }
+    const over = Math.abs(tilt) - TUNE.LEVEL;
+    if(!this.on){
+      if(over < 0) this.levelMs += dt; else this.levelMs = 0;
+      if(this.levelMs >= (this.drops ? TUNE.REPLACE_MS : TUNE.PLACE_MS)){
+        this.on = true; this.x = 0; this.streak = 0; this.placed++; this.levelMs = 0;
+        return { e:'on' };
+      }
+      return null;
+    }
+    // on: roll, or settle
+    if(over > 0) this.x += (tilt > 0 ? -1 : 1)*TUNE.ROLL_K*over*dt/1000;
+    else { const back = TUNE.RETURN*dt/1000; this.x = Math.abs(this.x) <= back ? 0 : this.x - Math.sign(this.x)*back; }
+    if(Math.abs(this.x) >= 1) return this._drop(this.x < 0 ? 'low' : 'high');
+    const m0 = Math.floor(this.streak/TUNE.STREAK_STEP), s0 = Math.floor(this.streak/1000);
+    this.points += dt/1000*this.mult();
+    this.streak += dt; this.held += dt;
+    if(this.streak > this.best) this.best = this.streak;
+    const m1 = Math.floor(this.streak/TUNE.STREAK_STEP), s1 = Math.floor(this.streak/1000);
+    if(m1 > m0) return { e:'mark', n:m1*TUNE.STREAK_STEP/1000 };
+    if(s1 > s0) return { e:'tick', n:s1 };
+    return null;
+  }
+  _drop(side){ this.on = false; this.x = 0; this.streak = 0; this.levelMs = 0; this.drops++; return { e:'drop', side }; }
+}
+
+/* One position being held: the whole chain from a pose to the ball, in one
+   place, so the game and every harness build it the same way. */
+class Hold {
+  constructor(pos, torso){ this.pos = pos; this.torso = torso || new TorsoTracker(); this.form = new FormSmoother();
+    this.tilt = new TiltSmoother(); this.ball = new Ball(); this.r = null; this.b = null; this.T = this.torso.T; this.shape = null; this.tv = null; }
+  push(t, pose, read){
+    const b = pose ? bodyOf(pose, read) : null;
+    const T = b ? this.torso.push(t, b) : this.torso.T;
+    const r = b ? POSITIONS[this.pos].judge(b, T) : null;
+    this.form.push(t, r);
+    const tv = this.tilt.push(t, r && r.ok ? r.tilt : null);
+    const shape = this.form.fresh ? this.form.ok : null;
+    this.b = b; this.T = T; this.r = r; this.shape = shape; this.tv = shape ? tv : null;
+    return this.ball.push(t, shape, this.tv);
+  }
+}
+
+/* ---- can the phone see you at all? Any posture. ---- */
+function seeCheck(pose, read){
+  const g = i => read(pose, i);
+  const Hh = pairMid(g(J.hipA), g(J.hipB)), S = pairMid(g(J.shA), g(J.shB)), K = pairMid(g(J.knA), g(J.knB));
+  if(!Hh || (!S && !K)) return { ok:false, why:'none' };
+  const asp = read.aspect || 1;
+  const T = S ? dist(S, Hh) : null;
+  if(T !== null && T < 0.06) return { ok:false, why:'closer', T };
+  const cx = Hh.x/asp;
+  if(cx < 0.12) return { ok:false, why:'right' };
+  if(cx > 0.88) return { ok:false, why:'left' };
+  return { ok:true, T, cx };
+}
+/*==JUDGE_END==*/
+
+/* ================= camera, tracker, the clock, the recording =================
+   The same pipeline as Animal Walk (animalwalk.html), which this file was
+   started from. */
+const BUILD = 'balance-1';
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null, read = null;
+
+async function loadTracker(){
+  const fsr = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fsr, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fsr, opts("CPU")); }
+}
+
+async function startCamera(){
+  const tries = [
+    { video:{ facingMode:'user', width:{ ideal:1280 }, height:{ ideal:720 } }, audio:false },
+    { video:{ facingMode:'user' }, audio:false },
+    { video:true, audio:false },
+  ];
+  let err = null;
+  for(const t of tries){
+    try { video.srcObject = await navigator.mediaDevices.getUserMedia(t); await video.play(); return true; }
+    catch(e){ err = e; }
+  }
+  throw err || new Error('no camera');
+}
+function aspectNow(){ return (video.videoWidth && video.videoHeight) ? video.videoWidth/video.videoHeight : 16/9; }
+
+/* The one clock: the camera's capture time. The ball is judged on a median
+   over half a second and takes a second or more to roll off, so the 150-250 ms
+   pose lag delays the sound a little and never changes what happens. */
+let clockOffset = null;
+function nowClock(){ return performance.now(); }
+function captureToClock(vt, ready){
+  const capMs = vt*1000, off = ready - capMs;
+  clockOffset = (clockOffset === null) ? off : clockOffset*0.9 + off*0.1;
+  return capMs + clockOffset;
+}
+
+/* ---- the recording ----------------------------------------------------
+   Every frame the tracker returned, with the camera's capture time, every
+   landmark and its confidence, what the judge made of it, every spoken line and
+   every ball event. Nobody has pointed this tracker at a body holding still on
+   the floor yet; this file is how we find out what it really sees. */
+const REC_CAP = 60000;
+const rec = []; let recDropped = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; return o; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'balance', build:BUILD,
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight }, ua:navigator.userAgent,
+    coords:'MediaPipe normalised, unmirrored, origin top-left. The judge mirrors x and scales it by the picture aspect.',
+    j:'per frame while a position is live: [raw tilt deg or null, shape 1/0/null, smoothed tilt or null, ball x, ball on 1/0]',
+    tune:TUNE });
+}
+let lastRecFrame = null;
+function recFrame(tc, lm){
+  const L = [];
+  for(const p of lm) L.push(+p.x.toFixed(4), +p.y.toFixed(4), +(p.visibility===undefined?1:p.visibility).toFixed(2));
+  lastRecFrame = recPush({ k:'f', t:Math.round(tc), lm:L });
+}
+
+/* ---- canvas ---- */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W = 0, H = 0;
+function resize(){
+  const DPR = Math.min(2, devicePixelRatio||1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', () => { resize(); checkOrientation(); });
+function videoFit(){
+  const vw = video.videoWidth||16, vh = video.videoHeight||9;
+  const sc = Math.min(W/vw, H/vh), dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh };
+}
+// a raw MediaPipe landmark to canvas pixels, mirrored like the picture
+function px(p){ const f = videoFit(); return { x:f.dx + (1-p.x)*f.dw, y:f.dy + p.y*f.dh }; }
+// a reader-space point (mirrored, x scaled by aspect) to canvas pixels
+function pxR(p){ const f = videoFit(); return { x:f.dx + p.x/(read.aspect||1)*f.dw, y:f.dy + p.y*f.dh }; }
+function checkOrientation(){
+  const portrait = innerHeight > innerWidth;
+  document.getElementById('rotate').classList.toggle('on', portrait && state !== 'idle' && state !== 'end');
+}
+
+let wake = null;
+async function keepAwake(){ try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){} }
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && state !== 'idle') keepAwake(); });
+
+/* ================= sound =================
+   The player is on the floor, face up or face down. Sound carries the game:
+   - near SILENCE with a soft TICK each second = the ball is on and you are level
+   - a ROLLING sound = the ball is moving. Pitch going DOWN = hips dropping.
+     Pitch going UP = hips too high. It gets louder the nearer the edge.
+   - a THUD = it fell. Two rising notes = it is back on.
+   - a CHIME and a spoken number every ten seconds of an unbroken hold.
+   There is no music: the ball has to be heard. */
+let AC = null, master = null, duck = null, rollNoiseG = null, rollFilt = null, rollOsc = null, rollOscG = null;
+function initAudio(){
+  if(AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = 0.9; master.connect(AC.destination);
+  duck = AC.createGain(); duck.gain.value = 1; duck.connect(master);
+  // the rolling ball: filtered noise plus a tone, both following the ball
+  const len = AC.sampleRate*2, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0);
+  let last = 0; for(let i = 0; i < len; i++){ last = (last + 0.04*(Math.random()*2-1))/1.04; d[i] = last*14; }   // brownish: a rumble
+  const src = AC.createBufferSource(); src.buffer = b; src.loop = true;
+  rollFilt = AC.createBiquadFilter(); rollFilt.type = 'bandpass'; rollFilt.frequency.value = ROLL_MID; rollFilt.Q.value = 2.5;
+  rollNoiseG = AC.createGain(); rollNoiseG.gain.value = 0;
+  src.connect(rollFilt); rollFilt.connect(rollNoiseG); rollNoiseG.connect(duck); src.start();
+  rollOsc = AC.createOscillator(); rollOsc.type = 'triangle'; rollOsc.frequency.value = ROLL_MID;
+  rollOscG = AC.createGain(); rollOscG.gain.value = 0;
+  rollOsc.connect(rollOscG); rollOscG.connect(duck); rollOsc.start();
+}
+const ROLL_MID = 660;                        // an octave down at the low edge, an octave up at the high edge
+function rollFreq(x){ return ROLL_MID*Math.pow(2, Math.max(-1, Math.min(1, x))); }
+function rollLevel(x){ return Math.min(1, Math.abs(x)*1.6); }
+let rollNow = { f:ROLL_MID, g:0 };
+function setRoll(x){
+  rollNow = { f:rollFreq(x), g:rollLevel(x) };
+  if(!AC) return;
+  const t = AC.currentTime;
+  rollFilt.frequency.setTargetAtTime(rollNow.f, t, 0.06);
+  rollOsc.frequency.setTargetAtTime(rollNow.f, t, 0.06);
+  rollNoiseG.gain.setTargetAtTime(rollNow.g*0.9, t, 0.08);
+  rollOscG.gain.setTargetAtTime(rollNow.g*0.22, t, 0.08);
+}
+function noiseBuf(){
+  if(noiseBuf.b) return noiseBuf.b;
+  const b = AC.createBuffer(1, AC.sampleRate*0.5, AC.sampleRate), d = b.getChannelData(0);
+  for(let i = 0; i < d.length; i++) d[i] = Math.random()*2-1;
+  return (noiseBuf.b = b);
+}
+// one note: type, freq (or [from,to] glide), start, length, peak
+function tone(type, f, t0, len, peak, attack){
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type;
+  if(Array.isArray(f)){ o.frequency.setValueAtTime(f[0], t0); o.frequency.exponentialRampToValueAtTime(f[1], t0+len); }
+  else o.frequency.setValueAtTime(f, t0);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0+(attack||0.005));
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+len);
+  o.connect(g); g.connect(master); o.start(t0); o.stop(t0+len+0.05);
+}
+function noise(t0, len, peak, freq, q){
+  const s = AC.createBufferSource(); s.buffer = noiseBuf();
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q||1;
+  const g = AC.createGain(); g.gain.setValueAtTime(peak, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0+len);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t0); s.stop(t0+len+0.02);
+}
+const NOTE = n => 440*Math.pow(2, (n-69)/12);
+const SFX = {
+  tick(){ const t = AC.currentTime; noise(t, 0.035, 0.30, 2400, 5); tone('sine', 1500, t, 0.04, 0.12); },
+  on(){ const t = AC.currentTime; tone('sine', NOTE(76), t, 0.16, 0.4); tone('sine', NOTE(83), t+0.11, 0.3, 0.4); },
+  drop(){ const t = AC.currentTime; tone('sine', [520, 90], t, 0.32, 0.55);
+    for(const [d, p] of [[0.34, 0.7], [0.56, 0.4], [0.70, 0.22]]){ tone('sine', [130, 55], t+d, 0.14, p); noise(t+d, 0.06, p*0.5, 300, 1); } },
+  chime(){ const t = AC.currentTime; tone('sine', 1047, t, 0.5, 0.35); tone('sine', 1568, t+0.09, 0.6, 0.25); },
+  go(){ const t = AC.currentTime; [60,64,67,72].forEach((n,i) => tone('triangle', NOTE(n+12), t+i*0.09, 0.25, 0.4)); },
+  done(){ const t = AC.currentTime; [72,67,64,60].forEach((n,i) => tone('triangle', NOTE(n+12), t+i*0.12, 0.35, 0.35)); },
+};
+const sfxLog = [];
+function sfx(n){ recPush({ k:'sfx', t:nowClock(), n }); if(sfxLog.length < 5000) sfxLog.push(n); if(AC) try { SFX[n](); } catch(e){} }
+
+/* ================= the voice =================
+   The rules Animal Walk settled, because Four Points talked over itself:
+   - ONE line at a time. A line that is not urgent is DROPPED if anything is
+     being said or was said in the last 2.5 s. Never queued.
+   - the same line is not repeated within its own gap
+   - the rolling sound ducks while the voice speaks
+   - only our own speaking flag is trusted */
+let voiceOn = true, voicePick = null, speaking = false, quietSince = -1e9, lastLine = {}, lastU = null;
+function initVoice(){
+  if(!('speechSynthesis' in window)) { voiceOn = false; return; }
+  const pick = () => {
+    const vs = speechSynthesis.getVoices() || [];
+    voicePick = vs.find(v => /en[-_](GB|US)/i.test(v.lang) && v.localService) || vs.find(v => /^en/i.test(v.lang)) || vs[0] || null;
+  };
+  pick(); speechSynthesis.onvoiceschanged = pick;
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch(e){}
+}
+// pri 2: must be heard, cuts anything. pri 1: normal. Returns true if it will be said.
+function say(text, pri, gap){
+  if(!voiceOn || !text) return false;
+  pri = pri || 1;
+  const now = performance.now();
+  if(lastLine[text] && now - lastLine[text] < (gap === undefined ? 8000 : gap)) return false;
+  const busy = speaking;
+  if(pri < 2 && (busy || now - quietSince < 2500)) return false;
+  lastLine[text] = now;
+  try {
+    if(busy) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if(voicePick) u.voice = voicePick;
+    u.rate = 0.92; u.pitch = 1; u.volume = 1;
+    speaking = true;
+    if(duck) duck.gain.setTargetAtTime(0.4, AC.currentTime, 0.08);
+    let over = false;
+    const fin = () => { if(over || u !== lastU) return; over = true; speaking = false; quietSince = performance.now();
+      if(duck) duck.gain.setTargetAtTime(1, AC.currentTime, 0.25); };
+    u.onend = fin; u.onerror = fin;
+    // a safety net: some phones never fire onend. Assume ~14 characters a second.
+    setTimeout(fin, 1500 + text.length*75);
+    lastU = u;
+    speechSynthesis.speak(u);
+    recPush({ k:'say', t:nowClock(), text, pri });
+    return true;
+  } catch(e){ speaking = false; return false; }
+}
+function hush(){ try { speechSynthesis.cancel(); } catch(e){} lastU = null; speaking = false; quietSince = performance.now(); }
+function voiceIdleFor(){ return speaking ? 0 : performance.now() - quietSince; }
+
+/* ================= the game =================
+   idle -> guide -> intro -> [ brief -> ready -> play -> rest ] x4 -> end
+   Nothing after the Start tap needs a hand on the phone. */
+const ROUNDS = [
+  { pos:'bridge', dur:30 },
+  { pos:'crab',   dur:40 },
+  { pos:'plank',  dur:40 },
+  { pos:'crab',   dur:90, sudden:true },     // one ball: the round ends when it falls
+];
+const REST_MS = 12000, READY_MAX_MS = 20000;
+const SHOWN = { bridge:'Bridge', crab:'Crab', plank:'Plank' };
+const BRIEF = {
+  bridge: 'Bridge. Lie on your back, side-on to the phone, knees bent, feet flat. Lift your hips until you are one straight line from shoulders to knees. The ball goes on your stomach.',
+  crab:   'Crab. Sit, hands on the floor behind you, feet flat. Lift your hips until your stomach is flat like a table.',
+  plank:  'Plank. Face the floor, on your hands and toes, arms straight, body in one straight line. The ball goes on your back.',
+  last:   'Last one. Crab again. One ball, no second chance. Hold it as long as you can.',
+};
+const TIP = {
+  bridge: { lie:'Lie on your back, knees bent, feet flat.' },
+  crab:   { hands:'Hands on the floor behind you, arms straight.', hips:'Lift your hips.', feet:'Feet flat, knees up.' },
+  plank:  { arms:'Hands under your shoulders, arms straight.', down:'Get down and face the floor.', legs:'Legs straight, knees off the floor.' },
+};
+const HIPS = { low:'Hips up.', high:'Hips down a little.' };
+let torso = new TorsoTracker();
+
+let state = 'idle', stateAt = 0;
+let hold = null, roundIdx = -1, pos = null;
+let roundMs = 0, lastTick = 0, lostSince = null, okSince = null, offSince = 0, sideSince = null, guideWhy = null, clockOnly = false;
+let stats = [];
+function freshStats(){ stats = ROUNDS.map(R => ({ pos:R.pos, sudden:!!R.sudden, held:0, best:0, drops:0, points:0, placed:0, judged:0, unjudged:0, ms:0, played:false })); }
+freshStats();
+
+function setState(s, now){
+  state = s; stateAt = now; okSince = null;
+  recPush({ k:'state', t:nowClock(), s, round:roundIdx, pos });
+  checkOrientation();
+}
+
+/* ---- setup: wait until the camera can see the body, in ANY posture ----
+   Animal Walk's rule: never gate on a pose the game does not use. All setup
+   asks is that the hips are in the picture, steady for a second. */
+const GUIDE_LINE = {
+  none:'Move back until the phone can see you. You can sit or lie down on the floor.',
+  closer:'Come a bit closer.',
+  right:'Move to your right.',
+  left:'Move to your left.',
+};
+function stepGuide(now){
+  const c = pose ? seeCheck(pose, read) : { ok:false, why:'none' };
+  guideWhy = c.ok ? null : c.why;
+  if(now - stateAt < 1500) return;                 // let the opening line land
+  if(!c.ok){ okSince = null; say(GUIDE_LINE[c.why], 1, 8000); return; }
+  if(okSince === null) okSince = now;
+  if(now - okSince >= 1000){
+    recPush({ k:'seen', t:nowClock(), c });
+    say('Got you.', 2);
+    setState('intro', now);
+  }
+}
+
+/* ---- the intro, said once per session and allowed to finish ---- */
+const INTRO = 'Here is how it works. I call a position. You hold it, side-on to the phone, and I put a ball on you. ' +
+  'Keep your hips level and the ball stays on. A soft tick means it is still there. ' +
+  'If your hips drop, you will hear it roll, lower and lower, until it falls off. If your hips are too high, the sound goes up instead. ' +
+  'The longer you keep it on without a drop, the more it is worth. You never need to look at the phone.';
+let introHeard = false, introSaid = false;
+function stepIntro(now){
+  if(now - stateAt < 1800) return;                 // after "Got you."
+  if(introHeard) return beginBrief(0, now);
+  if(!introSaid){
+    introSaid = say(INTRO, 2);
+    // no voice on this phone: do not wait for a line that will never be said
+    if(!introSaid && now - stateAt > 4000){ introHeard = true; return beginBrief(0, now); }
+    return;
+  }
+  if(voiceIdleFor() > 900 || now - stateAt > 40000){ introHeard = true; beginBrief(0, now); }
+}
+
+/* ---- rounds ---- */
+function beginBrief(i, now){
+  roundIdx = i;
+  const R = ROUNDS[i];
+  pos = R.pos; hold = null;
+  setRoll(0);
+  setState('brief', now);
+  hush();
+  say(R.sudden ? BRIEF.last : BRIEF[pos], 2);
+}
+function stepBrief(now){
+  if(now - stateAt < 1500) return;
+  if(voiceIdleFor() > 600 || now - stateAt > 25000){
+    hold = new Hold(pos, torso);           // one body ruler for the whole session
+    offSince = now; sideSince = null;
+    setState('ready', now);
+  }
+}
+/* One frame through the judge. Returns the ball's event, if any. */
+function judgeFrame(tc){
+  const ev = hold.push(tc, pose, read);
+  if(lastRecFrame && pose) lastRecFrame.j = [ hold.r && hold.r.ok ? +hold.r.tilt.toFixed(1) : null, hold.shape === null ? null : (hold.shape ? 1 : 0),
+    hold.tv === null ? null : +hold.tv.toFixed(1), +hold.ball.x.toFixed(3), hold.ball.on ? 1 : 0 ];
+  return ev;
+}
+/* What to say to someone who has no ball: the first thing to fix. Shape first,
+   then the hips. Never more than one line, and dropped if the voice is busy. */
+function coach(now){
+  const side = hold.b && hold.b.spread !== null && hold.b.spread > TUNE.SIDE_WARN;
+  if(side){ if(sideSince === null) sideSince = now; } else sideSince = null;
+  if(sideSince !== null && now - sideSince > 3000 && say('Turn side-on to the phone.', 1, 15000)) return;
+  if(hold.shape === false && hold.form.why) return say(TIP[pos][hold.form.why], 1, 9000);
+  if(hold.shape === true && hold.tv !== null && Math.abs(hold.tv) > TUNE.LEVEL) return say(hold.tv > 0 ? HIPS.low : HIPS.high, 1, 6000);
+}
+function seenNow(){ return !!(pose && (read(pose, J.hipA) || read(pose, J.hipB))); }
+
+/* Waiting for the first ball. The round starts the moment it goes on, or after
+   20 s regardless, with the clock running and no ball. */
+function stepReady(now, tc, fresh){
+  let ev = null;
+  if(fresh) ev = judgeFrame(tc);
+  if(ev && ev.e === 'on') return startPlay(now, true);
+  if(!seenNow()){ if(now - stateAt > 6000) say('I can\'t see you. Come where the phone can see you.', 1, 12000); }
+  else if(now - stateAt > 5000) coach(now);
+  if(now - stateAt > READY_MAX_MS) return startPlay(now, false);
+}
+function startPlay(now, withBall){
+  sfx(withBall ? 'on' : 'go');
+  say(withBall ? 'Ball\'s on.' : 'The clock is running. Get level and the ball goes on.', 2);
+  roundMs = 0; lastTick = now; lostSince = null; offSince = now; clockOnly = !withBall;
+  stats[roundIdx].played = true;
+  setState('play', now);
+}
+
+function stepPlay(now, tc, fresh){
+  const R = ROUNDS[roundIdx], S = stats[roundIdx], ball = hold.ball;
+  // the clock only runs while the camera can see the player
+  const seen = seenNow();
+  const dtFrame = Math.min(100, now - lastTick);
+  if(seen){ roundMs += dtFrame; lostSince = null; }
+  else {
+    if(lostSince === null) lostSince = now;
+    if(now - lostSince > 3000) say('I have lost you. Come back where I can see you.', 1, 12000);
+  }
+  lastTick = now;
+
+  if(fresh){
+    const ev = judgeFrame(tc);
+    if(hold.shape === null || (hold.shape && hold.tv === null)) S.unjudged++; else S.judged++;
+    if(ev){
+      if(ev.e !== 'tick') recPush({ k:'ball', t:Math.round(tc), e:ev.e, side:ev.side, n:ev.n, tilt:hold.tv, x:ball.x, round:roundIdx });
+      if(ev.e === 'on'){ sfx('on'); say('Ball\'s on.', 1, 0); }
+      else if(ev.e === 'tick') sfx('tick');
+      else if(ev.e === 'mark'){ sfx('chime'); say(String(ev.n), 1, 0); }
+      else if(ev.e === 'drop'){
+        sfx('drop'); offSince = now;
+        if(R.sudden){ copyStats(); return endRound(now, 'That was the ball.'); }
+        say('Dropped.', 1, 0);
+      }
+    }
+  }
+  setRoll(ball.on ? ball.x : 0);
+  // words only when the sound has had its chance
+  if(ball.on){ if(Math.abs(ball.x) > 0.45) say(ball.x < 0 ? HIPS.low : HIPS.high, 1, 5000); }
+  else if(seen && now - offSince > 3000) coach(now);
+  copyStats();
+  if(roundMs >= R.dur*1000) endRound(now, (R.sudden && ball.placed && !ball.drops) ? 'Time. You never dropped it.' : null);
+}
+function copyStats(){
+  const S = stats[roundIdx], b = hold.ball;
+  S.held = b.held; S.best = b.best; S.drops = b.drops; S.points = b.points; S.placed = b.placed; S.ms = roundMs;
+}
+function endRound(now, line){
+  sfx('done'); setRoll(0);
+  recPush({ k:'roundEnd', t:nowClock(), round:roundIdx, stats:JSON.parse(JSON.stringify(stats[roundIdx])) });
+  if(roundIdx >= ROUNDS.length-1) return finish(now, line);
+  hush(); say((line ? line + ' ' : '') + 'Good. Rest.', 2);
+  setState('rest', now);
+}
+function stepRest(now){ if(now - stateAt >= REST_MS) beginBrief(roundIdx+1, now); }
+
+function totals(){
+  const held = stats.reduce((a,s) => a + s.held, 0), points = stats.reduce((a,s) => a + s.points, 0);
+  let best = null; for(const s of stats) if(!best || s.best > best.best) best = s;
+  return { held, points, best };
+}
+function finish(now, line){
+  setState('end', now);
+  const t = totals();
+  hush();
+  say((line ? line + ' ' : '') + 'That is it. You kept the ball on for ' + Math.round(t.held/1000) + ' seconds.' +
+    (t.best && t.best.best >= 1000 ? ' Your longest hold was ' + Math.round(t.best.best/1000) + ' seconds, in the ' + SHOWN[t.best.pos].toLowerCase() + '.' : '') + ' Well done.', 2);
+  renderEnd();
+}
+
+function step(now, tc, fresh){
+  switch(state){
+    case 'guide': return stepGuide(now);
+    case 'intro': return stepIntro(now);
+    case 'brief': return stepBrief(now);
+    case 'ready': return stepReady(now, tc, fresh);
+    case 'play':  return stepPlay(now, tc, fresh);
+    case 'rest':  return stepRest(now);
+  }
+}
+
+/* ================= drawing =================
+   The screen is a bonus, not the channel. Big type, few words. */
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+const C = { good:'#8fd694', warn:'#e6b85c', off:'#9fb0a4', blind:'#6c7a70', ink:'#ece6d6', soft:'#cfc8b6', accent:'#e58f4f' };
+function bigText(s, y, size, color){
+  ctx.font = `750 ${Math.round(size)}px ui-sans-serif,system-ui,sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = Math.max(4, size*0.12); ctx.strokeStyle = 'rgba(8,10,9,.85)'; ctx.lineJoin = 'round';
+  ctx.strokeText(s, W/2, y); ctx.fillStyle = color || C.ink; ctx.fillText(s, W/2, y);
+}
+function cornerText(s, x, y, size, align, color){
+  ctx.font = `700 ${Math.round(size)}px ui-sans-serif,system-ui,sans-serif`;
+  ctx.textAlign = align; ctx.textBaseline = 'top';
+  ctx.lineWidth = Math.max(3, size*0.1); ctx.strokeStyle = 'rgba(8,10,9,.85)'; ctx.lineJoin = 'round';
+  ctx.strokeText(s, x, y); ctx.fillStyle = color || C.ink; ctx.fillText(s, x, y);
+}
+function drawSkeleton(color){
+  if(!pose) return;
+  ctx.lineCap = 'round'; ctx.lineWidth = Math.max(4, H*0.012); ctx.strokeStyle = color;
+  for(const [a,b] of BONES){
+    const p = pose[a], q = pose[b];
+    if(!p || !q || (p.visibility||1) < 0.35 || (q.visibility||1) < 0.35) continue;
+    const P = px(p), Q = px(q);
+    ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(Q.x, Q.y); ctx.stroke();
+  }
+  const n = pose[0];
+  if(n && (n.visibility||1) >= 0.35){ const N = px(n); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(N.x, N.y, Math.max(6, H*0.02), 0, 7); ctx.fill(); }
+}
+/* The body line the hips are measured against, and the ball riding on the torso. */
+function drawBall(){
+  const b = hold && hold.b; if(!b || !b.S || !b.H || !read) return;
+  const Q = pos === 'plank' ? b.A : b.K;
+  const S = pxR(b.S), Hp = pxR(b.H);
+  if(Q && hold.shape){
+    const q = pxR(Q);
+    ctx.save(); ctx.setLineDash([H*0.02, H*0.02]); ctx.lineWidth = Math.max(2, H*0.005); ctx.strokeStyle = 'rgba(236,230,214,.7)';
+    ctx.beginPath(); ctx.moveTo(S.x, S.y); ctx.lineTo(q.x, q.y); ctx.stroke(); ctx.restore();
+  }
+  if(!hold.ball.on) return;
+  const tl = Math.hypot(Hp.x-S.x, Hp.y-S.y), r = Math.max(10, tl*0.16);
+  // sits over the middle of the torso and rolls toward the hips when they are low, toward the shoulders when high
+  const k = 0.55 - hold.ball.x*0.45;
+  const cx = S.x + (Hp.x-S.x)*Math.max(0.05, Math.min(1.05, k)), cy = S.y + (Hp.y-S.y)*Math.max(0.05, Math.min(1.05, k)) - r*1.25;
+  ctx.fillStyle = Math.abs(hold.ball.x) > 0.02 ? C.warn : C.good;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+  ctx.lineWidth = Math.max(2, r*0.12); ctx.strokeStyle = 'rgba(8,10,9,.8)'; ctx.stroke();
+}
+const GUIDE_SHORT = { none:'Move back', closer:'Come closer', right:'Move right', left:'Move left' };
+
+function paint(now){
+  ctx.fillStyle = '#0e1310'; ctx.fillRect(0, 0, W, H);
+  const sb = document.getElementById('bSaveNow');
+  if(sb) sb.style.display = (state === 'idle' || state === 'end') ? 'none' : 'block';
+  if(state === 'idle' || state === 'end') return;
+  if(video.readyState >= 2){
+    const f = videoFit();
+    ctx.save(); ctx.globalAlpha = 0.35; ctx.translate(f.dx + f.dw, f.dy); ctx.scale(-1, 1);
+    try { ctx.drawImage(video, 0, 0, f.dw, f.dh); } catch(e){}
+    ctx.restore();
+  }
+  const big = Math.min(H*0.20, W*0.11), mid = Math.min(H*0.10, W*0.06), small = Math.min(H*0.07, W*0.04);
+  const live = (state === 'play' || state === 'ready') && hold;
+  let skel = C.off;
+  if(live){
+    const ball = hold.ball;
+    skel = hold.shape === null ? C.blind : ball.on ? (Math.abs(ball.x) > 0.02 ? C.warn : C.good) : C.off;
+  }
+  drawSkeleton(skel);
+  if(live) drawBall();
+
+  if(state === 'guide'){
+    bigText(guideWhy ? GUIDE_SHORT[guideWhy] : 'Hold still', H*0.22, big);
+    bigText('until the phone can see you', H*0.36, small, C.soft);
+  } else if(state === 'intro'){
+    bigText('Listen', H*0.22, big);
+    bigText('tick: ball on   lower: hips up   higher: hips down', H*0.36, small, C.soft);
+  } else if(state === 'brief' || state === 'ready'){
+    const R = ROUNDS[roundIdx];
+    bigText(R.sudden ? 'Last ball: Crab' : SHOWN[pos], H*0.20, R.sudden ? big*0.8 : big, C.accent);
+    bigText(state === 'ready' ? 'Get level. The ball goes on by itself.' : 'Round ' + (roundIdx+1) + ' of ' + ROUNDS.length, H*0.34, small, C.soft);
+  } else if(state === 'play'){
+    const R = ROUNDS[roundIdx], ball = hold.ball;
+    // the hold in seconds, large, left; position name and what the ball is doing, top centre
+    cornerText(String(Math.floor(ball.streak/1000)), W*0.04, H*0.16, big*1.15, 'left', ball.on ? C.ink : C.blind);
+    if(ball.on && ball.mult() > 1) cornerText('×' + ball.mult(), W*0.04, H*0.16 + big*1.2, mid, 'left', C.good);
+    cornerText(SHOWN[pos] + (R.sudden ? ' · last ball' : ''), W*0.04, H*0.04, small, 'left', C.accent);
+    const left = Math.max(0, Math.ceil(R.dur - roundMs/1000));
+    cornerText(left + ' s', W*0.96, H*0.16, mid, 'right', C.soft);
+    let msg = null, col = C.warn;
+    if(lostSince !== null && now - lostSince > 1500) msg = 'I can\'t see you';
+    else if(ball.on && ball.x < -0.02) msg = 'Hips up';
+    else if(ball.on && ball.x > 0.02) msg = 'Hips down';
+    else if(!ball.on && hold.shape === false && hold.form.why) msg = TIP[pos][hold.form.why];
+    else if(!ball.on && hold.shape && hold.tv !== null && Math.abs(hold.tv) > TUNE.LEVEL) msg = hold.tv > 0 ? 'Hips up' : 'Hips down';
+    else if(!ball.on){ msg = 'No ball. Get level.'; col = C.soft; }
+    if(msg) bigText(msg, H*0.86, msg.length > 22 ? small : mid, col);
+    ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(W*0.03, H*0.955, W*0.94, H*0.018);
+    ctx.fillStyle = C.accent; ctx.fillRect(W*0.03, H*0.955, W*0.94*Math.min(1, roundMs/1000/R.dur), H*0.018);
+  } else if(state === 'rest'){
+    bigText('Rest', H*0.20, big, C.good);
+    const nx = ROUNDS[roundIdx+1];
+    if(nx) bigText('Next: ' + (nx.sudden ? 'last ball, Crab' : SHOWN[nx.pos]), H*0.34, mid, C.soft);
+    bigText(String(Math.max(0, Math.ceil((REST_MS - (now - stateAt))/1000))), H*0.58, big);
+  }
+}
+
+/* ================= end screen ================= */
+function renderEnd(){
+  show('sEnd');
+  const sec = ms => (ms/1000).toFixed(ms < 9950 ? 1 : 0) + ' s';
+  const rows = stats.map(s => {
+    if(!s.played) return `<tr><td class="l">${SHOWN[s.pos]}${s.sudden ? ' (last ball)' : ''}</td><td colspan="4">not played</td></tr>`;
+    const seen = s.judged + s.unjudged ? Math.round(100*s.judged/(s.judged + s.unjudged)) + '%' : '—';
+    return `<tr><td class="l">${SHOWN[s.pos]}${s.sudden ? ' (last ball)' : ''}</td><td>${sec(s.held)}</td><td>${sec(s.best)}</td><td>${s.drops}</td><td>${Math.round(s.points)}</td><td>${seen}</td></tr>`;
+  }).join('');
+  const t = totals();
+  document.getElementById('big').textContent = `${Math.round(t.held/1000)} s with the ball · longest ${Math.round((t.best ? t.best.best : 0)/1000)} s · ${Math.round(t.points)} points`;
+  document.getElementById('results').innerHTML =
+    `<table><tr><th></th><th>Ball on</th><th>Longest hold</th><th>Drops</th><th>Points</th><th>Judged</th></tr>${rows}</table>
+     <p class="sub">“Ball on” is the work you did: seconds in the position with your hips level. Points are those seconds, worth double after ten unbroken and triple after twenty. “Judged” is the share of the round the camera could read you; time it could not is frozen, never counted for or against you.</p>`;
+}
+function show(id){ for(const s of ['sTitle','sEnd']){ const el = document.getElementById(s); if(el) el.classList.toggle('on', s === id); } }
+function saveRecording(){
+  recPush({ k:'end', t:nowClock(), stats, dropped:recDropped });
+  const blob = new Blob([rec.map(o => JSON.stringify(o)).join('\n')], { type:'application/x-ndjson' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'balance-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ================= boot and the loop ================= */
+function loop(){
+  requestAnimationFrame(loop);
+  const now = performance.now();
+  let fresh = false, tc = now;
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    let res = null;
+    try { res = landmarker.detectForVideo(video, now); } catch(e){}
+    tc = captureToClock(video.currentTime, performance.now());
+    const lm = res && res.landmarks && res.landmarks[0];
+    pose = (lm && lm.length >= 29) ? lm : null;
+    if(pose) recFrame(tc, pose); else { lastRecFrame = null; recPush({ k:'nf', t:Math.round(tc) }); }
+    fresh = true;
+  }
+  try { step(now, tc, fresh); } catch(e){ recPush({ k:'err', t:now, e:String(e && e.stack || e) }); if(window.__BAL_STRICT__) throw e; }
+  paint(now);
+}
+
+async function begin(){
+  const err = document.getElementById('err');
+  err.textContent = '';
+  // fullscreen, sound and speech must be asked for inside the tap, before any await
+  try { const el = document.documentElement, fs = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(fs){ const p = fs.call(el); if(p && p.catch) p.catch(() => {}); } } catch(e){}
+  initAudio(); try { await AC.resume(); } catch(e){}
+  initVoice();
+  show(null);
+  resize();
+  setState('guide', performance.now());
+  say('Put the phone on its side, on the floor, facing the room. Then get down about two steps back, side-on to it.', 2);
+  try {
+    await startCamera();
+    await loadTracker();
+  } catch(e){
+    setState('idle', performance.now()); show('sTitle');
+    err.textContent = 'Could not start the camera or the tracker: ' + (e && e.message || e) + '. Check camera permission and try again.';
+    return;
+  }
+  read = makeReader(aspectNow());
+  recHeader();
+  keepAwake();
+}
+function again(){
+  freshStats(); roundIdx = -1; pos = null; hold = null; introSaid = false; setRoll(0);
+  show(null); setState('guide', performance.now());
+  say('Get back where the phone can see you.', 2);
+}
+document.getElementById('bGo').addEventListener('click', begin);
+document.getElementById('bAgain').addEventListener('click', again);
+document.getElementById('bSave').addEventListener('click', saveRecording);
+document.getElementById('bSaveNow').addEventListener('click', saveRecording);
+resize();
+requestAnimationFrame(loop);
+
+// test hooks: read-only peeks plus a fast-forward for the harness
+window.__bal = {
+  peekState: () => state, peekRound: () => roundIdx, peekPos: () => pos,
+  peekStats: () => JSON.parse(JSON.stringify(stats)),
+  peekBall: () => hold ? { on:hold.ball.on, x:hold.ball.x, streak:hold.ball.streak, held:hold.ball.held, drops:hold.ball.drops, shape:hold.shape, tv:hold.tv, why:hold.form.why } : null,
+  peekRoll: () => rollNow, peekSpeaking: () => speaking, peekRec: () => rec.length, peekSfx: () => sfxLog.slice(),
+  endRoundNow: () => { if(state === 'play') roundMs = ROUNDS[roundIdx].dur*1000; },
+  skipRest: () => { if(state === 'rest') stateAt = -1e9; },
+  rollFreq, rollLevel, TUNE, J, ROUNDS,
+};
+</script>
+</body>
+</html>
