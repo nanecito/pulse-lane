@@ -1,0 +1,1088 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#08130f">
+<title>Keeper 4</title>
+<style>
+  :root{ --ink:#08130f; --pitch:#123524; --warm:#f4efe4; --dim:#9fb8aa;
+         --hand:#ff8a2a; --foot:#5be37d; --duck:#ff4d5e; --gold:#ffd166; --bad:#ff5c5c; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--warm);
+    font-family:Georgia,'Times New Roman',serif;overflow:hidden;overscroll-behavior:none}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  /* Everything read from the mark is sized in vh, not px. */
+  .ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;justify-content:safe center;padding:3vh 3vw;text-align:center;gap:1.6vh;
+    overflow-y:auto;overscroll-behavior:contain;
+    background:radial-gradient(130% 95% at 50% 15%,#1d4a33 0%,var(--ink) 70%);z-index:5}
+  .ov[hidden]{display:none}
+  #oFit{background:radial-gradient(130% 95% at 50% 15%,rgba(29,74,51,.45) 0%,rgba(8,19,15,.65) 70%)}
+  h1{font-size:clamp(28px,12vh,88px);margin:0;letter-spacing:.14em;font-weight:400;line-height:1.05}
+  h1 .g{color:var(--hand)}
+  .sub{color:var(--dim);font-size:clamp(14px,3.6vh,24px);line-height:1.45;max-width:40ch;margin:0}
+  .big{font-size:clamp(20px,7vh,56px);letter-spacing:.06em;margin:0;color:var(--gold)}
+  .k1{color:var(--hand)} .k2{color:var(--foot)} .k3{color:var(--duck)}
+  button{font:inherit;font-size:clamp(17px,4.2vh,30px);letter-spacing:.05em;padding:1.6vh 5vw;
+    border-radius:999px;border:2px solid var(--hand);background:var(--hand);color:#2a1200;cursor:pointer}
+  button.ghost{background:transparent;color:var(--hand)}
+  button:disabled{opacity:.45}
+  .row{display:flex;gap:2vw;flex-wrap:wrap;justify-content:center}
+  .note{color:var(--dim);font-size:clamp(11px,2.3vh,16px);max-width:52ch;line-height:1.4;margin:0}
+  .err{color:var(--bad);font-size:clamp(12px,2.6vh,18px);max-width:34ch;line-height:1.4}
+  /* THE BAND: the one line he reads from the mark. Plate behind it. */
+  #band{position:fixed;left:0;right:0;top:4vh;text-align:center;z-index:4;pointer-events:none;
+    text-shadow:0 3px 14px #000;padding:1vh 0 1.2vh;
+    background:linear-gradient(90deg,rgba(8,19,15,0),rgba(8,19,15,.78) 20%,rgba(8,19,15,.78) 80%,rgba(8,19,15,0))}
+  #band[hidden]{display:none}
+  #bandA{display:block;font-size:clamp(24px,10vh,80px);letter-spacing:.1em;color:var(--gold);line-height:1}
+  #bandB{display:block;font-size:clamp(13px,3.6vh,26px);color:var(--warm);margin-top:.8vh}
+  table{border-collapse:collapse;font-size:clamp(13px,3.2vh,22px)}
+  td{padding:.3vh 2vw}
+  td.k{color:var(--dim);text-align:right}
+  td.v{text-align:left;color:var(--gold)}
+  #score{font-size:clamp(50px,22vh,190px);color:var(--hand);line-height:1}
+  #tools{position:fixed;left:1vw;bottom:1vh;z-index:4;display:flex;gap:1vw}
+  #tools[hidden]{display:none}
+  button.mini{font-size:clamp(11px,2.2vh,15px);padding:.8vh 2.4vw;opacity:.75}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="band" hidden><b id="bandA"></b><span id="bandB"></span></div>
+<div id="tools" hidden><button id="bSaveNow" class="ghost mini">Save recording</button><button id="bSkipStep" class="ghost mini">Skip step</button></div>
+
+<div class="ov" id="oRot" hidden>
+  <h1>TURN YOUR<br><span class="g">PHONE</span></h1>
+  <p class="sub">Sideways. A phone camera is landscape whatever you do with it.</p>
+</div>
+
+<div class="ov" id="oStart">
+  <h1>KEE<span class="g">PER</span></h1>
+  <p class="sub">Balls are thrown at you. Each one shows where it will land. Get there first:
+    <span class="k1">orange</span> with a hand, <span class="k2">green</span> with a foot, and squat under the <span class="k3">red</span>.</p>
+  <div class="row"><button id="bStart">Play</button></div>
+  <p class="note" id="loadMsg" hidden>Starting the camera…</p>
+  <p class="err" id="errMsg" hidden></p>
+  <p class="note">Two minutes. Prop the phone sideways at hip height, tap once, then step back; it talks you into place. Nothing leaves your phone.</p>
+</div>
+
+<div class="ov" id="oFit" hidden>
+  <h1 id="fitBig">FIND YOUR<br><span class="g">SPOT</span></h1>
+  <p class="big" id="fitMsg">Looking for you…</p>
+  <div class="row"><button id="bSkip" class="ghost">Start anyway</button></div>
+  <p class="note" id="fitNote">It needs to see you head to feet, with room for your arms out.</p>
+</div>
+
+<div class="ov" id="oEnd" hidden>
+  <p class="big" id="endTag">SAVED</p>
+  <div><span id="score">0</span></div>
+  <table id="endRows"></table>
+  <div class="row"><button id="bAgain">Play again</button><button id="bSave" class="ghost">Save recording</button></div>
+  <p class="note" id="endNote"></p>
+</div>
+
+<script type="module">
+import { FilesetResolver, PoseLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12";
+
+/*====== sim.js ======*/
+/* ==================================================================
+   KEEPER — balls are thrown at you; stop them with your hands and feet,
+   duck the ones aimed at your head. No DOM in this block; the Node
+   simulation extracts it between the markers and plays it.
+
+   THE LATENCY RULE (doc 01) decides the whole design. The camera sees
+   the body 150-250 ms late, so nothing here is a reflex test. Every ball
+   shows WHERE it will land the moment it is thrown, 1.4-2.1 s ahead, and
+   a ring closes on that spot as it comes. The player reads it, gets the
+   hand (or foot, or head) there EARLY, and the game only asks one
+   question afterwards: was the limb in place while the ball arrived?
+   That is a judgment over a window of camera samples in BODY time, so
+   the pipeline delay cancels out of it instead of being charged.
+
+   Three movements, one meaning each (doc 00, Six O'Clock):
+     orange ball  -> a HAND goes to the ring          (block)
+     green ball   -> a FOOT steps out to the ring     (block)
+     red ball     -> squat under it                   (duck)
+
+   Positions are BODY FRAME: torso units from the player's own hip
+   centre, +x to the screen right, +y up. Scale-free and position-free.
+   A target is frozen in the camera frame at the moment it is thrown, so
+   the player has to travel to it (Sparks' rule).
+   ================================================================== */
+const K = {
+  ROUND_S: 120,
+  PRE_S: 0.40, POST_S: 0.25,   // the judging window around arrival, BODY time
+  HAND_R: 0.42,                // torso units (Sparks' HIT_R)
+  FOOT_R: 0.32,               /* BUILD 2: 0.36 -> 0.32, with the ring brought in; feet ~1.3 torsos apart would cover both rings */
+  FOOT_OUT: 0.70,              /* foot ring: this far OUTSIDE the player's own standing ankle.
+                                  BUILD 2: 0.95 -> 0.70. Hugo's first recording: on all 15 green balls his
+                                  best ankle fell SHORT of the ring, by 0.12-0.65 torso; 8 of 15 saved.
+                                  Replayed against 0.70 / 0.32, the same moves save 12 of 15. */
+  FOOT_UP: 0.08,               //   and a touch above it
+  DUCK_SQ: 0.55,               // squat fraction that clears a head ball
+  MIN_N: 2, MIN_FRAC: 0.5,     // readable samples needed to call a HIT (doc 01: blindness credits nobody)
+  TELE_S0: 2.1, TELE_S1: 1.35, // throw -> arrival, start of round -> end
+  GAP_S0: 2.3, GAP_S1: 1.05,   // arrival -> next arrival
+  JIT: 0.12,                   // each hand ring is jittered this much (torso units) so no fixed pose covers it
+  // what unlocks when, as a fraction of the round
+  FOOT_AT: 0.08, ROWS_AT: 0.15, DUCK_AT: 0.15, PAIR_AT: 0.40, PAIR_P: 0.30,
+  MIX: { hand: 0.50, foot: 0.25, duck: 0.25 },
+  STREAK_STEP: 5,              // every 5 in a row: +1 to the multiplier, up to x3
+};
+/* Hand rings, inside the envelope Sparks Close PROVED on Hugo's body
+   (doc 18: arm targets never past 1.25 torsos from the shoulder). The
+   low row is a reach down and out that needs the knees: legs work. */
+const HAND_T = [
+  { id:'mid-L',  bx:-1.30, by: 0.35, row:'mid'  }, { id:'mid-R',  bx: 1.30, by: 0.35, row:'mid'  },
+  { id:'wide-L', bx:-1.45, by: 1.05, row:'wide' }, { id:'wide-R', bx: 1.45, by: 1.05, row:'wide' },
+  { id:'high-L', bx:-0.85, by: 1.70, row:'high' }, { id:'high-R', bx: 0.85, by: 1.70, row:'high' },
+  /* BUILD 4: the low row is gone. Its rings sat low and out to the side,
+     ~0.6 torso from where a green foot ring lands, so the place on screen
+     said 'foot' while the colour said 'hand'. Hugo: "I get confused with the
+     knee ones and the hand ones." In his three recordings, on 4 of the 11
+     low balls he missed his FOOT went to the ring; on 0 of 13 green misses
+     did a hand. One place, one meaning: the bottom of the picture is feet. */
+];
+const FOOT_T = [ { id:'foot-L', side:-1 }, { id:'foot-R', side:1 } ];
+const DUCK_T = { id:'duck' };
+const ALL_IDS = HAND_T.map(t=>t.id).concat(FOOT_T.map(t=>t.id), ['duck']);
+
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+function mulberry(seed){ let a = seed>>>0; return function(){
+  a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a>>>15, 1 | a);
+  t = t + Math.imul(t ^ t>>>7, 61 | t) ^ t; return ((t ^ t>>>14) >>> 0) / 4294967296; }; }
+const lerp = (a,b,u) => a + (b-a)*u;
+
+/* Body-frame position of a ring. Foot rings come from the player's own
+   standing ankle (measured, never typed): ank = {L:{bx,by}, R:{bx,by}}. */
+function ringBody(tid, ank, rng){
+  const h = HAND_T.find(t=>t.id===tid);
+  if(h){ const j = rng ? K.JIT : 0;
+    return { bx: h.bx + (rng ? (rng()*2-1)*j : 0), by: h.by + (rng ? (rng()*2-1)*j : 0) }; }
+  const f = FOOT_T.find(t=>t.id===tid);
+  if(f){ const a = (f.side<0 ? ank.L : ank.R) || { bx: f.side*0.30, by: -1.65 };
+    return { bx: a.bx + f.side*K.FOOT_OUT, by: a.by + K.FOOT_UP }; }
+  return null;   // duck: no ring on the body, a ball at the head
+}
+
+function makeWorld(seed, allowed){
+  return { t:0, rng:mulberry(seed||1), seed:seed||1, n:0, balls:[], events:[],
+    allowed: new Set(allowed || ALL_IDS), nextArr: 3.0, lastId:'', lastSide:0,
+    score:0, streak:0, best:0, mult:1,
+    tally:{ thrown:0, block:0, hit:0, unscored:0, skipped:0,
+            hand:[0,0], foot:[0,0], duck:[0,0] } };   // [blocked, thrown-and-judged]
+}
+function difficulty(w){ return clamp(w.t / K.ROUND_S, 0, 1); }
+
+/* Choose the next throw. Returns a list (a pair is two hand balls at once). */
+function pickThrow(w){
+  const d = difficulty(w), r = w.rng, A = w.allowed;
+  const can = id => A.has(id) && id !== w.lastId;
+  const handOk = HAND_T.filter(t => can(t.id) && (t.row==='mid' || t.row==='wide' || d >= K.ROWS_AT));
+  const footOk = d >= K.FOOT_AT ? FOOT_T.filter(t => can(t.id)) : [];
+  const duckOk = d >= K.DUCK_AT && can('duck');
+  let m = { hand: handOk.length ? K.MIX.hand : 0, foot: footOk.length ? K.MIX.foot : 0, duck: duckOk ? K.MIX.duck : 0 };
+  const tot = m.hand + m.foot + m.duck; if(!tot) return [];
+  let u = r()*tot;
+  const side = t => (t.side !== undefined ? t.side : (t.bx < 0 ? -1 : 1));
+  // prefer the other side from last time: more travel, more reading
+  const pickFrom = list => { const other = list.filter(t => side(t) !== w.lastSide);
+    const L = other.length && r() < 0.7 ? other : list; return L[Math.floor(r()*L.length)]; };
+  if((u -= m.hand) < 0){
+    const a = pickFrom(handOk);
+    if(d >= K.PAIR_AT && r() < K.PAIR_P){
+      const b = handOk.filter(t => side(t) !== side(a) && t.row !== a.row);
+      if(b.length) return [a.id, b[Math.floor(r()*b.length)].id];
+    }
+    return [a.id];
+  }
+  if((u -= m.foot) < 0) return [pickFrom(footOk).id];
+  return ['duck'];
+}
+
+/* Advance the clock. inp.paused: the body is lost or out of place, so
+   nothing new is thrown (doc 01: a gate that trips mid-run stops placing
+   new work). Balls already in the air are judged on what was seen. */
+function stepWorld(w, dt, inp){
+  /* never more than a frame's worth at once: a clock jump must not become
+     a burst of throws (it did, once, in the first render) */
+  w.t += Math.min(dt, 0.25);
+  if(w.t >= K.ROUND_S - 0.5) return;
+  const d = difficulty(w);
+  const tele = lerp(K.TELE_S0, K.TELE_S1, d);
+  if(inp && inp.paused){ if(w.nextArr - tele < w.t) w.nextArr = w.t + tele; return; }
+  if(w.t >= w.nextArr - tele){
+    const ids = pickThrow(w);
+    const arr = w.nextArr;
+    for(const id of ids){
+      const b = { id:w.n++, tid:id, kind: id==='duck' ? 'duck' : (id.startsWith('foot') ? 'foot' : 'hand'),
+        launchT: w.t, arrT: arr, teleS: arr - w.t, state:'air', v:null, jit:[w.rng(), w.rng()] };
+      w.balls.push(b); w.events.push({ k:'launch', b }); w.tally.thrown++;
+      w.lastId = id; w.lastSide = id==='duck' ? 0 : (id.endsWith('L') ? -1 : 1);
+    }
+    w.nextArr = arr + lerp(K.GAP_S0, K.GAP_S1, d) * (ids.length > 1 ? 1.35 : 1);
+  }
+}
+
+/* THE JUDGMENT. Samples carry BODY time (capture time, i.e. the frame
+   time minus the pipeline delay) and positions in camera-frame units:
+     s = { t, wr:[{x,y}|null, {x,y}|null], an:[...], sq:number|null }
+   b.at {x,y}: the ring, frozen in the camera frame; b.ar, b.scale.
+   A BLOCK is final the moment one sample shows the limb inside the ring
+   during the window. A HIT is only called once the window is complete
+   (a sample later than its end has arrived) AND the limbs that could
+   have blocked were actually seen for enough of it. Otherwise UNSCORED.
+   Never a player failure for what the camera did not see. */
+function ringDist(b, p){ return Math.hypot((p.x - b.at.x)*b.ar, p.y - b.at.y) / b.scale; }
+function judgeBall(b, samples, latestT, force){
+  const lo = b.arrT - K.PRE_S, hi = b.arrT + K.POST_S;
+  const win = samples.filter(s => s.t >= lo && s.t <= hi);
+  const R = b.kind === 'foot' ? K.FOOT_R : K.HAND_R;
+  let best = Infinity, seen = [0,0], sqSeen = 0, bestSq = 0;
+  for(const s of win){
+    if(b.kind === 'duck'){
+      if(s.sq !== null && s.sq !== undefined){ sqSeen++; bestSq = Math.max(bestSq, s.sq);
+        if(s.sq >= K.DUCK_SQ) return { v:'block', t:s.t, d:s.sq }; }
+      continue;
+    }
+    const L = b.kind === 'foot' ? s.an : s.wr;
+    for(let i=0;i<2;i++){ const p = L[i]; if(!p) continue; seen[i]++;
+      const dd = ringDist(b, p); if(dd < best) best = dd;
+      if(dd <= R) return { v:'block', t:s.t, d:dd, limb:i }; }
+  }
+  if(!(latestT > hi) && !force) return null;           // the evidence is not all in yet
+  const need = Math.max(K.MIN_N, Math.ceil(K.MIN_FRAC * win.length));
+  if(b.kind === 'duck') return sqSeen >= need ? { v:'hit', d:bestSq } : { v:'unscored', why:'body not seen' };
+  /* both limbs could have blocked, so both must have been seen to call
+     it a hit: a visible hand cannot vouch for one the camera lost */
+  if(seen[0] >= need && seen[1] >= need) return { v:'hit', d:best };
+  return { v:'unscored', why: b.kind==='foot' ? 'feet not seen' : 'hands not seen', d:best };
+}
+
+/* score and counts. Score is a game number; the tally is the work. */
+function settle(w, b, res){
+  b.v = res.v; b.res = res; b.state = res.v;
+  const T = w.tally;
+  if(res.v === 'unscored'){ T.unscored++; w.events.push({ k:'unscored', b }); return; }
+  T[b.kind][1]++;
+  if(res.v === 'block'){
+    T.block++; T[b.kind][0]++; w.streak++; w.best = Math.max(w.best, w.streak);
+    w.mult = Math.min(3, 1 + Math.floor(w.streak / K.STREAK_STEP));
+    w.score += 100 * w.mult; w.events.push({ k:'block', b, mult:w.mult });
+  } else { T.hit++; w.streak = 0; w.mult = 1; w.events.push({ k:'hit', b }); }
+}
+const SIM = { K, HAND_T, FOOT_T, ALL_IDS, makeWorld, stepWorld, judgeBall, settle, ringBody, ringDist, pickThrow, mulberry, clamp, difficulty };
+/*====== endsim ======*/
+
+
+/*====== signal.js ======*/
+/* ---- the landmark reader, lifted from Sparks / Tail Gunner unchanged ---- */
+const VIS_GET = 0.15, VIS_KEEP = 0.04;
+const J = { nose:0, earA:7, earB:8, shA:11, shB:12, elA:13, elB:14, wrA:15, wrB:16,
+            hipA:23, hipB:24, knA:25, knB:26, ankA:27, ankB:28 };
+function makeReader(){
+  const latch = {};
+  return function(pose, i){
+    if(!pose || !pose[i]){ latch[i] = false; return null; }
+    const p = pose[i];
+    const v = (p.visibility === undefined) ? 1 : p.visibility;
+    const thr = latch[i] ? VIS_KEEP : VIS_GET;
+    if(v < thr){ latch[i] = false; return null; }
+    latch[i] = true;
+    return { x: 1 - p.x, y: p.y, v };       // mirrored, normalised to the frame, y DOWN
+  };
+}
+/* A landmark's confidence is not its being in the picture (doc 00, racing
+   builds 34 and 41): off-picture ankles come back at ~0.57. Check the
+   coordinate too. */
+const inFrame = p => !!p && p.x > 0.005 && p.x < 0.995 && p.y > 0.005 && p.y < 0.99;
+
+/* ---- the squat: Tail Gunner build 5's tracked standing reference, hips
+   only, seeded only from an UPRIGHT frame, re-seeded if it reads an
+   impossible drop for 1.5 s. Coordinates here are aspect-corrected, y UP. */
+const SQUAT_DEPTH = 0.26;     // hip drop, in torsos, that is a full squat (racing game)
+const REF_UP = 0.5, REF_DOWN = 12, REF_SHRINK = 0.10;
+function makeSquat(){
+  let hipRef = null, refTorso = 0, impossibleS = 0;
+  return {
+    reset(){ hipRef = null; refTorso = 0; impossibleS = 0; },
+    ref(){ return hipRef; },
+    read(L, dt){
+      if(!(L.shC && L.hipC)) return null;
+      const torso = Math.max(1e-6, Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y));
+      const hy = L.hipC.y, sy = L.shC.y;
+      const upright = (sy - hy) > 0.7*torso;
+      if(hipRef === null){ if(!upright) return null; hipRef = hy; refTorso = torso; impossibleS = 0; }
+      refTorso += (torso - refTorso)*Math.min(1, dt/0.6);
+      if(refTorso > 0 && (refTorso - torso)/refTorso > REF_SHRINK) hipRef = hy;   // walked back
+      hipRef = hipRef + (hy - hipRef) * Math.min(1, dt/(hy > hipRef ? REF_UP : REF_DOWN));
+      const drop = (hipRef - hy)/refTorso;
+      if(drop > 2*SQUAT_DEPTH && upright){ impossibleS += dt; if(impossibleS > 1.5){ hipRef = hy; refTorso = torso; impossibleS = 0; } }
+      else impossibleS = 0;
+      return clamp(Math.max(0, drop)/SQUAT_DEPTH, 0, 1);
+    }
+  };
+}
+/* ---- the body scale: Sparks' tracked torso, 85th percentile over 5 s of
+   UPRIGHT frames. Not the instantaneous torso: a squat or a reach down
+   foreshortens it exactly when a ring is being placed (doc 01). ---- */
+/* BUILD 2. Build 1 dropped old samples whenever the upright body read
+   smaller for 0.6 s, to follow a player who steps back. Hugo's first
+   recording: it fired every time he bent forward at the waist to a low
+   ball — a forward bend shortens the torso the camera sees exactly like a
+   step back does — and his size fell from 0.17 to as low as 0.12, in 287
+   frames under 0.15; rings and the squat were measured with it.
+   Now a torso sample counts only when it agrees with SHOULDER WIDTH (doc
+   16: a bend about a horizontal axis does not touch it): torso/width must
+   be at least 0.9 of its own recent 85th percentile. A step back shrinks
+   both, so it is still followed. Replayed on the recording: never under
+   0.152, median 0.170; a synthetic step back settles in ~4.6 s. */
+function makeScale(){
+  let buf = [], rbuf = [], scale = 0;
+  return {
+    reset(){ buf = []; rbuf = []; scale = 0; },
+    get(){ return scale; },
+    push(v, shw, t, upright){
+      if(upright && v > 0.02 && shw > 1e-4){
+        const r = v/shw; rbuf.push({ r, t });
+        while(rbuf.length && t - rbuf[0].t > 10000) rbuf.shift();
+        const rs = rbuf.map(b => b.r).sort((a,b)=>a-b), rref = rs[Math.min(rs.length-1, Math.floor(rs.length*0.85))];
+        if(r >= 0.9*rref) buf.push({ v, t });
+      }
+      while(buf.length && t - buf[0].t > 3000) buf.shift();
+      if(!buf.length) return scale || v;
+      const vs = buf.map(b => b.v).sort((a,b)=>a-b);
+      scale = vs[vs.length >> 1];
+      return scale;
+    }
+  };
+}
+/* Second Line / Tail Gunner's rotation-free side-on guard and label check. */
+function sidesOk(L){
+  if(!(L.shA&&L.shB&&L.hipA&&L.hipB)) return false;
+  const sw = L.shB.x - L.shA.x, hw = L.hipB.x - L.hipA.x;
+  const span = Math.max(Math.abs(sw), 1e-6);
+  if(sw <= 0 || hw <= -span*0.2) return false;              // labels swapped
+  const shD = Math.hypot(L.shB.x - L.shA.x, L.shB.y - L.shA.y);
+  const torso = Math.hypot(L.shC.x - L.hipC.x, L.shC.y - L.hipC.y);
+  if(!torso || shD/torso < 0.38) return false;              // turned side on
+  return true;
+}
+/*====== endsignal ======*/
+
+/* ================= camera, pose, recording ================= */
+const video = document.createElement('video');
+video.playsInline = true; video.muted = true; video.autoplay = true;
+let landmarker = null, lastVideoTime = -1, pose = null;
+const read = makeReader();
+async function loadTracker(){
+  const fs = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm");
+  const opts = dl => ({ baseOptions:{ modelAssetPath:
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    delegate: dl }, runningMode:"VIDEO", numPoses:1 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch(e){ landmarker = await PoseLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+const BUILD = 'keeper-4';
+const POSE_LATENCY_MS = 200;   /* ASSUMED, as in every game here. Used to turn
+   a frame's time into BODY time for the judgment. The simulation swept the
+   true value 150-350 ms against this assumption: saves barely move, because
+   a ring is judged over a 0.65 s window that an early player is already in. */
+const REC_CAP = 50000; const rec = []; let recDropped = 0;
+function recPush(o){ if(rec.length < REC_CAP) rec.push(o); else recDropped++; }
+function recHeader(){
+  recPush({ k:'header', t:Date.now(), iso:new Date().toISOString(), game:'keeper', build:BUILD,
+    orientation:(innerHeight>innerWidth)?'portrait':'landscape',
+    screen:{ w:innerWidth, h:innerHeight, dpr:devicePixelRatio||1 },
+    video:{ w:video.videoWidth, h:video.videoHeight },
+    ua:navigator.userAgent, cores:navigator.hardwareConcurrency||null,
+    poseLatencyMs:POSE_LATENCY_MS, K, HAND_T,
+    tune:{ SQUAT_DEPTH, REF_UP, REF_DOWN, REF_SHRINK, VIS_GET, VIS_KEEP },
+    coords:'MediaPipe normalised to the camera frame, mirrored (x=1-raw), y down. Ball rings are in the same frame.' });
+}
+const NEEDS_REC = ['nose','shA','shB','elA','elB','wrA','wrB','hipA','hipB','knA','knB','ankA','ankB'];
+
+/* ================= canvas, orientation ================= */
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W=0, H=0, DPR=1;
+function resize(){ DPR = Math.min(2, devicePixelRatio||1); W = c.clientWidth; H = c.clientHeight;
+  c.width = Math.round(W*DPR); c.height = Math.round(H*DPR); ctx.setTransform(DPR,0,0,DPR,0,0); }
+function landscapeOK(){ return innerWidth > innerHeight; }
+function checkRotation(){ if(ui && ui.oRot) ui.oRot.hidden = landscapeOK(); }
+addEventListener('resize', ()=>{ resize(); checkRotation(); });
+addEventListener('orientationchange', ()=>{ resize(); checkRotation(); });
+function videoFit(){
+  const vw = video.videoWidth||0, vh = video.videoHeight||0;
+  if(!vw||!vh) return { dx:0,dy:0,dw:W,dh:H,vw:0,vh:0 };
+  const sc = Math.min(W/vw, H/vh);
+  const dw = vw*sc, dh = vh*sc;
+  return { dx:(W-dw)/2, dy:(H-dh)/2, dw, dh, vw, vh };
+}
+function frameAR(){ const vw=video.videoWidth||4, vh=video.videoHeight||3; return vw/vh; }
+function px(p){ const f=videoFit(); return { x:f.dx+p.x*f.dw, y:f.dy+p.y*f.dh }; }
+
+/* ================= the body, once per fresh camera frame ================= */
+const squat = makeSquat(), scaleT = makeScale();
+let ankBuf = [], ankRef = null;   // the player's own standing ankles, body frame (measured, never typed)
+let headBuf = [], headRef = null; // BUILD 2: his standing head height, body frame
+function observe(raw, now, dt){
+  const ar = frameAR(), g = {};
+  const o = { ar, ok:false, g };
+  if(!raw) return o;
+  for(const k in J){ const q = read(raw, J[k]); if(q) g[k] = q; }
+  if(!(g.shA && g.shB && g.hipA && g.hipB)) return o;
+  const L = {};
+  for(const k in g) L[k] = { x:g[k].x*ar, y:-g[k].y, v:g[k].v };
+  L.hipC = { x:(L.hipA.x+L.hipB.x)/2, y:(L.hipA.y+L.hipB.y)/2 };
+  L.shC  = { x:(L.shA.x+L.shB.x)/2,  y:(L.shA.y+L.shB.y)/2 };
+  o.L = L;
+  o.hip = { x:(g.hipA.x+g.hipB.x)/2, y:(g.hipA.y+g.hipB.y)/2 };
+  o.sh  = { x:(g.shA.x+g.shB.x)/2,  y:(g.shA.y+g.shB.y)/2 };
+  o.torso = Math.hypot((o.sh.x-o.hip.x)*ar, o.sh.y-o.hip.y);
+  o.upright = (L.shC.y - L.hipC.y) > 0.7*o.torso;
+  o.facing = sidesOk(L);
+  if(o.torso < 0.03) return o;
+  o.shw = Math.hypot((g.shA.x - g.shB.x)*ar, g.shA.y - g.shB.y);
+  o.scale = scaleT.push(o.torso, o.shw, now, o.upright && o.facing);
+  o.sq = o.facing ? squat.read(L, dt) : null;
+  const hr = squat.ref();
+  o.hipRefY = hr === null ? o.hip.y : -hr;          // the STANDING hip, frame y: rings are placed from it
+  o.ok = o.facing && !!o.scale;
+  o.wr = [inFrame(g.wrA) ? g.wrA : null, inFrame(g.wrB) ? g.wrB : null];
+  o.an = [inFrame(g.ankA) ? g.ankA : null, inFrame(g.ankB) ? g.ankB : null];
+  o.head = g.nose ? { x:g.nose.x, y:g.nose.y } : { x:o.sh.x, y:o.sh.y - 0.44*o.torso };
+  /* standing ankles: only from a body upright, not squatting, both ankles
+     in the picture, and neither foot stepped out to a ring */
+  o.agree = Math.abs(o.torso - o.scale)/o.scale < 0.10;
+  if(o.ok && o.upright && o.agree && o.sq !== null && o.sq < 0.15 && g.nose){
+    headBuf.push((o.hipRefY - g.nose.y)/o.scale); if(headBuf.length > 90) headBuf.shift();
+    const hs = headBuf.slice().sort((a,b)=>a-b); headRef = hs[hs.length >> 1]; }
+  if(o.ok && o.upright && o.agree && o.sq !== null && o.sq < 0.15 && o.an[0] && o.an[1]){
+    const a = o.an.map(p => ({ bx:(p.x - o.hip.x)*ar/o.scale, by:(o.hipRefY - p.y)/o.scale })).sort((u,v)=>u.bx-v.bx);
+    if(a[0].bx < 0 && a[1].bx > 0 && a[1].bx - a[0].bx < 1.2){
+      a.sc = o.scale; ankBuf = ankBuf.filter(q => Math.abs(q.sc - o.scale)/o.scale < 0.10);
+      ankBuf.push(a); if(ankBuf.length > 90) ankBuf.shift();
+      const med = (k, i) => { const v = ankBuf.map(q=>q[i][k]).sort((x,y)=>x-y); return v[v.length>>1]; };
+      ankRef = { L:{ bx:med('bx',0), by:med('by',0) }, R:{ bx:med('bx',1), by:med('by',1) } };
+    }
+  }
+  return o;
+}
+/* body frame -> camera frame, from the standing hip */
+function toFrame(o, bx, by){ return { x: o.hip.x + bx*o.scale/o.ar, y: o.hipRefY - by*o.scale }; }
+const MARGIN = 0.02;
+function onScreen(at, rT, o, frac){
+  const m = rT * o.scale * (frac===undefined ? 1 : frac), mx = m/o.ar;
+  if(at.y - m < MARGIN) return 'above';
+  if(at.y + m > 1 - MARGIN) return 'below';
+  if(at.x - mx < MARGIN) return 'left';
+  if(at.x + mx > 1 - MARGIN) return 'right';
+  return null;
+}
+/* which balls this stance can be thrown, and where the first one that
+   cannot fits went off. One definition for the gate and the live check. */
+function stanceSet(o, frac){
+  const set = new Set(), off = {};
+  if(!o || !o.ok) return { set, off:{ all:'nobody' } };
+  for(const t of HAND_T){ const at = toFrame(o, t.bx, t.by), e = onScreen(at, K.HAND_R + K.JIT, o, frac); if(e) off[t.id] = e; else set.add(t.id); }
+  const feet = o.an[0] && o.an[1] && ankRef;
+  for(const t of FOOT_T){
+    if(!feet){ off[t.id] = 'feet'; continue; }
+    const rb = ringBody(t.id, ankRef, null), at = toFrame(o, rb.bx, rb.by), e = onScreen(at, K.FOOT_R, o, frac);
+    if(e) off[t.id] = e; else set.add(t.id);
+  }
+  if(o.g.nose && o.head.y > 0.04) set.add('duck'); else off.duck = 'above';
+  return { set, off };
+}
+const MIN_SET = ['mid-L','mid-R','wide-L','wide-R','foot-L','foot-R','duck'];
+
+/* ================= the fit gate ================= */
+let fitPrev = null;
+function fitState(o, now){
+  if(!o || !o.g || !(o.g.shA && o.g.shB && o.g.hipA && o.g.hipB)) return { ok:false, why:'nobody' };
+  if(!o.facing) return { ok:false, why:'turn' };
+  if(!o.upright) return { ok:false, why:'upright' };
+  if(!(o.an[0] && o.an[1])) return { ok:false, why:'feet' };
+  if(o.head.y < 0.03) return { ok:false, why:'high' };
+  // UPRIGHT AND STEADY (racing build 39): the reference is only seeded from this
+  let moving = false;
+  if(fitPrev){ const dt = Math.max(1e-3, (now - fitPrev.t)/1000);
+    const v = Math.hypot(o.hip.x - fitPrev.x, o.hip.y - fitPrev.y)/dt;
+    fitPrev.v = fitPrev.v*0.7 + v*0.3; moving = fitPrev.v > 0.12; fitPrev.x=o.hip.x; fitPrev.y=o.hip.y; fitPrev.t=now; }
+  else fitPrev = { x:o.hip.x, y:o.hip.y, t:now, v:0 };
+  if(moving || !o.agree) return { ok:false, why:'moving' };
+  if(!ankRef) return { ok:false, why:'still' };
+  const s = stanceSet(o, 1);
+  const miss = MIN_SET.filter(id => !s.set.has(id));
+  if(miss.length){
+    const e = s.off[miss[0]];
+    if(e === 'left') return { ok:false, why:'goRight' };
+    if(e === 'right') return { ok:false, why:'goLeft' };
+    return { ok:false, why:'back' };
+  }
+  return { ok:true, set:s.set, highOk: s.set.has('high-L') && s.set.has('high-R') };
+}
+/* the player's left is the screen's left: the picture is a mirror */
+const FIT_SAY = {
+  nobody:['STEP INTO THE PICTURE','I cannot see you yet. Step in front of the phone.'],
+  turn  :['FACE THE PHONE','Turn to face the phone.'],
+  upright:['STAND UP','Stand up straight, facing the phone.'],
+  feet  :['STEP BACK','I cannot see your feet. Step back.'],
+  high  :['STEP BACK','Your head is at the top of the picture. Step back.'],
+  moving:['HOLD STILL','Hold still a moment.'],
+  still :['HOLD STILL','Stand still so I can see where your feet are.'],
+  back  :['STEP BACK','The balls need room around you. Step back a little.'],
+  goLeft:['MOVE LEFT','Move a step to your left.'],
+  goRight:['MOVE RIGHT','Move a step to your right.'],
+  highWait:['A BIT FURTHER','One more step back and you get the high balls too.'],
+};
+
+/* ================= voice ================= */
+let voiceOn = true, lastSaidAt = 0; const saidAt = {};
+function say(text, force, cooldownMs){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  const now = performance.now(), cd = cooldownMs || 4000;
+  if(!force && ((saidAt[text] && now - saidAt[text] < cd) || now - lastSaidAt < 1500)) return;
+  saidAt[text] = now; lastSaidAt = now;
+  try { if(force) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.rate = 1.08; u.pitch = 1.0; u.volume = 1;
+    speechSynthesis.speak(u); } catch(e){}
+  recPush({ k:'say', t:+(now-clockT0).toFixed(1), text });
+}
+
+/* ================= sound: all synthesised, no files ================= */
+let AC = null, master = null, noiseBuf = null, crowd = null;
+function audioInit(){
+  try {
+    if(!AC){ const A = window.AudioContext || window.webkitAudioContext; if(!A) return;
+      AC = new A(); master = AC.createGain(); master.gain.value = 0.9;
+      const lim = AC.createDynamicsCompressor(); lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.2;
+      master.connect(lim); lim.connect(AC.destination);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1; }
+    if(AC.state === 'suspended') AC.resume();
+  } catch(e){ AC = null; }
+}
+function noise(t, dur, type, f0, f1, q, vol){
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const f = AC.createBiquadFilter(); f.type = type; f.Q.value = q;
+  f.frequency.setValueAtTime(f0, t); if(f1 && f1 !== f0) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.02, dur*0.2));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(master); src.start(t, Math.random()*1.0); src.stop(t + dur + 0.05);
+  return g;
+}
+function tone(t, dur, type, f0, f1, vol){
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = type;
+  o.frequency.setValueAtTime(f0, t); if(f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.02);
+}
+const SFX = {
+  launch(kind){ if(!AC) return; const t = AC.currentTime;
+    if(kind==='hand'){ tone(t, 0.09, 'sine', 160, 90, 0.5); noise(t, 0.35, 'bandpass', 700, 2600, 1.4, 0.35); }
+    else if(kind==='foot'){ tone(t, 0.12, 'sine', 120, 60, 0.6); noise(t, 0.5, 'lowpass', 500, 200, 0.8, 0.3); }
+    else { tone(t, 0.6, 'triangle', 880, 440, 0.25); noise(t, 0.6, 'bandpass', 1800, 600, 1.2, 0.3); } },
+  block(mult){ if(!AC) return; const t = AC.currentTime;
+    noise(t, 0.07, 'highpass', 1800, 1800, 0.7, 1.2); tone(t, 0.14, 'sine', 240, 110, 0.9);
+    tone(t + 0.02, 0.18, 'triangle', 660*(mult>1?1.25:1), 660*(mult>1?1.25:1), 0.18);
+    if(crowd) crowdSwell(0.10 + 0.05*mult); },
+  hit(){ if(!AC) return; const t = AC.currentTime;
+    tone(t, 0.3, 'sine', 90, 38, 1.1); noise(t, 0.25, 'lowpass', 600, 120, 0.8, 0.9);
+    tone(t + 0.05, 0.35, 'sawtooth', 140, 70, 0.12); },
+  duckPass(){ if(!AC) return; const t = AC.currentTime; noise(t, 0.45, 'bandpass', 2400, 400, 2, 0.6); },
+  up(){ if(!AC) return; const t = AC.currentTime; for(const [i,f] of [[0,523],[1,659],[2,784]]) tone(t + i*0.09, 0.22, 'triangle', f, f, 0.22); },
+  beep(hi){ if(!AC) return; const t = AC.currentTime; tone(t, 0.16, 'square', hi ? 880 : 440, hi ? 880 : 440, 0.12); },
+};
+/* a crowd, very quiet, that swells a little on a save */
+function crowdStart(){
+  if(!AC || crowd) return;
+  const src = AC.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 650; f.Q.value = 0.6;
+  const g = AC.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(0.035, AC.currentTime, 0.8);
+  src.connect(f); f.connect(g); g.connect(master); src.start();
+  crowd = { src, g };
+}
+function crowdSwell(v){ if(!crowd) return; const t = AC.currentTime;
+  crowd.g.gain.cancelScheduledValues(t); crowd.g.gain.setValueAtTime(crowd.g.gain.value, t);
+  crowd.g.gain.linearRampToValueAtTime(v, t + 0.15); crowd.g.gain.setTargetAtTime(0.035, t + 0.4, 0.5); }
+function crowdStop(){ if(!crowd || !AC) return; const t = AC.currentTime, cr = crowd; crowd = null;
+  cr.g.gain.setTargetAtTime(0.0001, t, 0.3); cr.src.stop(t + 1.5); }
+document.addEventListener('visibilitychange', ()=>{ try { if(!AC) return;
+  if(document.visibilityState === 'hidden') AC.suspend(); else if(state==='play'||state==='teach') AC.resume(); } catch(e){} });
+
+/* ================= state ================= */
+let state='idle', clockT0=0, phaseStart=0, fitSince=0, highWaitSince=0, lastNow=0, halted=false;
+let world=null, balls=[], samples=[], latestT=-1, obs=null, lastObsAt=0, lostS=0;
+let teachI=0, teachTry=0, teachNextAt=0, teachBall=null, roundSet=null;
+let work={ squats:0, armed:true, sqS:0 }, lastSetAt=0, flashUntil=0, lastMult=1, countdown=0;
+let bandA='', bandUntil=0, freshPose=false;
+const ui={};
+for(const id of ['oStart','oFit','oEnd','oRot','band','bandA','bandB','loadMsg','errMsg','fitMsg','fitBig','fitNote','score','endRows','endTag','endNote','tools'])
+  ui[id]=document.getElementById(id);
+function setBand(a,b,ms){ bandA=a; ui.bandA.textContent=a; ui.bandB.textContent=b||'';
+  ui.band.hidden = !a; bandUntil = ms ? performance.now()+ms : 0; }
+const gtNow = now => (now - phaseStart)/1000;
+
+/* ---- a ball is placed on the body at the moment it is thrown ---- */
+function placeBall(b, o){
+  if(!o || !o.ok) return false;
+  b.ar = o.ar; b.scale = o.scale;
+  if(b.kind === 'duck'){
+    /* BUILD 2: at his STANDING head height, not wherever the head is now.
+       Build 1 used the live head, so a red ball thrown while he was still
+       down from the last one drew its band at chest height (0.62 of the
+       frame against 0.36 standing). */
+    const hy = headRef !== null ? toFrame(o, 0, headRef).y : o.head.y;
+    b.at = { x:o.head.x, y:hy }; b.body = null;
+  } else {
+    const rb = ringBody(b.tid, ankRef, null);
+    if(!rb) return false;
+    const jx = b.kind==='hand' ? (b.jit[0]*2-1)*K.JIT : 0, jy = b.kind==='hand' ? (b.jit[1]*2-1)*K.JIT : 0;
+    b.body = { bx: rb.bx + jx, by: rb.by + jy };
+    b.at = toFrame(o, b.body.bx, b.body.by);
+    if(onScreen(b.at, b.kind==='foot' ? K.FOOT_R : K.HAND_R, o, 0.5)) return false;
+  }
+  const side = b.kind==='duck' ? 0 : (b.body.bx < 0 ? -1 : 1);
+  // where it flies in from, in frame units: hands from above, feet along the ground from their side, the duck from the top centre
+  /* from the top OUTER corner of its own side, in the dark side panel: not
+     from the top middle, where the cue band sat over it (first render) and
+     where the two balls of a pair overlapped */
+  if(b.kind==='hand') b.from = { x: side < 0 ? -0.22 : 1.22, y: 0.02 };
+  else if(b.kind==='foot') b.from = { x: side < 0 ? -0.15 : 1.15, y: b.at.y };
+  else b.from = { x: 0.5, y: -0.3 };
+  b.side = side;
+  recPush({ k:'ball', t:+(performance.now()-clockT0).toFixed(1), id:b.id, tid:b.tid, kind:b.kind, launch:+b.launchT.toFixed(3), arr:+b.arrT.toFixed(3),
+    at:[+b.at.x.toFixed(4), +b.at.y.toFixed(4)], body:b.body && [+b.body.bx.toFixed(3), +b.body.by.toFixed(3)], scale:+b.scale.toFixed(4), ph:state });
+  return true;
+}
+function cueBall(b){
+  SFX.launch(b.kind);
+  if(b.kind==='duck'){ say('Duck!', true); }
+  else if(b.kind==='foot'){ say(b.side < 0 ? 'Left foot!' : 'Right foot!', true); }
+}
+
+/* ---- judging, every frame: the same function the simulation ran ---- */
+function judgeAll(gt){
+  for(const b of balls){
+    if(b.state !== 'air') continue;
+    const force = gt > b.arrT + K.POST_S + POSE_LATENCY_MS/1000 + 1.2;   // nothing arrived: judge on what was seen
+    const res = judgeBall(b, samples, latestT, force);
+    if(!res) continue;
+    b.showAt = res.v === 'block' ? Math.max(b.arrT, gt) : gt; b.shown = false;
+    if(world && state==='play') settle(world, b, res); else { b.v = res.v; b.res = res; b.state = res.v; }
+    recPush({ k:'verdict', t:+(performance.now()-clockT0).toFixed(1), id:b.id, tid:b.tid, v:res.v, d:res.d===undefined?null:+(+res.d).toFixed(3), why:res.why||null, gt:+gt.toFixed(3) });
+  }
+}
+/* sound and words at the moment the player SEES the result, not when it was decided */
+function showResults(gt){
+  for(const b of balls){
+    if(b.shown || !b.v || gt < b.showAt) continue;
+    b.shown = true;
+    if(b.v === 'block'){ SFX.block(world ? world.mult : 1); if(b.kind==='duck') SFX.duckPass(); }
+    else if(b.v === 'hit'){ SFX.hit(); flashUntil = performance.now() + 380; }
+  }
+  if(world && world.mult > lastMult){ SFX.up(); say(world.mult === 2 ? 'Double points.' : 'Triple points.', false, 3000); }
+  if(world) lastMult = world.mult;
+}
+
+/* ================= teaching: each movement once, spoken ================= */
+const TEACH = [
+  { tid:'mid-R',  say:'Orange balls. Get a hand into the ring before the ball arrives.', band:['HANDS','orange ball: hand in the ring'] },
+  { tid:'wide-L', say:'And the other side.', band:['HANDS','orange ball: hand in the ring'] },
+  { tid:'foot-L', say:'Green balls roll along the ground. Step out and stop it with your left foot.', band:['FEET','green ball: step out, foot in the ring'] },
+  { tid:'foot-R', say:'Now your right foot.', band:['FEET','green ball: step out, foot in the ring'] },
+  { tid:'duck',   say:'Red balls come at your head. Squat under them.', band:['DUCK','red ball: squat under it'] },
+];
+const TEACH_TELE = 2.8;
+function startTeach(now){
+  state='teach'; phaseStart=now; balls=[]; samples=[]; latestT=-1; teachI=0; teachTry=0; teachBall=null;
+  teachNextAt = 0.6; ui.tools.hidden=false; document.getElementById('bSkipStep').hidden = false; world=null;
+  recPush({ k:'teach', t:+(now-clockT0).toFixed(1), ankRef });
+}
+function teachTick(gt){
+  const step = TEACH[teachI];
+  if(!teachBall){
+    if(gt < teachNextAt) return;
+    if(teachTry === 0){ setBand(step.band[0], step.band[1], 3500); say(step.say, true); teachNextAt = gt + (step.say.length > 40 ? 3.6 : 1.6); teachTry = 1; return; }
+    const kind = step.tid==='duck' ? 'duck' : (step.tid.startsWith('foot') ? 'foot' : 'hand');
+    const b = { id:1000+teachI*10+teachTry, tid:step.tid, kind, launchT:gt, arrT:gt+TEACH_TELE, teleS:TEACH_TELE, state:'air', v:null, jit:[0.5,0.5], teach:true };
+    if(!placeBall(b, obs)){ teachNextAt = gt + 0.5; return; }
+    balls.push(b); teachBall = b; cueBall(b);
+    return;
+  }
+  if(!teachBall.v || !teachBall.shown || gt < teachBall.showAt + 0.9) return;
+  const v = teachBall.v; teachBall = null;
+  if(v === 'block' || teachTry >= 3){
+    if(v === 'block') say(teachI === TEACH.length-1 ? 'Good.' : 'Good.', true);
+    else say('We will practise that one in the game.', true);
+    teachI++; teachTry = 0; teachNextAt = gt + 1.1;
+    if(teachI >= TEACH.length){ countdown = gt; state='count'; setBand('READY','two minutes, here they come'); say('Two minutes. Here they come.', true); }
+    return;
+  }
+  teachTry++;
+  if(v === 'unscored') say(teachBall === null && TEACH[teachI].tid.startsWith('foot') ? 'I could not see your feet. Again.' : 'I could not see that. Again.', true);
+  else say(TEACH[teachI].tid==='duck' ? 'Squat lower. Again.' : 'Get there before the ball does. Again.', true);
+  teachNextAt = gt + 1.6;
+}
+
+/* ================= the round ================= */
+function startRound(now){
+  state='play'; phaseStart=now; balls=[]; samples=[]; latestT=-1; lastMult=1;
+  world = makeWorld((Date.now() % 100000) + 1, roundSet ? [...roundSet] : null);
+  work = { squats:0, armed:true, sqS:0 }; lostS = 0; lastSetAt = 0;
+  setBand('', ''); ui.tools.hidden=false; document.getElementById('bSkipStep').hidden = true; crowdStart();
+  recPush({ k:'round', t:+(now-clockT0).toFixed(1), seed:world.seed, allowed:[...world.allowed], ankRef });
+}
+function roundTick(now, gt, dt){
+  // the live gate (doc 01): it runs for as long as the signal is used
+  const bodyOk = obs && obs.ok && (now - lastObsAt) < 400;
+  lostS = bodyOk ? 0 : lostS + dt;
+  if(bodyOk && now - lastSetAt > 1000){ lastSetAt = now;
+    const s = stanceSet(obs, 0.7); const live = new Set([...s.set].filter(id => !roundSet || roundSet.has(id)));
+    world.allowed = live.size ? live : world.allowed; }
+  const paused = lostS > 0.4 || (world.allowed.size === 0);
+  stepWorld(world, Math.max(0, gt - world.t), { paused });
+  for(const e of world.events){
+    if(e.k !== 'launch') continue;
+    if(placeBall(e.b, obs)){ balls.push(e.b); cueBall(e.b); }
+    else { e.b.state = 'skipped'; world.tally.thrown--; world.tally.skipped++; }
+  }
+  world.events.length = 0;
+  // the work, counted apart from the score: a full squat is one, re-armed below 0.4
+  if(obs && obs.sq !== null && obs.sq !== undefined){
+    if(work.armed && obs.sq >= 0.8){ work.squats++; work.armed = false; } else if(!work.armed && obs.sq < 0.4) work.armed = true; }
+  if(gt >= K.ROUND_S && (!balls.some(b => b.state==='air') || gt > K.ROUND_S + 3)) endRound(now);
+  if(lostS > 0.4){ say('I cannot see you. Step back into the picture.', false, 5000); }
+}
+function endRound(now){
+  state='end'; setBand('', ''); ui.tools.hidden=true; letSleep(); crowdStop();
+  for(const b of balls) if(b.state==='air'){ const r = judgeBall(b, samples, latestT, true); settle(world, b, r); }
+  const T = world.tally, judged = T.block + T.hit;
+  ui.score.textContent = T.block + ' / ' + judged;
+  ui.endTag.textContent = 'SAVED';
+  const f = (a) => a[1] ? (a[0] + ' of ' + a[1]) : '—';
+  const rows = [
+    ['score', world.score], ['best run', world.best + ' in a row'],
+    ['hands', f(T.hand)], ['feet', f(T.foot)], ['ducks', f(T.duck)],
+    ['not seen, not counted', T.unscored],
+    ['deep squats counted', work.squats], ['steps out to a ball', T.foot[0]],
+  ];
+  ui.endRows.innerHTML = rows.map(r=>`<tr><td class="k">${r[0]}</td><td class="v">${r[1]}</td></tr>`).join('');
+  ui.endNote.textContent = 'Score and work are counted separately. A ball the camera did not see is not counted for you or against you.';
+  ui.oEnd.hidden = false;
+  say('Time. You saved ' + T.block + ' of ' + judged + '.', true);
+  recPush({ k:'end', t:+(now-clockT0).toFixed(1), score:world.score, best:world.best, tally:T, work });
+}
+
+/* ================= drawing ================= */
+const COL = { hand:'#ff8a2a', foot:'#5be37d', duck:'#ff4d5e' };
+function drawMirror(alpha){
+  const f = videoFit(); if(!f.vw) return f;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(f.dx+f.dw, f.dy); ctx.scale(-1,1);
+  ctx.drawImage(video, 0, 0, f.dw, f.dh); ctx.restore();
+  return f;
+}
+function drawPitch(f){
+  ctx.fillStyle = '#08130f'; ctx.fillRect(0, 0, W, H);
+  if(!f.vw) return;
+  const g = ctx.createLinearGradient(0, f.dy, 0, f.dy + f.dh);
+  g.addColorStop(0, '#0f2a1d'); g.addColorStop(1, '#16462c');
+  ctx.fillStyle = g; ctx.fillRect(f.dx, f.dy, f.dw, f.dh);
+}
+/* the goal around the player: posts, bar, a faint net. From the standing
+   hip and the tracked scale, so it sits on the body and not on the screen. */
+let goalSm = null;
+function drawGoal(f, o){
+  if(!o || !o.ok || !ankRef) return;
+  const ground = (ankRef.L.by + ankRef.R.by)/2 - 0.1;
+  const target = { l: toFrame(o, -2.1, ground), r: toFrame(o, 2.1, 2.25) };
+  if(!goalSm) goalSm = target;
+  const k = 0.08; goalSm = { l:{ x:goalSm.l.x + (target.l.x-goalSm.l.x)*k, y:goalSm.l.y + (target.l.y-goalSm.l.y)*k },
+                             r:{ x:goalSm.r.x + (target.r.x-goalSm.r.x)*k, y:goalSm.r.y + (target.r.y-goalSm.r.y)*k } };
+  const a = px({ x:goalSm.l.x, y:goalSm.r.y }), b = px({ x:goalSm.r.x, y:goalSm.l.y });
+  ctx.save(); ctx.beginPath(); ctx.rect(f.dx, f.dy, f.dw, f.dh); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1;
+  const step = Math.max(8, (b.x - a.x)/22);
+  for(let x = a.x; x <= b.x; x += step){ ctx.beginPath(); ctx.moveTo(x, a.y); ctx.lineTo(x, b.y); ctx.stroke(); }
+  for(let y = a.y; y <= b.y; y += step){ ctx.beginPath(); ctx.moveTo(a.x, y); ctx.lineTo(b.x, y); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(3, f.dh*0.012); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(a.x, b.y); ctx.lineTo(a.x, a.y); ctx.lineTo(b.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(f.dx, b.y); ctx.lineTo(f.dx+f.dw, b.y); ctx.stroke();
+  ctx.restore();
+}
+const BONES=[['shA','elA'],['elA','wrA'],['shB','elB'],['elB','wrB'],['shA','shB'],
+             ['shA','hipA'],['shB','hipB'],['hipA','hipB'],['hipA','knA'],['hipB','knB'],['knA','ankA'],['knB','ankB']];
+/* gloves on the wrists and boots on the ankles: the parts that block, big
+   enough to see from the mark */
+function drawBody(f, o, alpha){
+  if(!o || !o.g) return;
+  const P = {}; for(const k in o.g) P[k] = px(o.g[k]);
+  const u = (o.scale || o.torso || 0.18) * f.dh;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap='round'; ctx.lineWidth = Math.max(2, u*0.06);
+  ctx.strokeStyle = 'rgba(244,239,228,.55)';
+  for(const [a,b] of BONES){ if(P[a]&&P[b]){ ctx.beginPath(); ctx.moveTo(P[a].x,P[a].y); ctx.lineTo(P[b].x,P[b].y); ctx.stroke(); } }
+  const dot = (p, col, on) => { if(!p) return; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(7, u*0.17), 0, Math.PI*2);
+    ctx.fillStyle = on ? col : 'rgba(255,255,255,.25)'; ctx.globalAlpha = alpha*(on?0.9:0.5); ctx.fill();
+    ctx.lineWidth = Math.max(2, u*0.04); ctx.strokeStyle = '#fff'; ctx.globalAlpha = alpha; ctx.stroke(); };
+  const wr = o.wr || [null,null], an = o.an || [null,null];
+  if(P.nose){ const low = o.sq != null && o.sq >= K.DUCK_SQ;
+    ctx.beginPath(); ctx.arc(P.nose.x, P.nose.y, Math.max(8, u*0.22), 0, Math.PI*2);
+    ctx.fillStyle = duckOn ? (low ? COL.foot : COL.duck) : 'rgba(244,239,228,.35)'; ctx.globalAlpha = alpha*0.9; ctx.fill();
+    ctx.lineWidth = Math.max(2, u*0.04); ctx.strokeStyle = '#fff'; ctx.globalAlpha = alpha; ctx.stroke(); }
+  dot(P.wrA, COL.hand, !!wr[0]); dot(P.wrB, COL.hand, !!wr[1]);
+  dot(P.ankA, COL.foot, !!an[0]); dot(P.ankB, COL.foot, !!an[1]);
+  ctx.restore();
+}
+function ballPos(b, gt, f){
+  const u = clamp((gt - b.launchT)/b.teleS, 0, 1.4);
+  /* BUILD 3: constant speed. Builds 1-2 eased the ball in (1-(1-u)^1.6): it
+     covered 80% of the way by 63% of the time and LOOKED arrived 0.35-0.55 s
+     early, while the closing ring counted to the real arrival. Hugo's second
+     recording: six hand misses were his hand on the ring 0.5-1.0 s before
+     arrival, gone before the window opened. Now the ball and the closing ring
+     reach the ring together, at the moment the game judges. */
+  const e = u >= 1 ? 1 : u;
+  const A = px(b.from), B = px(b.at);
+  let x = A.x + (B.x - A.x)*e, y = A.y + (B.y - A.y)*e;
+  if(b.kind==='hand') y -= Math.sin(Math.PI*Math.min(1,e))*f.dh*0.10;
+  if(b.kind==='foot') y -= Math.abs(Math.sin(Math.PI*3*Math.min(1,e)))*f.dh*0.035*(1-e);
+  return { x, y, u };
+}
+function drawBallSphere(x, y, r, col, spin){
+  const g = ctx.createRadialGradient(x - r*0.35, y - r*0.35, r*0.1, x, y, r);
+  g.addColorStop(0, '#fff'); g.addColorStop(0.22, col); g.addColorStop(0.8, col); g.addColorStop(1, 'rgba(0,0,0,.55)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  ctx.lineWidth = Math.max(2, r*0.10); ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1.5, r*0.08);
+  ctx.beginPath(); ctx.ellipse(x, y, r*0.92, r*0.35, spin, 0, Math.PI*2); ctx.stroke();
+}
+let duckOn = false;
+function drawBalls(f, gt){
+  const now = performance.now();
+  for(const b of balls){
+    if(!b.at) continue;
+    const col = COL[b.kind], R = (b.kind==='foot' ? K.FOOT_R : K.HAND_R) * b.scale * f.dh;
+    const C = px(b.at), age = gt - b.showAt;
+    if(b.v && b.shown && age > 1.0) continue;
+    const pending = !b.v || !b.shown;
+    if(pending){
+      const p = ballPos(b, gt, f), u = clamp(p.u, 0, 1);
+      if(b.kind==='duck'){
+        // a red band at head height that closes in; the ball flies at the head
+        /* a red band at head height that firms up as it comes. No "get below
+           this line" guide: the judge asks for a squat, not a head height, and
+           the first render's line implied four times the squat it needs. The
+           head marker turns green when the squat would clear it. */
+        const bh = R*0.9;
+        ctx.fillStyle = `rgba(255,77,94,${(0.12 + 0.25*u).toFixed(2)})`; ctx.fillRect(f.dx, C.y - bh, f.dw, bh*2);
+        duckOn = true;
+      } else {
+        // the ring: where it lands. Filled, outlined, and a closing ring that times it
+        ctx.fillStyle = col + '40'; ctx.beginPath(); ctx.arc(C.x, C.y, R, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = col; ctx.lineWidth = Math.max(3, f.dh*0.011); ctx.stroke();
+        ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(2, f.dh*0.007);
+        ctx.beginPath(); ctx.arc(C.x, C.y, R*(1 + 2.4*(1-u)), 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      const grow = p.u > 1 ? 1 + 0.25*clamp((p.u-1)*3, 0, 1) : 1;
+      const r = Math.max(f.dh*0.035, R*0.75) * (b.kind==='duck' ? 1.25 : 1) * grow;
+      drawBallSphere(p.x, p.y, r, col, gt*7 + b.id);
+    } else if(b.v === 'block'){
+      const k = clamp(age/0.6, 0, 1), dir = b.kind==='duck' ? 0 : (b.side||1);
+      const x = C.x + dir*f.dh*0.25*k, y = C.y - f.dh*0.35*k + f.dh*0.5*k*k;
+      ctx.globalAlpha = 1 - k; drawBallSphere(x, y, Math.max(f.dh*0.035, R*0.75)*(1 - 0.4*k), col, gt*12);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(3, f.dh*0.012);
+      ctx.beginPath(); ctx.arc(C.x, C.y, R*(1 + 0.8*k), 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+      popText(b.kind==='duck' ? 'DUCKED' : 'SAVE', C.x, C.y - R*1.8, k, '#fff');
+    } else if(b.v === 'hit'){
+      const k = clamp(age/0.7, 0, 1);
+      ctx.fillStyle = `rgba(255,70,70,${(0.7*(1-k)).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(C.x, C.y, R*(1.0 + 1.2*k), 0, Math.PI*2); ctx.fill();
+      for(let i=0;i<10;i++){ const a = i*0.63 + b.id; ctx.beginPath(); ctx.arc(C.x + Math.cos(a)*R*2.4*k, C.y + Math.sin(a)*R*2.4*k, R*0.4*(1-k*0.5), 0, Math.PI*2); ctx.fill(); }
+      popText('HIT', C.x, C.y - R*1.8, k, COL.duck);
+    } else {
+      const k = clamp(age/1.0, 0, 1);
+      ctx.globalAlpha = 0.6*(1-k); drawBallSphere(C.x, C.y, R*0.7, '#888', 0); ctx.globalAlpha = 1;
+      popText('not seen', C.x, C.y - R*1.6, k, '#bbb', 0.6);
+    }
+  }
+}
+function popText(s, x, y, k, col, sz){
+  const fs = Math.round(H*0.09*(sz||1));
+  ctx.save(); ctx.globalAlpha = 1 - k*k; ctx.font = `bold ${fs}px Georgia`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.lineWidth = Math.max(3, fs*0.12); ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(s, x, y - k*H*0.05);
+  ctx.fillStyle = col; ctx.fillText(s, x, y - k*H*0.05); ctx.restore();
+}
+function drawHud(f, gt){
+  const fs = Math.round(H*0.10);
+  ctx.save(); ctx.textBaseline = 'top'; ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = 6;
+  ctx.font = `${fs}px Georgia`; ctx.textAlign='left';
+  if(state==='play'){ ctx.fillStyle = '#f4efe4'; ctx.fillText(Math.ceil(Math.max(0, K.ROUND_S - gt)) + 's', W*0.015, H*0.03); }
+  if(world){ ctx.fillStyle = '#ffd166'; ctx.fillText(String(world.score), W*0.015, H*0.03 + fs*1.15);
+    ctx.textAlign='right'; ctx.fillStyle = '#f4efe4'; ctx.fillText(world.tally.block + '/' + (world.tally.block + world.tally.hit), W*0.985, H*0.03);
+    if(world.mult > 1){ ctx.fillStyle = '#ffd166'; ctx.font = `bold ${Math.round(fs*1.2)}px Georgia`; ctx.fillText('×' + world.mult, W*0.985, H*0.03 + fs*1.15); }
+    else if(world.streak >= 2){ ctx.fillStyle = 'rgba(255,209,102,.8)'; ctx.font = `${Math.round(fs*0.6)}px Georgia`; ctx.fillText(world.streak + ' in a row', W*0.985, H*0.03 + fs*1.2); }
+  }
+  ctx.restore();
+}
+function drawFlash(){
+  const now = performance.now(); if(now > flashUntil) return;
+  const k = (flashUntil - now)/380;
+  const g = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+  g.addColorStop(0, 'rgba(255,40,40,0)'); g.addColorStop(1, `rgba(255,40,40,${(0.55*k).toFixed(2)})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function bigText(s, col){
+  ctx.save(); const fs = Math.round(H*0.09); ctx.font = `${fs}px Georgia`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const w = ctx.measureText(s).width + fs*1.2;
+  ctx.fillStyle = 'rgba(8,19,15,.82)'; ctx.fillRect(W/2 - w/2, H*0.42 - fs*0.8, w, fs*1.6);
+  ctx.fillStyle = col; ctx.fillText(s, W/2, H*0.42); ctx.restore();
+}
+
+/* ================= the frame ================= */
+function frame(){
+  requestAnimationFrame(frame);
+  if(halted) return;
+  const now = performance.now();
+  const dt = Math.min(0.1, lastNow ? (now - lastNow)/1000 : 1/30); lastNow = now;
+  freshPose = false;
+  if(landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    let raw = null;
+    try { const res = landmarker.detectForVideo(video, now);
+          raw = (res && res.landmarks && res.landmarks[0]) || null; } catch(e){}
+    const ret = performance.now();
+    if(raw){ pose = raw; freshPose = true; } else pose = null;
+    obs = observe(pose, now, dt);
+    if(obs.ok) lastObsAt = now;
+    if(state==='teach' || state==='play' || state==='count'){
+      /* the sample's time is BODY time: when the camera saw this, which is
+         the frame time less the pipeline delay (doc 01, one clock) */
+      const s = { t: gtNow(now) - POSE_LATENCY_MS/1000, wr: obs.ok ? obs.wr : [null,null], an: obs.ok ? obs.an : [null,null], sq: obs.ok && obs.sq!==undefined ? obs.sq : null };
+      samples.push(s); latestT = s.t; if(samples.length > 300) samples.splice(0, samples.length - 300);
+    }
+    if(state!=='idle' && state!=='end'){
+      const q = {}; if(pose) for(const k of NEEDS_REC){ const v = read(pose, J[k]); if(v) q[k] = [ +v.x.toFixed(4), +v.y.toFixed(4), +(v.v||0).toFixed(2) ]; }
+      recPush({ k:'f', t:+(now-clockT0).toFixed(1), ret:+(ret-clockT0).toFixed(1), ph:state, ok:obs.ok?1:0, sq:obs.sq==null?null:+obs.sq.toFixed(2), sc:obs.scale?+obs.scale.toFixed(4):null, p:q });
+    }
+  }
+  if(bandUntil && now > bandUntil) setBand('', '');
+  const f = videoFit();
+
+  if(state==='fit'){
+    drawPitch(f); drawMirror(0.85); drawBody(f, obs, 0.9);
+    const st = fitState(obs, now);
+    let msg;
+    if(st.ok && !st.highOk){
+      if(!highWaitSince) highWaitSince = now;
+      if(now - highWaitSince < 5000){ msg = FIT_SAY.highWait; fitSince = 0; }
+      else msg = ['READY','Hold it there.'];
+    } else if(st.ok){ msg = ['HOLD IT THERE','Hold it there.']; highWaitSince = 0; }
+    else { msg = FIT_SAY[st.why] || FIT_SAY.nobody; highWaitSince = 0; }
+    ui.fitBig.innerHTML = st.ok ? 'READY' : 'FIND YOUR<br><span class="g">SPOT</span>';
+    ui.fitMsg.textContent = msg[0]; say(msg[1]);
+    const go = st.ok && (st.highOk || (highWaitSince && now - highWaitSince >= 5000));
+    if(go){ if(!fitSince) fitSince = now;
+      if(now - fitSince > 1400){ roundSet = st.set; ui.oFit.hidden = true;
+        recPush({ k:'fit', t:+(now-clockT0).toFixed(1), set:[...st.set], scale:+obs.scale.toFixed(4), ankRef });
+        if(!st.highOk) say('No room for high balls here. That is fine.', true);
+        startTeach(now); } }
+    else fitSince = 0;
+    return;
+  }
+  if(state==='teach' || state==='count' || state==='play'){
+    if(state==='teach') teachTick(gtNow(now));
+    if(state==='count'){ if(gtNow(now) - countdown > 2.6) startRound(now); }
+    /* the clock is read AFTER any phase change: the first render passed the
+       teaching clock (~40 s) into the new round, which threw 29 balls in a
+       second and started the ramp a third of the way in */
+    if(state==='play') roundTick(now, gtNow(now), dt);
+    if(state==='end') return;
+    judgeAll(gtNow(now)); showResults(gtNow(now));
+    drawPitch(f); drawMirror(0.8);
+    ctx.fillStyle = 'rgba(8,19,15,.30)'; ctx.fillRect(f.dx, f.dy, f.dw, f.dh);
+    duckOn = false; drawGoal(f, obs); drawBalls(f, gtNow(now)); drawBody(f, obs, 0.95); drawHud(f, gtNow(now)); drawFlash();
+    if(state==='play' && lostS > 0.4) bigText('I CANNOT SEE YOU', '#ff5c5c');
+    return;
+  }
+  if(state==='end'){ drawPitch(f); }
+}
+
+/* ================= startup ================= */
+const bStart=document.getElementById('bStart'), bSkip=document.getElementById('bSkip'),
+      bAgain=document.getElementById('bAgain'), bSave=document.getElementById('bSave');
+let wakeLock = null;
+async function keepAwake(){
+  try { if('wakeLock' in navigator && !wakeLock){ wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', ()=>{ wakeLock = null; }); } } catch(e){ wakeLock = null; }
+}
+function letSleep(){ try { if(wakeLock){ wakeLock.release(); wakeLock = null; } } catch(e){ wakeLock = null; } }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state!=='idle' && state!=='end') keepAwake(); });
+
+function toFit(){
+  ui.oFit.hidden = false; state='fit'; fitSince=0; highWaitSince=0; fitPrev=null; goalSm=null;
+  squat.reset(); ankBuf=[]; ankRef=null; headBuf=[]; headRef=null;
+  say('Step back until I can see you from head to feet, with room for your arms out.', true);
+}
+async function begin(){
+  /* fullscreen inside the gesture, before any await; refusal ignored */
+  try { const el = document.documentElement; const go = el.requestFullscreen || el.webkitRequestFullscreen;
+    if(go && !document.fullscreenElement){ const pr = go.call(el, { navigationUI:'hide' }); if(pr && pr.catch) pr.catch(()=>{}); } } catch(e){}
+  audioInit();
+  bStart.disabled = true; ui.loadMsg.hidden = false; ui.errMsg.hidden = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'user', width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30} }, audio:false });
+    video.srcObject = stream; await video.play();
+    ui.loadMsg.textContent = 'Loading the tracker…';
+    if(!landmarker) await loadTracker();
+  } catch(e){
+    ui.errMsg.hidden=false; bStart.disabled=false; ui.loadMsg.hidden=true;
+    ui.errMsg.textContent = 'Could not start: ' + (e && e.message ? e.message : e) + '. The camera needs a https page and permission.';
+    return;
+  }
+  clockT0 = performance.now(); recHeader(); keepAwake();
+  ui.oStart.hidden = true;
+  ui.fitNote.textContent = 'It needs to see you head to feet, with room for your arms out. Camera ' + video.videoWidth + '×' + video.videoHeight + '.';
+  toFit();
+}
+bStart.addEventListener('click', begin);
+bSkip.addEventListener('click', ()=>{ ui.oFit.hidden=true; roundSet=null; recPush({ k:'skipfit', t:+(performance.now()-clockT0).toFixed(1) }); startTeach(performance.now()); });
+bAgain.addEventListener('click', ()=>{ audioInit(); ui.oEnd.hidden=true; world=null; balls=[]; keepAwake(); toFit(); });
+function saveRec(){
+  const blob = new Blob([rec.map(o=>JSON.stringify(o)).join('\n')], {type:'application/x-ndjson'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'keeper-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+bSave.addEventListener('click', saveRec);
+document.getElementById('bSaveNow').addEventListener('click', saveRec);
+document.getElementById('bSkipStep').addEventListener('click', ()=>{
+  if(state!=='teach') return;
+  recPush({ k:'skip', t:+(performance.now()-clockT0).toFixed(1), step:teachI });
+  balls = balls.filter(b => b !== teachBall); teachBall = null; teachTry = 0; teachI++;
+  if(teachI >= TEACH.length){ countdown = gtNow(performance.now()); state='count'; setBand('READY','two minutes, here they come'); say('Two minutes. Here they come.', true); }
+  else teachNextAt = gtNow(performance.now()) + 0.3;
+});
+resize(); checkRotation();
+requestAnimationFrame(frame);
+
+/* ---- harness hook: the renderer and the boot test drive the real page ---- */
+window.__kp = {
+  SIM, K, observe, fitState, stanceSet,
+  halt:()=>{halted=true}, resume:()=>{halted=false},
+  setLandmarker:(lm)=>{ landmarker = lm; },
+  peek:()=>({ state, gt: phaseStart ? gtNow(performance.now()) : 0, teachI, teachTry, ankRef, obs: obs && { ok:obs.ok, sq:obs.sq, scale:obs.scale, upright:obs.upright, facing:obs.facing },
+    balls: balls.map(b=>({ id:b.id, tid:b.tid, kind:b.kind, state:b.state, v:b.v, launchT:b.launchT, arrT:b.arrT, at:b.at, side:b.side })),
+    world: world && { t:world.t, score:world.score, streak:world.streak, mult:world.mult, tally:world.tally, allowed:[...world.allowed] }, work,
+    rec: rec.length, said: rec.filter(r=>r.k==='say').map(r=>r.text).slice(-12) }),
+  audio:()=>({ ctx: AC && AC.state, crowd: !!crowd }),
+  rec:()=>rec,
+};
+</script>
+</body>
+</html>
