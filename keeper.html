@@ -1051,5 +1051,149 @@ window.__kp = {
   rec:()=>rec,
 };
 </script>
+<script>
+/* AUTOSEND — added 24 Nov 2026. Sends this session's recording to Hugo's
+   Google Drive without anyone touching the phone. It lives outside the game
+   module and only watches the game's own Save path: it never reads or
+   changes play, and if anything in it fails the game carries on as before.
+   When: the end screen appears, the page is hidden (switching app, closing
+   the tab), or Save is tapped. Every send is the whole session so far, under
+   one file name per session, so later sends replace earlier ones.
+   Until recorder.json names a receiver, recordings wait in this phone's
+   storage (shared by every game on this site) and go out on the next open. */
+(function(){
+'use strict';
+try {
+  var GAME = (location.pathname.split('/').pop() || 'index.html').replace(/\.html$/, '') || 'index';
+  var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
+  var NAME = GAME + '_' + d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) +
+             '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.ndjson.gz';
+  var SAVE_IDS = ['bSaveNow', 'bRec', 'bRec1', 'bSave', 'bSaveFit', 'bRecRaw'];
+  var KEEP = 40;                     // most recordings ever held unsent
+  var silentN = 0, silentUntil = 0, lastBytes = -1, flushing = false;
+
+  /* ---- the game's own Save: take a copy of what it writes ---- */
+  var origClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function(){
+    try {
+      if (this.download && /\.ndjson(\.gz)?$/.test(this.download) && /^blob:/.test(this.href)) {
+        take(this.href, /\.gz$/.test(this.download));
+        if (silentN > 0 && Date.now() < silentUntil) { silentN--; return; }   // auto-save: no download prompt
+      }
+    } catch (e) {}
+    return origClick.apply(this, arguments);
+  };
+
+  function autoSave(){
+    for (var i = 0; i < SAVE_IDS.length; i++) {
+      var b = document.getElementById(SAVE_IDS[i]);
+      if (b && !b.disabled) {
+        if (Date.now() >= silentUntil) silentN = 0;
+        silentN++; silentUntil = Date.now() + 4000;
+        try { b.click(); } catch (e) { silentN--; }
+        return;
+      }
+    }
+  }
+
+  function take(href, isGz){
+    fetch(href).then(function(r){ return r.blob(); }).then(function(blob){
+      if (blob.size < (isGz ? 512 : 2048)) return null;   // opened and left: nothing worth sending
+      if (!isGz && 'CompressionStream' in window) {
+        return new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+      }
+      return blob;
+    }).then(function(gz){
+      if (!gz || gz.size === lastBytes) return;            // nothing new since the last send
+      lastBytes = gz.size;
+      return toB64(gz).then(function(b64){ return put({ name: NAME, b64: b64, t: Date.now() }); })
+                      .then(flush);
+    }).catch(function(){});
+  }
+
+  function toB64(blob){
+    return new Promise(function(res, rej){
+      var fr = new FileReader();
+      fr.onload = function(){ res(String(fr.result).split(',')[1] || ''); };
+      fr.onerror = rej; fr.readAsDataURL(blob);
+    });
+  }
+
+  /* ---- the waiting room: IndexedDB, shared by every game on the site ---- */
+  function db(){
+    return new Promise(function(res, rej){
+      var q = indexedDB.open('pulse-lane-autosend', 1);
+      q.onupgradeneeded = function(){ q.result.createObjectStore('rec', { keyPath: 'name' }); };
+      q.onsuccess = function(){ res(q.result); }; q.onerror = function(){ rej(q.error); };
+    });
+  }
+  function tx(mode, fn){
+    return db().then(function(h){ return new Promise(function(res, rej){
+      var t = h.transaction('rec', mode), s = t.objectStore('rec'), out = fn(s);
+      t.oncomplete = function(){ h.close(); res(out && out.result !== undefined ? out.result : out); };
+      t.onerror = function(){ h.close(); rej(t.error); };
+    }); });
+  }
+  function put(o){ return tx('readwrite', function(s){ s.put(o); }); }
+  function all(){ return tx('readonly', function(s){ return s.getAll(); }); }
+  function del(n){ return tx('readwrite', function(s){ s.delete(n); }); }
+
+  function receiver(){
+    return fetch('recorder.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ return r.ok ? r.json() : {}; }).catch(function(){ return {}; });
+  }
+
+  function flush(){
+    if (flushing) return; flushing = true;
+    var sent = 0;
+    Promise.all([receiver(), all()]).then(function(v){
+      var cfg = v[0] || {}, list = (v[1] || []).sort(function(a, b){ return a.t - b.t; });
+      var drop = list.length > KEEP ? list.slice(0, list.length - KEEP) : [];
+      var chain = Promise.all(drop.map(function(o){ return del(o.name); }));
+      list = list.slice(drop.length);
+      if (!cfg.endpoint) return chain;
+      list.forEach(function(o){
+        chain = chain.then(function(){
+          return fetch(cfg.endpoint, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                       body: JSON.stringify({ key: cfg.key || '', name: o.name, b64: o.b64 }) })
+            .then(function(r){ return r.json(); })
+            .then(function(j){ if (j && j.ok) { sent++; return del(o.name); } })
+            .catch(function(){});
+        });
+      });
+      return chain;
+    }).catch(function(){}).then(function(){ flushing = false; if (sent) toast(); });
+  }
+
+  function toast(){
+    if (document.hidden) return;
+    var el = document.createElement('div');
+    el.textContent = '✓ Recording sent';
+    el.setAttribute('style', 'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:2147483647;' +
+      'background:rgba(0,0,0,.78);color:#fff;font:600 16px/1.2 system-ui,sans-serif;padding:8px 14px;' +
+      'border-radius:18px;pointer-events:none');
+    document.body.appendChild(el);
+    setTimeout(function(){ el.remove(); }, 3000);
+  }
+
+  /* ---- when to send ---- */
+  document.addEventListener('visibilitychange', function(){ if (document.hidden) autoSave(); else flush(); });
+  window.addEventListener('pagehide', autoSave);
+  function watchEnd(){
+    var el = document.getElementById('oEnd') || document.getElementById('sEnd');
+    if (!el) return;
+    var shown = function(){ var cs = getComputedStyle(el); return !el.hidden && cs.display !== 'none' && cs.visibility !== 'hidden'; };
+    var was = shown();
+    new MutationObserver(function(){
+      var now = shown();
+      if (now && !was) setTimeout(autoSave, 1500);   // let the game write its last lines first
+      was = now;
+    }).observe(el, { attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchEnd); else watchEnd();
+  setTimeout(flush, 3000);           // anything left over from an earlier session
+} catch (e) {}
+})();
+</script>
 </body>
 </html>
