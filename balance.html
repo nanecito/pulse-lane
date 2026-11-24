@@ -71,7 +71,7 @@
   <p class="sub">If something felt wrong — it would not give you the ball, dropped it when you were level, or could not see you — save the recording and send it. It holds exactly what the camera saw.</p>
 </div>
 
-<button id="bSaveNow" class="ghost" style="position:fixed;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:6;display:none;font-size:14px;padding:8px 12px;margin:0;background:rgba(14,19,16,.75)">Save recording</button>
+<button id="bSaveNow" class="ghost" style="position:fixed;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:41;display:none;font-size:14px;padding:8px 12px;margin:0;background:rgba(14,19,16,.75)">Save recording</button>
 <div id="rotate">Turn the phone sideways.<br>This game is played in landscape.</div>
 
 <script type="module">
@@ -367,7 +367,7 @@ function seeCheck(pose, read){
 /* ================= camera, tracker, the clock, the recording =================
    The same pipeline as Animal Walk (animalwalk.html), which this file was
    started from. */
-const BUILD = 'balance-1';
+const BUILD = 'balance-2';
 const video = document.createElement('video');
 video.playsInline = true; video.muted = true; video.autoplay = true;
 let landmarker = null, lastVideoTime = -1, pose = null, read = null;
@@ -450,11 +450,22 @@ function videoFit(){
 function px(p){ const f = videoFit(); return { x:f.dx + (1-p.x)*f.dw, y:f.dy + p.y*f.dh }; }
 // a reader-space point (mirrored, x scaled by aspect) to canvas pixels
 function pxR(p){ const f = videoFit(); return { x:f.dx + p.x/(read.aspect||1)*f.dw, y:f.dy + p.y*f.dh }; }
+let portraitSince = null, wasPortrait = null;
 function checkOrientation(){
   const portrait = innerHeight > innerWidth;
   document.getElementById('rotate').classList.toggle('on', portrait && state !== 'idle' && state !== 'end');
+  if(portrait !== wasPortrait){ wasPortrait = portrait; portraitSince = portrait ? performance.now() : null;
+    recPush({ k:'orient', t:nowClock(), portrait, w:innerWidth, h:innerHeight, type:(screen.orientation && screen.orientation.type) || null }); }
+}
+// The player is not looking at the screen, so a cover on it has to be spoken.
+function portraitNag(now){
+  if(portraitSince === null || state === 'idle' || state === 'end') return;
+  if(now - portraitSince > 2500) say('The picture is upright. Turn the phone on its side. If it does not turn, switch on auto-rotate.', 1, 15000);
 }
 
+function lockLandscape(){
+  try { const o = screen.orientation; if(o && o.lock){ const p = o.lock('landscape'); if(p && p.catch) p.catch(e => recPush({ k:'lockFailed', t:nowClock(), e:String(e && e.name || e) })); } } catch(e){}
+}
 let wake = null;
 async function keepAwake(){ try { if('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch(e){} }
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && state !== 'idle') keepAwake(); });
@@ -930,6 +941,9 @@ function loop(){
     if(pose) recFrame(tc, pose); else { lastRecFrame = null; recPush({ k:'nf', t:Math.round(tc) }); }
     fresh = true;
   }
+  // the camera picture changes shape when the page turns: the reader must follow it
+  if(read && Math.abs(read.aspect - aspectNow()) > 0.01){ read = makeReader(aspectNow()); recPush({ k:'aspect', t:nowClock(), w:video.videoWidth, h:video.videoHeight }); }
+  portraitNag(now);
   try { step(now, tc, fresh); } catch(e){ recPush({ k:'err', t:now, e:String(e && e.stack || e) }); if(window.__BAL_STRICT__) throw e; }
   paint(now);
 }
@@ -938,8 +952,11 @@ async function begin(){
   const err = document.getElementById('err');
   err.textContent = '';
   // fullscreen, sound and speech must be asked for inside the tap, before any await
+  // Then hold the page in landscape. Build 1 did not: with auto-rotate off the
+  // page stayed upright when the phone was laid on its side, and the "turn the
+  // phone" cover hid the whole game while the voice carried on underneath.
   try { const el = document.documentElement, fs = el.requestFullscreen || el.webkitRequestFullscreen;
-    if(fs){ const p = fs.call(el); if(p && p.catch) p.catch(() => {}); } } catch(e){}
+    if(fs){ const p = fs.call(el); if(p && p.then) p.then(lockLandscape, lockLandscape); else lockLandscape(); } else lockLandscape(); } catch(e){}
   initAudio(); try { await AC.resume(); } catch(e){}
   initVoice();
   show(null);
@@ -975,7 +992,7 @@ window.__bal = {
   peekState: () => state, peekRound: () => roundIdx, peekPos: () => pos,
   peekStats: () => JSON.parse(JSON.stringify(stats)),
   peekBall: () => hold ? { on:hold.ball.on, x:hold.ball.x, streak:hold.ball.streak, held:hold.ball.held, drops:hold.ball.drops, shape:hold.shape, tv:hold.tv, why:hold.form.why } : null,
-  peekRoll: () => rollNow, peekSpeaking: () => speaking, peekRec: () => rec.length, peekSfx: () => sfxLog.slice(),
+  peekRoll: () => rollNow, peekSpeaking: () => speaking, peekRec: () => rec.length, peekAspect: () => read && read.aspect, peekSfx: () => sfxLog.slice(),
   endRoundNow: () => { if(state === 'play') roundMs = ROUNDS[roundIdx].dur*1000; },
   skipRest: () => { if(state === 'rest') stateAt = -1e9; },
   rollFreq, rollLevel, TUNE, J, ROUNDS,
